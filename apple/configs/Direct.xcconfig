@@ -1,0 +1,6 @@
+// Direct edition — GitHub / notarized DMG. Not sandboxed (Developer ID +
+// notarization in Phase D). Donate link allowed.
+PRODUCT_BUNDLE_IDENTIFIER = uk.co.riera.scribed
+CODE_SIGN_ENTITLEMENTS = Scribed.entitlements
+ENABLE_HARDENED_RUNTIME = YES
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) EDITION_DIRECT DONATE_ENABLED

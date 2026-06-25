@@ -1,0 +1,7 @@
+// Setapp edition — distributed via the Setapp app (Developer ID + notarization,
+// no sandbox required). Bundle ID carries the "-setapp" suffix per Setapp docs.
+// Donate link OMITTED (Setapp discourages leading users out — confirm w/ Setapp).
+PRODUCT_BUNDLE_IDENTIFIER = uk.co.riera.scribed-setapp
+CODE_SIGN_ENTITLEMENTS = Scribed.entitlements
+ENABLE_HARDENED_RUNTIME = YES
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) EDITION_SETAPP

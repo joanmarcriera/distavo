@@ -46,6 +46,7 @@ final class WatcherController: ObservableObject {
     }
 
     private func runAfterLaunch() async {
+        applySandboxFoldersIfNeeded()
         if firstRun {
             openAppSettings()
             notifier.notify(title: "Welcome to Scribed",
@@ -67,6 +68,16 @@ final class WatcherController: ObservableObject {
     }
 
     private func clearStaleProcessing() { store()?.clearStaleProcessing() }
+
+    /// In the sandboxed edition, point the recordings/notes folders at the
+    /// user-granted (bookmarked) locations. No-op elsewhere.
+    private func applySandboxFoldersIfNeeded() {
+        let access = SandboxFolders.ensureAccess()
+        var changed = false
+        if let recordings = access.recordings { config.recordingsDir = recordings.path; changed = true }
+        if let notes = access.notes { config.notesDir = notes.path; changed = true }
+        if changed { persist() }
+    }
 
     /// Process all pending recordings (self-serializing so overlapping timer
     /// ticks and "Process now" can't double-process).

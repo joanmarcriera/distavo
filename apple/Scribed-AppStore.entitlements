@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Mac App Store edition: App Sandbox + the minimum access Scribed needs. -->
+  <key>com.apple.security.app-sandbox</key>
+  <true/>
+  <!-- Talk to the user's WhisperX/Ollama servers. -->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- Read recordings / write notes in user-chosen folders (via NSOpenPanel +
+       security-scoped bookmarks). -->
+  <key>com.apple.security.files.user-selected.read-write</key>
+  <true/>
+</dict>
+</plist>

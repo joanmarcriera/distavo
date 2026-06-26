@@ -1,7 +1,11 @@
-// Mac App Store edition — App Sandbox + security-scoped bookmarks (entitlements
-// wired in Phase D via Seshat-AppStore.entitlements). Donate link allowed but
-// gated to the US storefront at runtime (Phase D).
+// Mac App Store edition — App Sandbox + security-scoped bookmarks
+// (Seshat-AppStore.entitlements). No external donate link: an external
+// "Pay What You Want" checkout risks App Review Guideline 3.1.1 (apps must use
+// in-app purchase for paid features and may not steer users to outside payment).
+// To re-enable, add DONATE_ENABLED below — but only once IAP / storefront
+// gating is actually implemented.
 PRODUCT_BUNDLE_IDENTIFIER = uk.co.riera.seshat
 CODE_SIGN_ENTITLEMENTS = Seshat-AppStore.entitlements
 ENABLE_HARDENED_RUNTIME = YES
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) EDITION_APPSTORE DONATE_ENABLED
+// Absolute — must not inherit Direct's EDITION_DIRECT / DONATE_ENABLED.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = EDITION_APPSTORE

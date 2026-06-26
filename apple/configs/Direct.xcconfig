@@ -1,6 +1,11 @@
 // Direct edition — GitHub / notarized DMG. Not sandboxed (Developer ID +
-// notarization in Phase D). Donate link allowed.
+// notarization). External donate link allowed here (only the App Store / Setapp
+// channels forbid leading users out to pay).
 PRODUCT_BUNDLE_IDENTIFIER = uk.co.riera.seshat
 CODE_SIGN_ENTITLEMENTS = Seshat.entitlements
 ENABLE_HARDENED_RUNTIME = YES
-SWIFT_ACTIVE_COMPILATION_CONDITIONS = $(inherited) EDITION_DIRECT DONATE_ENABLED
+// Absolute (NO $(inherited)): this file is the target's default base config, so
+// a command-line `-xcconfig configs/{Setapp,AppStore}.xcconfig` must fully
+// REPLACE these flags. With $(inherited) the other editions would inherit
+// Direct's EDITION_DIRECT + DONATE_ENABLED and ship the donate link.
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = EDITION_DIRECT DONATE_ENABLED

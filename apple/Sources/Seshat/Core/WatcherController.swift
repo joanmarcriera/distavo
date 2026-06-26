@@ -18,11 +18,13 @@ final class WatcherController: ObservableObject {
     @Published private(set) var watchIntervalSeconds: Int
     @Published private(set) var hasLastNote = false
     @Published private(set) var lastError: String?
+    @Published private(set) var recentActivity: [String] = []
 
     private(set) var config: Config
     private let deps: PipelineDeps
     private let notifier = Notifier()
     private let needsOnboarding: Bool
+    private let activityLog = ActivityLog()
 
     private var isScanning = false
     private var processingActive = false
@@ -43,6 +45,8 @@ final class WatcherController: ObservableObject {
         self.watchIntervalSeconds = cfg.watchIntervalSeconds
         self.allowLocalOllama = cfg.summarise.allowLocalFallback
         clearStaleProcessing()
+        recentActivity = activityLog.recent(12)
+        log("Seshat started")
         start()
     }
 
@@ -68,6 +72,15 @@ final class WatcherController: ObservableObject {
     }
 
     func showSettings() { SettingsWindowController.shared.show(self) }
+
+    /// Open the timestamped activity log in the user's default text viewer.
+    func openLog() { NSWorkspace.shared.open(activityLog.url) }
+
+    private func log(_ message: String) {
+        let entry = activityLog.append(message)
+        recentActivity.append(entry)
+        if recentActivity.count > 12 { recentActivity.removeFirst(recentActivity.count - 12) }
+    }
 
     private func refreshActivity() {
         if processingActive { activity = .processing }
@@ -116,6 +129,7 @@ final class WatcherController: ObservableObject {
         refreshActivity()
         for path in pending {
             status = "Processing \(path.lastPathComponent)…"
+            log("Processing \(path.lastPathComponent)")
             let result = await Pipeline.processOne(path: path, config: cfg, deps: deps)
             handle(result)
         }
@@ -132,18 +146,21 @@ final class WatcherController: ObservableObject {
             hasLastNote = true
             unseenDone = true
             lastError = nil
+            log("Saved note: \(result.base)")
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
         case .deferredNeedLocal:
             status = "Needs local Ollama"
             if !deferredBases.contains(result.base) {
                 deferredBases.insert(result.base)
+                log("Deferred — server Ollama offline: \(result.base)")
                 notifier.notify(title: "Server Ollama offline",
                                 body: "Enable ‘Use local Ollama’ to process \(result.base).")
             }
         case .failed:
             status = "Failed: \(result.base)"
             lastError = "\(result.base): \(result.message)"
+            log("Failed: \(result.base) — \(result.message)")
             notifier.notify(title: "Processing failed", body: "\(result.base): \(result.message)")
         case .skipped:
             break

@@ -37,6 +37,19 @@ struct StatusMenu: View {
 
         Button("Open meeting-notes folder") { controller.openNotesFolder() }
         Button("Open recordings folder") { controller.openRecordingsFolder() }
+
+        Menu("Activity") {
+            if controller.recentActivity.isEmpty {
+                Text("No activity yet")
+            } else {
+                ForEach(Array(controller.recentActivity.reversed().enumerated()), id: \.offset) { _, entry in
+                    Text(entry)
+                }
+            }
+            Divider()
+            Button("Open full log…") { controller.openLog() }
+        }
+
         Button("Settings…") { controller.showSettings() }
 
         Menu("Help") {

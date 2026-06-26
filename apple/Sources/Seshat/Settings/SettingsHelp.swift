@@ -53,9 +53,14 @@ struct ServerHelpButton: View {
                             .textSelection(.enabled)
                             .padding(8)
                             .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+                        // Scripting Terminal needs the apple-events entitlement,
+                        // which the sandboxed App Store build doesn't (and can't)
+                        // ship — so the button only exists in Direct/Setapp.
+                        #if !EDITION_APPSTORE
                         Button("Run in Terminal") { runInTerminal(commands) }
                         Text("Opens Terminal and runs the commands above — nothing happens without your OK.")
                             .font(.caption2).foregroundStyle(.secondary)
+                        #endif
                     }
                 }
                 .font(.callout)
@@ -109,8 +114,10 @@ struct ServerHelpButton: View {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
+    #if !EDITION_APPSTORE
     /// Open Terminal and run the commands. Requires the user to grant automation
-    /// permission the first time (and is unavailable in a future sandboxed build).
+    /// permission the first time. Excluded from the sandboxed App Store build,
+    /// which lacks the apple-events entitlement.
     private func runInTerminal(_ command: String) {
         let escaped = command
             .replacingOccurrences(of: "\\", with: "\\\\")
@@ -125,4 +132,5 @@ struct ServerHelpButton: View {
         NSAppleScript(source: source)?.executeAndReturnError(&error)
         if let error { NSLog("Seshat: Terminal automation failed: \(error)") }
     }
+    #endif
 }

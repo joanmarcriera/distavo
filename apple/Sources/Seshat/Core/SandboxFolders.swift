@@ -18,6 +18,9 @@ enum SandboxFolders {
         guard let url = try? URL(
             resolvingBookmarkData: data, options: .withSecurityScope,
             relativeTo: nil, bookmarkDataIsStale: &stale) else { return nil }
+        // A stale bookmark still resolves, but re-store it now or it degrades
+        // until it can't resolve at all and the user silently loses access.
+        if stale { store(url, key: key) }
         _ = url.startAccessingSecurityScopedResource()
         return url
     }

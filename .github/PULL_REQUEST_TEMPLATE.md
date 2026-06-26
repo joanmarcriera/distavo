@@ -4,8 +4,8 @@
 
 ## Checklist
 
-- [ ] Tests pass (`uv run pytest`)
-- [ ] Shell scripts syntax-checked (`bash -n install-login-item.sh`) if changed
+- [ ] Tests pass (`cd apple/SeshatCore && swift test`)
+- [ ] App builds (`cd apple && xcodegen generate && xcodebuild … build`) if source changed
 - [ ] Docs updated where behavior changed
 - [ ] No private data committed (recordings, notes, transcripts, real server
       IPs, or tokens)

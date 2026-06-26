@@ -12,17 +12,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install ffmpeg
-        run: brew install ffmpeg
+      - name: Install xcodegen
+        run: brew install xcodegen
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v6
+      - name: Run SeshatCore tests
+        run: cd apple/SeshatCore && swift test
 
-      - name: Install dependencies
-        run: uv sync --extra dev
+      - name: Generate Xcode project
+        run: cd apple && xcodegen generate
 
-      - name: Run tests
-        run: uv run pytest -q
-
-      - name: Check shell scripts
-        run: bash -n install-login-item.sh
+      - name: Build all editions (unsigned)
+        run: |
+          cd apple
+          fail=0
+          for edition in Direct Setapp AppStore; do
+            echo "::group::Build $edition edition"
+            if xcodebuild -project Seshat.xcodeproj -scheme Seshat \
+                 -configuration Debug -derivedDataPath "build/$edition" \
+                 -xcconfig "configs/$edition.xcconfig" \
+                 CODE_SIGNING_ALLOWED=NO build; then
+              echo "$edition: OK"
+            else
+              echo "::error::$edition edition failed to build"; fail=1
+            fi
+            echo "::endgroup::"
+          done
+          exit $fail

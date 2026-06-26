@@ -1,0 +1,47 @@
+# XcodeGen spec — generates Seshat.xcodeproj (committable, diff-able).
+# Regenerate after editing:  cd apple && xcodegen generate
+name: Seshat
+options:
+  bundleIdPrefix: uk.co.riera
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+packages:
+  SeshatCore:
+    path: SeshatCore
+targets:
+  Seshat:
+    type: application
+    platform: macOS
+    configFiles:
+      Debug: configs/Direct.xcconfig
+      Release: configs/Direct.xcconfig
+    dependencies:
+      - package: SeshatCore
+    sources:
+      - path: Sources
+      - path: Resources
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_LSUIElement: YES
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.productivity
+        INFOPLIST_KEY_CFBundleDisplayName: Seshat
+        INFOPLIST_KEY_NSHumanReadableCopyright: "© 2026 Joan Marc Riera Duocastella · MIT"
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Seshat opens Terminal to run the optional install commands you choose."
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Seshat connects to the WhisperX and Ollama servers you run on your local network to transcribe and summarise recordings."
+schemes:
+  Seshat:
+    build:
+      targets:
+        Seshat: all
+    run:
+      config: Debug

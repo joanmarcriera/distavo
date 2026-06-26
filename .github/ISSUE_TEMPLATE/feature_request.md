@@ -1,6 +1,6 @@
 ---
 name: Feature request
-about: Suggest an idea for Scribed
+about: Suggest an idea for Seshat
 title: "[Feature] "
 labels: enhancement
 assignees: ""

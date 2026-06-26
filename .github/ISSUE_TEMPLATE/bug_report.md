@@ -19,13 +19,14 @@ What you expected to happen.
 
 **Environment**
 - macOS version:
-- Scribed version / commit:
+- Seshat version / commit:
 - WhisperX endpoint reachable? (yes/no)
 - Ollama endpoint + model:
 
 **Logs**
-Relevant lines from `~/Library/Logs/MeetingNotes/watcher.log` (redact any
-private content, server IPs, or tokens).
+Relevant lines from `~/Library/Logs/Seshat/seshat.log` (redact any private
+content, server IPs, or tokens). Tip: the app's **Report an Issue…** menu item
+pre-fills your version and system info for you.
 
 **Additional context**
 Anything else that might help.

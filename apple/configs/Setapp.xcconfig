@@ -1,0 +1,8 @@
+// Setapp edition — distributed via the Setapp app (Developer ID + notarization,
+// no sandbox required). Bundle ID carries the "-setapp" suffix per Setapp docs.
+// No external donate link: Setapp prohibits leading users out to pay elsewhere.
+PRODUCT_BUNDLE_IDENTIFIER = uk.co.riera.seshat-setapp
+CODE_SIGN_ENTITLEMENTS = Seshat.entitlements
+ENABLE_HARDENED_RUNTIME = YES
+// Absolute — must not inherit Direct's DONATE_ENABLED (see Direct.xcconfig).
+SWIFT_ACTIVE_COMPILATION_CONDITIONS = EDITION_SETAPP

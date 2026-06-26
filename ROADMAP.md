@@ -1,51 +1,39 @@
 # Roadmap
 
-Scribed's distribution plan moves from a source-based GitHub release toward
-easy package-manager installs and, eventually, a notarized Mac app on Setapp.
-Each phase is more involved than the last.
+Seshat is a native Swift/SwiftUI menu-bar app that ships in three editions from
+one codebase. Distribution moves from a notarized direct download toward Setapp
+and the Mac App Store. The detailed, copy-pasteable shipping steps live in
+[`docs/distribution-checklist.md`](docs/distribution-checklist.md).
 
-## Phase 1 — GitHub open-source release (current)
+## Phase 1 — Native app + open source (current)
 
-- Public GitHub repository under an MIT license.
-- Run from source with `uv sync` and `./install-login-item.sh`.
-- Documentation, CI, issue/PR templates, and contribution guidelines in place.
+- Native Swift/SwiftUI rewrite with a UI-free `SeshatCore` package (no GPL
+  dependencies — AVFoundation replaces ffmpeg, so the app can ship on the App
+  Store).
+- Public GitHub repository under an MIT license, CI, issue/PR templates, and
+  contribution guidelines in place.
+- Three build editions wired via `apple/configs/{Direct,Setapp,AppStore}.xcconfig`
+  with reverse-DNS bundle IDs `uk.co.riera.seshat` / `uk.co.riera.seshat-setapp`.
 
-This is where the project is today.
+## Phase 2 — Direct download (notarized)
 
-## Phase 2 — Homebrew
+- Developer ID signed, **notarized**, stapled `.app` / DMG published on GitHub
+  Releases.
+- Optional [Sparkle](https://sparkle-project.org/) auto-update for the Direct
+  edition.
 
-Make Scribed installable with standard tooling.
+## Phase 3 — Setapp
 
-- Ensure Scribed is cleanly **pip/uv-installable** — the `scribed` entry point
-  is already defined in `pyproject.toml`.
-- Ship a **Homebrew CLI formula** that declares `ffmpeg` as a dependency, so
-  `brew install` brings the transcription prerequisite along.
-- Later, provide an **`.app` cask** for users who prefer a downloadable app
-  bundle over a CLI formula.
+- Link the Setapp Framework into the `-setapp` bundle (gated behind
+  `EDITION_SETAPP`), upload the first build via the Setapp Web UI, pass review.
 
-## Phase 3 — Setapp (the hard one)
+## Phase 4 — Mac App Store
 
-Distributing through Setapp requires a real, sandboxed, notarized Mac app. This
-is a substantial body of work:
+- Sandboxed build (security-scoped bookmarks for the watched folders), Apple
+  Distribution signing + provisioning profile, App Store Connect record, and
+  App Review.
+- Donations on the App Store would require StoreKit In-App Purchase (consumable
+  "tip" products) — the external donate link is Direct-only and must stay gated.
 
-- **Build a notarized `.app`** with `py2app`:
-  - `LSUIElement=1` so it runs as a menu-bar-only agent (no Dock icon).
-  - A proper app icon.
-  - A **bundled, signed static `ffmpeg`** binary so users don't need Homebrew —
-    note the licensing implications and use an **LGPL** ffmpeg build.
-- **App Sandbox compliance**:
-  - Replace arbitrary config-driven paths with **security-scoped bookmarks** for
-    the watched folder.
-  - Add the appropriate **network client/server entitlements** for talking to
-    WhisperX/Ollama.
-  - Replace the `LaunchAgent` plist with **`SMAppService`** for run-at-login.
-  - Consider a **native settings window** instead of the localhost web server.
-- **Code-sign** with the hardened runtime → **notarize** → **staple** the
-  ticket.
-- Integrate the **Setapp SDK** and go through Setapp's curated review.
-
-### Naming note
-
-The working name **"Scribed"** must be **trademark-checked** before any public
-distribution, and a real **reverse-DNS bundle identifier** chosen (the current
-`com.scribed.app` label in the LaunchAgent is a placeholder).
+Each phase's exact commands and credential prerequisites are in the
+distribution checklist.

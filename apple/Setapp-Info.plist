@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDisplayName</key>
+	<string>Distavo</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.productivity</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Distavo opens Terminal to run the optional install commands you choose.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Copyright 2026 Joan Marc Riera Duocastella - MIT</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Distavo connects to the WhisperX and Ollama servers you run on your local network to transcribe and summarise recordings.</string>
+	<key>NSPrincipalClass</key>
+	<string>NSApplication</string>
+	<key>NSUpdateSecurityPolicy</key>
+	<dict>
+		<key>AllowProcesses</key>
+		<dict>
+			<key>MEHY5QF425</key>
+			<array>
+				<string>com.setapp.DesktopClient.SetappAgent</string>
+			</array>
+		</dict>
+	</dict>
+</dict>
+</plist>

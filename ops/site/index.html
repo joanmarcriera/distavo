@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Distavo - private meeting notes on your Mac</title>
+  <meta name="description" content="Distavo watches a folder and turns recordings into clean Markdown meeting notes using WhisperX and Ollama servers you control.">
+  <meta property="og:title" content="Distavo">
+  <meta property="og:description" content="Private meeting notes on your Mac. No telemetry. No bundled AI cloud.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://distavo.com/">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/"><span class="brand-mark"></span><span>Distavo</span></a>
+      <div class="nav-links">
+        <a href="#how">How it works</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="/support/">Support</a>
+        <a href="/feedback/">Feedback</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <img class="hero-image" src="/assets/settings.png" alt="Distavo settings window showing WhisperX, Ollama, folder, and processing options">
+      <div class="hero-inner">
+        <span class="eyebrow">macOS 13+ menu bar app</span>
+        <h1>Distavo</h1>
+        <p class="lede">Private meeting notes on your Mac. Drop a recording into a folder and get a clean Markdown note back, using the WhisperX and Ollama servers you choose.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="https://github.com/joanmarcriera/distavo/releases">Get the direct build</a>
+          <a class="button secondary" href="/feedback/">Help shape Distavo</a>
+          <a class="button text" href="https://github.com/joanmarcriera/distavo">View source</a>
+        </div>
+        <div class="hero-meta" aria-label="Release status">
+          <span>Version 1.1.0</span>
+          <span>App Store build uploaded</span>
+          <span>MIT licensed</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="how" class="section">
+      <div class="section-title">
+        <h2>Meeting notes without handing meetings to someone else's cloud.</h2>
+        <p>Distavo is the thin native Mac layer around your own transcription and summarisation setup. It watches, converts, calls your configured endpoints, validates, and writes notes locally.</p>
+      </div>
+
+      <div class="grid">
+        <article class="card">
+          <span class="tag blue">Watch</span>
+          <h3>Use the folder you already sync.</h3>
+          <p>Point Distavo at a local, iCloud Drive, or Google Drive folder. When a recording finishes syncing, Distavo processes it once.</p>
+        </article>
+        <article class="card">
+          <span class="tag green">Transcribe</span>
+          <h3>Send audio only where you decide.</h3>
+          <p>AVFoundation converts media locally, then Distavo uploads the WAV to the WhisperX endpoint you configured.</p>
+        </article>
+        <article class="card">
+          <span class="tag rust">Summarise</span>
+          <h3>Write Markdown notes with your model.</h3>
+          <p>The cleaned transcript goes to your Ollama server, then Distavo writes a structured note to your notes folder.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section compact product-shot" aria-labelledby="native-settings">
+      <div class="shot-copy">
+        <div class="section-title">
+          <h2 id="native-settings">Native settings. No local web panel.</h2>
+          <p>The App Store build is sandboxed and uses security-scoped bookmarks for folders. Direct and Setapp builds keep the same core pipeline with edition-specific distribution behavior.</p>
+        </div>
+        <p>Configure server URLs, models, speaker options, folders, and local fallback from the Mac settings window. The app has no telemetry and no phone-home.</p>
+        <a class="button secondary" href="/privacy/">Read the privacy policy</a>
+      </div>
+      <figure class="shot-frame">
+        <img src="/assets/settings.png" alt="Distavo settings window with WhisperX and Ollama connection fields">
+      </figure>
+    </section>
+
+    <section class="status-band">
+      <div class="section compact">
+        <div>
+          <h2>App Store package is ready.</h2>
+          <p>The 1.1.0 build has been signed, exported, and uploaded to App Store Connect. Public availability still depends on the normal manual App Review step.</p>
+        </div>
+        <a class="button primary" href="/support/">Support and requirements</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Distavo. Private meeting notes on macOS.</span>
+      <div class="footer-links">
+        <a href="/privacy/">Privacy</a>
+        <a href="/support/">Support</a>
+        <a href="https://github.com/joanmarcriera/distavo">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

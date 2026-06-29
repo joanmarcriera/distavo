@@ -40,9 +40,9 @@ Sources: [Membership revenue](https://docs.setapp.com/docs/setapp-membership-rev
 
 ## 2. Technical build requirements
 
-Most of this is already wired in `apple/configs/Setapp.xcconfig` and
-`Distavo.entitlements`, but the Setapp Framework integration requires a one-time
-manual step in the vendor dashboard.
+Most of this is already wired in `apple/configs/Setapp.xcconfig`,
+`apple/Setapp-Info.plist`, and `Distavo.entitlements`, but the Setapp Framework
+integration requires a one-time manual step in the vendor dashboard.
 
 ### 2.1 Bundle ID
 
@@ -100,7 +100,8 @@ Source: [Install and set up Framework](https://docs.setapp.com/docs/install-and-
 
 ### 2.4 Info.plist requirements
 
-XcodeGen generates the Info.plist (`GENERATE_INFOPLIST_FILE: YES`). The
+The Setapp build uses `apple/Setapp-Info.plist` via `Setapp.xcconfig` so the
+Setapp-only metadata does not leak into the Direct or App Store editions. The
 following keys must be present in the Setapp build:
 
 | Key | Value |
@@ -109,12 +110,11 @@ following keys must be present in the Setapp build:
 | `CFBundleName` | `Distavo` |
 | `CFBundleIconFile` | your app icon name |
 | `CFBundleVersion` | build number (integer) |
-| `CFBundleShortVersionString` | marketing version (e.g. `1.0.0`) |
-| `NSUpdateSecurityPolicy` | required for macOS 13+ (see below) |
+| `CFBundleShortVersionString` | marketing version (currently `1.1.0`) |
+| `NSUpdateSecurityPolicy` | allows `com.setapp.DesktopClient.SetappAgent` under team `MEHY5QF425` |
 
-Add `NSUpdateSecurityPolicy` via an `INFOPLIST_KEY_NSUpdateSecurityPolicy`
-setting in `Setapp.xcconfig`, or include it in a custom plist merged at build
-time. Setapp will reject the build without it.
+`NSUpdateSecurityPolicy` is already present in `apple/Setapp-Info.plist`.
+Setapp will reject the build without it.
 
 Source: [Submitting apps for review](https://docs.setapp.com/docs/submitting-apps-for-review)
 
@@ -196,18 +196,22 @@ xcrun stapler validate build/export-setapp/Distavo.app   # → "The validate act
 
 ### 3.5 Package for Setapp
 
-Setapp expects a **zip with a single root directory** containing only the `.app`
-— no `__MACOSX` metadata folder. Use `ditto`, not `zip`:
+Setapp expects a clean **zip** with the `.app` bundle and a 1024 × 1024
+`AppIcon.png` next to it — no `__MACOSX` metadata folder. Use `ditto`, not
+Finder compression or `zip`. The wrapper script creates this structure for the
+Setapp edition:
 
 ```bash
-ditto -c -k --keepParent build/export-setapp/Distavo.app build/Distavo-Setapp.zip
+TEAM_ID=… NOTARY_PROFILE=distavo-notary ./scripts/build-and-notarize.sh setapp
 ```
 
 Validate the structure before uploading:
 
 ```bash
-ditto -x -k build/Distavo-Setapp.zip /tmp/distavo-check && ls -la /tmp/distavo-check
-# Expect: one entry — Distavo.app — and no __MACOSX folder.
+rm -rf /tmp/distavo-check
+ditto -x -k build/release-setapp/Distavo-setapp.zip /tmp/distavo-check
+find /tmp/distavo-check -maxdepth 2 -print | sort
+# Expect: Distavo.app and AppIcon.png, and no __MACOSX folder.
 ```
 
 Verify signature and Gatekeeper acceptance as a final sanity check:
@@ -258,6 +262,7 @@ Source: [Submitting apps for review](https://docs.setapp.com/docs/submitting-app
 | Integrate Setapp Framework (`libSetapp.a`) + public key into Xcode project | Yes | — |
 | First build upload (Web UI) | Yes | — |
 | Archive, notarize, staple, package | No | Yes — shell script / Makefile / CI |
+| Setapp `Info.plist` metadata and package icon structure | — | Yes — already wired |
 | Subsequent build uploads | No | Yes — REST API / MacPaw script / Fastlane |
 | Release notes per version | Yes (content) | Template automatable |
 

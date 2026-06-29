@@ -15,7 +15,7 @@
 #   - notarytool keychain profile:
 #       xcrun notarytool store-credentials distavo-notary \
 #         --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PW
-set -euo pipefail
+set -Eeuo pipefail
 
 cd "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -72,10 +72,36 @@ fi
 : "${NOTARY_PROFILE:?set NOTARY_PROFILE (notarytool keychain profile) to notarize}"
 APP="$EXPORT_DIR/Distavo.app"
 ZIP="$BUILD_DIR/Distavo-$EDITION.zip"
+NOTARY_ZIP="$BUILD_DIR/Distavo-$EDITION-notary.zip"
+
+package_distribution_zip() {
+  local -r app="$1"
+  local -r zip="$2"
+
+  rm -f -- "$zip"
+
+  if [[ "$EDITION" == "setapp" ]]; then
+    local -r package_root="$BUILD_DIR/setapp-package"
+    local -r icon_source="Resources/Assets.xcassets/AppIcon.appiconset/icon_512@2x.png"
+
+    [[ -d "$app" ]] || { echo "missing app bundle: $app" >&2; return 1; }
+    [[ -f "$icon_source" ]] || { echo "missing Setapp AppIcon.png source: $icon_source" >&2; return 1; }
+
+    rm -rf -- "$package_root"
+    mkdir -p -- "$package_root"
+    ditto "$app" "$package_root/Distavo.app"
+    cp "$icon_source" "$package_root/AppIcon.png"
+    ditto -c -k "$package_root" "$zip"
+    return 0
+  fi
+
+  ditto -c -k --keepParent "$app" "$zip"
+}
 
 echo "==> Notarizing"
-ditto -c -k --keepParent "$APP" "$ZIP"
-xcrun notarytool submit "$ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
+rm -f -- "$NOTARY_ZIP"
+ditto -c -k --keepParent "$APP" "$NOTARY_ZIP"
+xcrun notarytool submit "$NOTARY_ZIP" --keychain-profile "$NOTARY_PROFILE" --wait
 
 echo "==> Stapling + verifying"
 xcrun stapler staple "$APP"
@@ -84,6 +110,5 @@ codesign --verify --strict --verbose=2 "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
 # Fresh zip of the stapled app for distribution.
-rm -f "$ZIP"
-ditto -c -k --keepParent "$APP" "$ZIP"
+package_distribution_zip "$APP" "$ZIP"
 echo "==> Done: $ZIP"

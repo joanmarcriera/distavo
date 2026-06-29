@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy - Distavo</title>
+  <meta name="description" content="Distavo privacy policy: what data is produced, where it is stored, and what leaves your Mac.">
+  <link rel="stylesheet" href="/assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/"><span class="brand-mark"></span><span>Distavo</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/support/">Support</a>
+        <a href="/feedback/">Feedback</a>
+      </div>
+    </nav>
+  </header>
+
+  <main class="page-main">
+    <span class="eyebrow" style="color: var(--muted); border-color: var(--line)">Privacy policy</span>
+    <h1>Distavo keeps meeting content under your control.</h1>
+    <p>Distavo is designed so that your recordings and notes stay on machines you control. This page describes what data Distavo produces, where it is stored, and what leaves your Mac.</p>
+
+    <h2>What data Distavo produces</h2>
+    <p>For each recording it processes, Distavo creates:</p>
+    <ul class="list">
+      <li>A WAV copy of the recording, produced locally by AVFoundation from your original file.</li>
+      <li>A transcript of the audio, returned by your WhisperX server.</li>
+      <li>A summary or structured note, produced by your Ollama model from the transcript.</li>
+      <li>The original recording file remains where you placed it.</li>
+    </ul>
+
+    <h2>Where data is stored locally</h2>
+    <ul class="list">
+      <li>Recordings: the watched folder, by default <code>~/Documents/Distavo/recordings</code>.</li>
+      <li>Notes: by default <code>~/Documents/Distavo/notes/&lt;name&gt;.md</code>.</li>
+      <li>Working files and configuration: under <code>~/Library/Application Support/Distavo/</code>.</li>
+      <li>Logs: <code>~/Library/Logs/Distavo/distavo.log</code>.</li>
+    </ul>
+    <p>These files are written in cleartext under your home directory. Distavo does not encrypt them; protect them with your normal macOS account and disk encryption, such as FileVault.</p>
+
+    <h2>What leaves your Mac</h2>
+    <p>Distavo talks to exactly two network endpoints, both of which you configure:</p>
+    <ul class="list">
+      <li>Your WhisperX server, which receives the locally converted WAV for transcription.</li>
+      <li>Your Ollama server, which receives the cleaned transcript for summarisation.</li>
+    </ul>
+    <p>These endpoints can be on localhost, your own network, or a remote machine. Because audio and transcript text leave your Mac to reach them, only configure servers you operate or fully trust.</p>
+
+    <h2>No telemetry</h2>
+    <p>Distavo has no telemetry and no phone-home. It does not collect analytics, crash reports, usage statistics, or any other data, and it does not contact any server other than the WhisperX and Ollama URLs you set.</p>
+
+    <h2>Recommendation</h2>
+    <p>Prefer local or otherwise trusted WhisperX and Ollama servers. Review the configured URLs before processing sensitive recordings.</p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Distavo privacy policy.</span>
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/support/">Support</a>
+        <a href="https://github.com/joanmarcriera/distavo">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

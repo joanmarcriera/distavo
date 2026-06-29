@@ -30,10 +30,14 @@ Entity Manager + an n8n workflow + the static form.
     (derived). **`CHelperAccount` rollup + Contact-linking are not auto-populated yet** (add later via
     a scheduled reconcile or HTTP+IF nodes).
 
-**Remaining for the reward/thank loop:**
-1. **SMTP credential in n8n** for `marc@riera.co.uk` (Google Workspace — App Password → n8n SMTP cred),
-   then add an EmailSend node after "Create CFeedback" emailing the helper the thank-you.
-2. *(later)* `CHelperAccount` rollup + Contact-linking enrichment.
+- ✅ **Thank-you email LIVE.** "Send thank-you" EmailSend node after "Create CFeedback" using the
+  n8n SMTP credential **"SMTP account 2"** (Google Workspace `marc@riera.co.uk`). Verified — Gmail
+  accepted delivery. **Full loop live:** form → webhook → guard(+7) → `CFeedback` → thank-you email.
+
+**Remaining (later, non-blocking):**
+- `CHelperAccount` rollup + Contact-linking enrichment (currently CFeedback is the event-log;
+  balance = Σ accepted `awardDays`).
+- v2 LLM tiering (OpenRouter key in `~/.tokens`).
 
 
 ## 1. EspoCRM entities — ✅ BUILT (2026-06-29)

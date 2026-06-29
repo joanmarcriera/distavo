@@ -134,14 +134,16 @@ jobs:
       - name: Export the App Store package
         run: |
           cd apple
-          cat > build/ExportOptions-AppStore.plist <<PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           # Pin the signing certs explicitly: bare automatic export lets xcodebuild's
           # cert auto-selection grab the *installer* cert to sign the .app code, which
           # fails ("this identity cannot be used for signing code"). The .app is signed
           # with "Apple Distribution"; the .pkg installer with "3rd Party Mac Developer
           # Installer". The profile is still resolved via -allowProvisioningUpdates below.
+          # NB: these comments live OUTSIDE the heredoc — '#' inside <<PLIST is literal
+          # text and would corrupt the plist ("isn't in the correct format").
+          cat > build/ExportOptions-AppStore.plist <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
             <key>method</key><string>app-store-connect</string>
             <key>teamID</key><string>${APPLE_TEAM_ID}</string>

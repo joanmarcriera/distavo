@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import DistavoCore
+import DistavoEmbedded
 
 /// Menu-bar controller — the GUI-agnostic core, mirroring the Python
 /// `WatcherController`. Owns config, the scan loop, status, the deferred set,
@@ -41,10 +42,19 @@ final class WatcherController: ObservableObject {
     private static let onboardedKey = "distavo.didOnboard"
     private static let localNetWarnedKey = "distavo.didWarnLocalNetwork"
 
-    init(deps: PipelineDeps = .live()) {
+    init(deps: PipelineDeps = .appLive()) {
         self.deps = deps
         self.needsOnboarding = !UserDefaults.standard.bool(forKey: Self.onboardedKey)
-        var cfg = (try? Config.load(from: Config.defaultConfigURL)) ?? Config()
+        // Fresh installs default to the on-device engine sized for this Mac;
+        // existing config files keep whatever backend they already use.
+        var cfg = (try? Config.load(from: Config.defaultConfigURL,
+                                    fresh: .recommendedForThisMac())) ?? Config()
+        // A config carried over from another Mac may say "embedded" on
+        // hardware that can't run it (Intel) — fall back to the server backend
+        // rather than failing every recording.
+        if cfg.transcribe.backend == "embedded" && !HardwareProbe.supportsEmbeddedTranscription {
+            cfg.transcribe.backend = "server"
+        }
         cfg.applyEnvOverrides()
         self.config = cfg
         self.watchIntervalSeconds = cfg.watchIntervalSeconds
@@ -52,7 +62,22 @@ final class WatcherController: ObservableObject {
         clearStaleProcessing()
         recentActivity = activityLog.recent(12)
         log("Distavo started")
+        wireEmbeddedProgress()
         start()
+    }
+
+    /// Surface embedded-engine phases (model download, transcribing,
+    /// diarizing) in the menu status and the activity log.
+    private func wireEmbeddedProgress() {
+        Task {
+            await EmbeddedTranscriber.shared.setProgressHandler { [weak self] message in
+                Task { @MainActor in
+                    guard let self, self.processingActive else { return }
+                    self.status = message
+                    self.log(message)
+                }
+            }
+        }
     }
 
     // MARK: Lifecycle
@@ -67,7 +92,9 @@ final class WatcherController: ObservableObject {
         if needsOnboarding {
             SettingsWindowController.shared.show(self)
             notifier.notify(title: "Welcome to Distavo",
-                            body: "Choose your folders and point Distavo at your WhisperX & Ollama servers to begin.")
+                            body: config.transcribe.backend == "embedded"
+                                ? "Transcription runs on this Mac out of the box. Add your Ollama server (for summaries) in Settings to begin."
+                                : "Choose your folders and point Distavo at your WhisperX & Ollama servers to begin.")
             UserDefaults.standard.set(true, forKey: Self.onboardedKey)
         }
         maybeWarnLocalNetwork()
@@ -291,7 +318,10 @@ final class WatcherController: ObservableObject {
     func testConnections(_ cfg: Config) async -> (whisperx: Bool, ollamaServer: Bool, ollamaLocal: Bool) {
         let whisper = WhisperXClient()
         let ollama = OllamaClient()
-        async let whisperxOK = whisper.reachable(cfg.transcribe.whisperxURL)
+        // With the embedded engine there is no WhisperX to probe — skip the
+        // TCP-timeout wait (the dot is hidden in that mode anyway).
+        async let whisperxOK = cfg.transcribe.backend == "embedded"
+            ? true : whisper.reachable(cfg.transcribe.whisperxURL)
         async let serverOK = ollama.reachable(cfg.summarise.server.url)
         async let localOK = ollama.reachable(cfg.summarise.local.url)
         return (await whisperxOK, await serverOK, await localOK)

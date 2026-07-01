@@ -1,7 +1,7 @@
 # Distavo — Distribution & Notarization Checklist
 
 Practical, copy-pasteable steps to ship **Distavo** (SwiftUI menu-bar app, `LSUIElement`,
-macOS 13 deployment target) in its three editions:
+macOS 14 deployment target) in its three editions:
 
 | Edition         | Bundle ID                     | Signing                     | Sandbox | Channel                  |
 | --------------- | ----------------------------- | --------------------------- | ------- | ------------------------ |
@@ -445,6 +445,14 @@ export-compliance, and **Submit for Review**. Common rejections for a menu-bar a
 sandbox entitlements, using private APIs, or a donate/payment link that bypasses Apple's IAP rules
 (the `DONATE_ENABLED` flag is gated to the US storefront per `AppStore.xcconfig` — confirm that gating
 holds at runtime before submitting).
+
+**Built-in transcription engine + App Review:** downloading ML model weights at runtime is fine —
+weights are data, not executable code (guideline 2.5.2 doesn't apply), Apple documents on-device
+model download/compile for Core ML, and MacWhisper/Aiko ship exactly this pattern on the MAS.
+Models land inside the sandbox container (`Application Support/Distavo/models`) via the existing
+`network.client` entitlement — no new entitlements. In review notes, state that transcription is
+fully on-device and the only network use is the user's own Ollama/WhisperX URLs plus the one-time
+Hugging Face model download. Third-party licenses are in `NOTICES.md` (all MIT/Apache — no GPL).
 
 ---
 

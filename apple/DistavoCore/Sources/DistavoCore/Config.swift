@@ -57,27 +57,39 @@ public struct SummariseOptions: Codable, Equatable {
 }
 
 public struct TranscribeConfig: Codable, Equatable {
+    /// "embedded" (WhisperKit on this Mac) or "server" (a WhisperX URL).
+    /// Defaults to "server" so a pre-existing config that lacks the key keeps
+    /// its WhisperX setup untouched; fresh installs opt into "embedded" via
+    /// `Config.recommendedForThisMac()`.
+    public var backend: String
     public var whisperxURL: String
     public var model: String
+    /// Catalog id from `EmbeddedModelCatalog` (not a WhisperKit repo name).
+    public var embeddedModel: String
     public var language: String
     public var diarize: Bool
     public var numSpeakers: Int
 
     enum CodingKeys: String, CodingKey {
-        case whisperxURL = "whisperx_url", model, language, diarize, numSpeakers = "num_speakers"
+        case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
+        case language, diarize, numSpeakers = "num_speakers"
     }
 
-    public init(whisperxURL: String = "http://127.0.0.1:9000", model: String = "medium",
+    public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
+                model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 2) {
-        self.whisperxURL = whisperxURL; self.model = model; self.language = language
+        self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
+        self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = TranscribeConfig()
+        backend = try c.decodeIfPresent(String.self, forKey: .backend) ?? d.backend
         whisperxURL = try c.decodeIfPresent(String.self, forKey: .whisperxURL) ?? d.whisperxURL
         model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
+        embeddedModel = try c.decodeIfPresent(String.self, forKey: .embeddedModel) ?? d.embeddedModel
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? d.language
         diarize = try c.decodeIfPresent(Bool.self, forKey: .diarize) ?? d.diarize
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
@@ -184,9 +196,27 @@ public struct Config: Codable, Equatable {
 
     // MARK: Load / save
 
-    public static func load(from url: URL, fileManager: FileManager = .default) throws -> Config {
+    /// Defaults for a Mac with no config yet: transcription runs on-device when
+    /// the hardware supports it (with the model that fits its RAM), otherwise
+    /// the classic WhisperX-server setup. Existing config files never pass
+    /// through here — their missing keys decode to the "server" default, so an
+    /// upgrade can't silently switch a working WhisperX user to embedded.
+    public static func recommendedForThisMac(
+        embeddedSupported: Bool = HardwareProbe.supportsEmbeddedTranscription,
+        memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes
+    ) -> Config {
+        var cfg = Config()
+        if embeddedSupported {
+            cfg.transcribe.backend = "embedded"
+            cfg.transcribe.embeddedModel = EmbeddedModelCatalog.recommended(memoryBytes: memoryBytes).id
+        }
+        return cfg
+    }
+
+    public static func load(from url: URL, fileManager: FileManager = .default,
+                            fresh: @autoclosure () -> Config = Config()) throws -> Config {
         if !fileManager.fileExists(atPath: url.path) {
-            let defaults = Config()
+            let defaults = fresh()
             try save(defaults, to: url, fileManager: fileManager)
             return defaults
         }

@@ -7,7 +7,7 @@ import PackageDescription
 // this package; AppKit/AVFoundation/SwiftUI stay in the app target.
 let package = Package(
     name: "DistavoCore",
-    platforms: [.macOS(.v13)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "DistavoCore", targets: ["DistavoCore"]),
     ],

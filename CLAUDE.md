@@ -93,6 +93,13 @@ App target (`apple/Sources/Distavo/`):
 - **`Core/`** — `Links` (outbound URLs), `LoginItem` (run-at-login via SMAppService), `Notifier`,
   `SandboxFolders` (App Store security-scoped bookmarks), `AppPipelineDeps` (routes the pipeline's
   transcribe step to `EmbeddedTranscriber` or `WhisperXClient` per `transcribe.backend`).
+- **`Capture/`** — the built-in meeting recorder (macOS 14.4+, hidden below): a global **Core Audio
+  process tap** (excluding Distavo's own pid) + private aggregate device (default output as clock +
+  default mic + tap, drift-compensated) → stereo WAV (L = mic, R = system audio) written into the
+  watched recordings folder, so the pipeline needs **zero changes**. Adapted from
+  insidegui/AudioCap (BSD-2, `NOTICES.md`) **without** its private-TCC probe — App Store safe.
+  Never bundle BlackHole (GPL-3). TCC needs a signed build; CI can't exercise this — manual
+  checklist in `docs/meeting-capture-verification.md`.
 
 ### Editions
 `SWIFT_ACTIVE_COMPILATION_CONDITIONS` in each xcconfig selects edition behavior via `#if`:

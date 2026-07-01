@@ -20,7 +20,9 @@ history) and its behaviour is preserved here, noted in `// Port of …` comments
 - `Sources/Distavo/` — the app target: `MenuBarExtra` menu, `WatcherController`,
   native Settings window, `Notifier`, `LoginItem`. `AppPipelineDeps.swift`
   routes the pipeline's transcribe step to the embedded engine or the WhisperX
-  client per `transcribe.backend`.
+  client per `transcribe.backend`. `Capture/` is the built-in meeting recorder
+  (Core Audio process tap + mic, macOS 14.4+, no BlackHole/drivers) — manual
+  verification: `../docs/meeting-capture-verification.md`.
 - `project.yml` — XcodeGen spec. **`Distavo.xcodeproj` is generated and gitignored.**
 - `configs/{Direct,Setapp,AppStore}.xcconfig` — per-edition build settings.
 - `Distavo.entitlements` (Direct/Setapp, no sandbox) and

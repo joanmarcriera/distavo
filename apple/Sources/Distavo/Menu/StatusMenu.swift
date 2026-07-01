@@ -6,6 +6,12 @@ import AppKit
 /// AND the edition defines DONATE_ENABLED.
 struct StatusMenu: View {
     @ObservedObject var controller: WatcherController
+    @ObservedObject var capture: MeetingCaptureController
+
+    init(controller: WatcherController) {
+        self.controller = controller
+        self.capture = controller.capture
+    }
 
     var body: some View {
         Text(controller.status)
@@ -14,6 +20,14 @@ struct StatusMenu: View {
         }
 
         Divider()
+
+        if MeetingCaptureController.isSupported {
+            Button(capture.isRecording
+                   ? "⏹ Stop recording (\(capture.elapsedLabel))"
+                   : "● Record meeting (system audio + mic)") {
+                capture.toggle()
+            }
+        }
 
         Button("Process now") { controller.processNow() }
         Button("Copy last transcript") { controller.copyLastTranscript() }

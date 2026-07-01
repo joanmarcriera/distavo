@@ -13,6 +13,15 @@ transcription engine. Distavo itself is MIT-licensed; nothing here is GPL.
 - The package vendors portions of Hugging Face `swift-transformers`
   (Apache-2.0); see the `NOTICES` file inside the package for details.
 
+## AudioCap (meeting recorder reference implementation)
+
+- Source: https://github.com/insidegui/AudioCap
+- License: BSD-2-Clause — Copyright © 2024 Guilherme Rambo
+- Used for: the Core Audio process-tap + aggregate-device sequence in
+  Distavo's built-in meeting recorder (`apple/Sources/Distavo/Capture/`) is
+  adapted from AudioCap. Its private-TCC permission probe is deliberately not
+  included.
+
 ## Models downloaded at runtime (with your consent, on first use)
 
 The app itself ships no models. When the built-in engine is selected, it

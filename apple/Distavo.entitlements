@@ -5,5 +5,10 @@
   <!-- Direct / Setapp editions are NOT sandboxed. The Mac App Store edition
        uses Distavo-AppStore.entitlements (app-sandbox, network.client,
        files.user-selected.read-write) added in Phase D. -->
+  <!-- Hardened-runtime exception: microphone access for the built-in meeting
+       recorder. System-audio capture via Core Audio taps needs no entitlement,
+       only the user's System Audio Recording TCC approval. -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
 </dict>
 </plist>

@@ -24,6 +24,15 @@ final class WatcherController: ObservableObject {
     private(set) var config: Config
     private let deps: PipelineDeps
     private let notifier = Notifier()
+
+    /// Built-in meeting recorder (macOS 14.4+): records system audio + mic
+    /// into the watched folder, where the normal pipeline picks it up.
+    lazy var capture = MeetingCaptureController(
+        folderProvider: { [weak self] in
+            Config.resolvePath(self?.config.recordingsDir ?? Config().recordingsDir)
+        },
+        notify: { [weak self] title, body in self?.notifier.notify(title: title, body: body) },
+        log: { [weak self] message in self?.log(message) })
     private let needsOnboarding: Bool
     private let activityLog = ActivityLog()
 

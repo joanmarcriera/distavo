@@ -20,11 +20,13 @@ public enum NetworkScope {
         return false
     }
 
-    /// True if any configured server is on the local network.
+    /// True if any configured server is on the local network. The WhisperX URL
+    /// only counts when the server backend is actually in use — the embedded
+    /// backend never touches it, so it must not trigger the permission warning.
     public static func usesLocalNetwork(_ config: Config) -> Bool {
-        [config.transcribe.whisperxURL,
-         config.summarise.server.url,
-         config.summarise.local.url].contains(where: isLocalNetworkHost)
+        var urls = [config.summarise.server.url, config.summarise.local.url]
+        if config.transcribe.backend != "embedded" { urls.append(config.transcribe.whisperxURL) }
+        return urls.contains(where: isLocalNetworkHost)
     }
 
     /// Turn a connection failure into an actionable message, pointing at Local

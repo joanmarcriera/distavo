@@ -9,9 +9,18 @@ history) and its behaviour is preserved here, noted in `// Port of …` comments
 
 - `DistavoCore/` — UI-free SwiftPM package (Config, state, transcript cleaning,
   validation, prompt, WhisperX/Ollama clients, AudioConverter, Pipeline). Fully
-  unit-tested with `swift test` (no Xcode host, no servers).
+  unit-tested with `swift test` (no Xcode host, no servers). Dependency-free by
+  design — keep it that way.
+- `DistavoEmbedded/` — separate SwiftPM package for the **built-in on-device
+  transcription engine**: WhisperKit (Whisper CoreML) + SpeakerKit (pyannote
+  diarization) from MIT-licensed `argmax-oss-swift` (see `../NOTICES.md`),
+  adapted to the WhisperX response shape via `EmbeddedResultMapper`. Apple
+  Silicon; models download on first use into
+  `~/Library/Application Support/Distavo/models`.
 - `Sources/Distavo/` — the app target: `MenuBarExtra` menu, `WatcherController`,
-  native Settings window, `Notifier`, `LoginItem`.
+  native Settings window, `Notifier`, `LoginItem`. `AppPipelineDeps.swift`
+  routes the pipeline's transcribe step to the embedded engine or the WhisperX
+  client per `transcribe.backend`.
 - `project.yml` — XcodeGen spec. **`Distavo.xcodeproj` is generated and gitignored.**
 - `configs/{Direct,Setapp,AppStore}.xcconfig` — per-edition build settings.
 - `Distavo.entitlements` (Direct/Setapp, no sandbox) and
@@ -29,6 +38,9 @@ xcodebuild -project Distavo.xcodeproj -scheme Distavo -configuration Debug \
 
 # Run the core unit tests (fast, headless).
 cd DistavoCore && swift test
+
+# Run the embedded-engine tests (slower first run: builds WhisperKit).
+cd ../DistavoEmbedded && swift test
 ```
 
 > Source files are referenced explicitly in the generated project, so **re-run
@@ -51,6 +63,17 @@ swift test --filter LiveE2ETests
 
 Real transcript content is only ever sent to the WhisperX/Ollama URLs you
 configure — there is **no cloud path** in the code by design.
+
+`DistavoEmbedded` has its own gated live test that downloads the real Whisper
+`small` model (~460 MB) and transcribes a local file fully on-device:
+
+```sh
+cd apple/DistavoEmbedded
+DISTAVO_EMBEDDED_LIVE=1 \
+DISTAVO_EMBEDDED_LIVE_AUDIO=/absolute/path/to/speech.wav \
+DISTAVO_EMBEDDED_LIVE_DIARIZE=1 \
+swift test --filter EmbeddedLiveTests
+```
 
 ## Editions
 

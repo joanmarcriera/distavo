@@ -64,6 +64,9 @@ struct StatusMenu: View {
             Button("Report an Issue…") {
                 if let url = Support.issueURL() { NSWorkspace.shared.open(url) }
             }
+            Button("Open-source acknowledgements…") {
+                if let url = URL(string: Links.noticesURLString) { NSWorkspace.shared.open(url) }
+            }
         }
 
         #if DONATE_ENABLED

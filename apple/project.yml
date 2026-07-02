@@ -4,7 +4,7 @@ name: Distavo
 options:
   bundleIdPrefix: uk.co.riera
   deploymentTarget:
-    macOS: "13.0"
+    macOS: "14.0"
   createIntermediateGroups: true
 # Three build configurations from one target, each pinned to an edition xcconfig
 # below: Debug/Release build the Direct edition; Release-AppStore builds the
@@ -27,6 +27,8 @@ settings:
 packages:
   DistavoCore:
     path: DistavoCore
+  DistavoEmbedded:
+    path: DistavoEmbedded
 targets:
   Distavo:
     type: application
@@ -37,6 +39,7 @@ targets:
       Release-AppStore: configs/AppStore.xcconfig
     dependencies:
       - package: DistavoCore
+      - package: DistavoEmbedded
     sources:
       - path: Sources
       - path: Resources

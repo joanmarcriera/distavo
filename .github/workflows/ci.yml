@@ -18,6 +18,11 @@ jobs:
       - name: Run DistavoCore tests
         run: cd apple/DistavoCore && swift test
 
+      # Builds WhisperKit/SpeakerKit, so slower than the core tests — but it's
+      # what catches an argmax-oss-swift API drift before a release does.
+      - name: Run DistavoEmbedded tests
+        run: cd apple/DistavoEmbedded && swift test
+
       - name: Generate Xcode project
         run: cd apple && xcodegen generate
 

@@ -12,6 +12,8 @@ enum Links {
     /// Lower-case to match the canonical GitHub login (avoids a 301 redirect).
     static let repoSlug = "joanmarcriera/distavo"
     static let projectURLString = "https://github.com/\(repoSlug)"
+    /// Third-party licenses for the built-in transcription engine.
+    static let noticesURLString = "https://github.com/\(repoSlug)/blob/main/NOTICES.md"
 
     static let donateURL = URL(string: donateURLString)
 }

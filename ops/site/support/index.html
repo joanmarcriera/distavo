@@ -22,20 +22,22 @@
   <main class="page-main">
     <span class="eyebrow" style="color: var(--muted); border-color: var(--line)">Support</span>
     <h1>Get Distavo running cleanly.</h1>
-    <p>Distavo is a macOS menu-bar app for turning recordings into Markdown meeting notes with WhisperX and Ollama servers you control.</p>
+    <p>Distavo is a macOS menu-bar app that records meetings and turns them into Markdown meeting notes, with on-device transcription and an Ollama server you control.</p>
 
     <h2>Requirements</h2>
     <ul class="list">
-      <li>macOS 13 or later.</li>
-      <li>A reachable WhisperX HTTP endpoint that you run or trust.</li>
+      <li>macOS 14 or later; the built-in meeting recorder needs macOS 14.4 or later.</li>
+      <li>Apple Silicon for the built-in on-device transcription. On other Macs, point Distavo at a WhisperX HTTP endpoint you run or trust.</li>
       <li>A reachable Ollama HTTP endpoint with a summarisation model pulled.</li>
       <li>Folders you are comfortable using for recordings, notes, and working files.</li>
     </ul>
 
     <h2>Common setup checks</h2>
     <ul class="list">
-      <li>Use the app's Test connection button for both WhisperX and Ollama.</li>
-      <li>If the server URL is on your LAN, allow macOS Local Network access when prompted.</li>
+      <li>The first transcription downloads the selected model from Hugging Face — let it finish once; later runs load from disk.</li>
+      <li>The built-in recorder asks for microphone and system-audio recording permission the first time you use it.</li>
+      <li>Use the app's Test connection button for Ollama, and for WhisperX if you use server transcription.</li>
+      <li>If a server URL is on your LAN, allow macOS Local Network access when prompted.</li>
       <li>For the App Store edition, pick watched and notes folders through the native folder chooser so macOS can grant sandbox access.</li>
       <li>Keep sensitive meetings on endpoints you operate or fully trust.</li>
     </ul>

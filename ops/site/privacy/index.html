@@ -28,7 +28,7 @@
     <p>For each recording it processes, Distavo creates:</p>
     <ul class="list">
       <li>A WAV copy of the recording, produced locally by AVFoundation from your original file.</li>
-      <li>A transcript of the audio, returned by your WhisperX server.</li>
+      <li>A transcript of the audio, produced on your Mac by the built-in engine — or returned by your WhisperX server if you configured one.</li>
       <li>A summary or structured note, produced by your Ollama model from the transcript.</li>
       <li>The original recording file remains where you placed it.</li>
     </ul>
@@ -38,23 +38,25 @@
       <li>Recordings: the watched folder, by default <code>~/Documents/Distavo/recordings</code>.</li>
       <li>Notes: by default <code>~/Documents/Distavo/notes/&lt;name&gt;.md</code>.</li>
       <li>Working files and configuration: under <code>~/Library/Application Support/Distavo/</code>.</li>
+      <li>Downloaded transcription models: <code>~/Library/Application Support/Distavo/models</code> (removable from Settings).</li>
       <li>Logs: <code>~/Library/Logs/Distavo/distavo.log</code>.</li>
     </ul>
     <p>These files are written in cleartext under your home directory. Distavo does not encrypt them; protect them with your normal macOS account and disk encryption, such as FileVault.</p>
 
     <h2>What leaves your Mac</h2>
-    <p>Distavo talks to exactly two network endpoints, both of which you configure:</p>
+    <p>With the built-in transcription engine (the default), audio never leaves your Mac. Distavo makes network connections only to:</p>
     <ul class="list">
-      <li>Your WhisperX server, which receives the locally converted WAV for transcription.</li>
       <li>Your Ollama server, which receives the cleaned transcript for summarisation.</li>
+      <li>Your WhisperX server, only if you switch transcription to server mode; it receives the locally converted WAV.</li>
+      <li>Hugging Face (huggingface.co), a one-time download of the on-device transcription models. Model files are downloaded; no audio, transcripts, or personal data are uploaded.</li>
     </ul>
-    <p>These endpoints can be on localhost, your own network, or a remote machine. Because audio and transcript text leave your Mac to reach them, only configure servers you operate or fully trust.</p>
+    <p>The WhisperX and Ollama endpoints can be on localhost, your own network, or a remote machine. Because audio or transcript text leaves your Mac to reach them, only configure servers you operate or fully trust.</p>
 
     <h2>No telemetry</h2>
-    <p>Distavo has no telemetry and no phone-home. It does not collect analytics, crash reports, usage statistics, or any other data, and it does not contact any server other than the WhisperX and Ollama URLs you set.</p>
+    <p>Distavo has no telemetry and no phone-home. It does not collect analytics, crash reports, usage statistics, or any other data, and it does not contact any server other than the endpoints listed above.</p>
 
     <h2>Recommendation</h2>
-    <p>Prefer local or otherwise trusted WhisperX and Ollama servers. Review the configured URLs before processing sensitive recordings.</p>
+    <p>Prefer the built-in on-device engine, or local and otherwise trusted WhisperX and Ollama servers. Review the configured URLs before processing sensitive recordings.</p>
   </main>
 
   <footer class="site-footer">

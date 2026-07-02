@@ -8,5 +8,9 @@
        the System Audio Recording (Core Audio tap) prompt text. -->
   <key>NSAudioCaptureUsageDescription</key>
   <string>Distavo records the meeting audio playing on this Mac (the other participants) when you choose Record meeting. The audio never leaves your Mac except to the transcription/summary engines you configured.</string>
+  <!-- Distavo only uses standard HTTPS/TLS (exempt), so App Store Connect can
+       skip the per-build export-compliance question. -->
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
 </dict>
 </plist>

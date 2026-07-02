@@ -106,10 +106,16 @@ class AscClient:
                  payload: dict | None = None) -> dict:
         url = f"{API_BASE}{path}"
         for attempt in range(5):
-            resp = self.session.request(
-                method, url, params=params, json=payload,
-                headers={"Authorization": f"Bearer {self._bearer()}"}, timeout=60,
-            )
+            try:
+                resp = self.session.request(
+                    method, url, params=params, json=payload,
+                    headers={"Authorization": f"Bearer {self._bearer()}"}, timeout=60,
+                )
+            except requests.RequestException as exc:
+                wait = 2 ** attempt * 5
+                print(f"  network error talking to ASC ({exc}); retrying in {wait}s")
+                time.sleep(wait)
+                continue
             if resp.status_code == 429 or resp.status_code >= 500:
                 wait = 2 ** attempt * 5
                 print(f"  ASC returned {resp.status_code}; retrying in {wait}s")
@@ -378,8 +384,24 @@ def submit_for_review(client: AscClient, app_id: str, version_id: str | None) ->
         print("  DRY-RUN would add the version to the submission and submit it")
         return
 
+    # Check for THIS version among the draft's items (not mere non-emptiness):
+    # a stale draft could still hold a previous version's item, which must not
+    # be silently submitted instead.
     items = client.get(f"/v1/reviewSubmissions/{submission_id}/items")["data"]
-    if not items:
+    attached = any(
+        item.get("relationships", {}).get("appStoreVersion", {})
+            .get("data", {}).get("id") == version_id
+        for item in items
+    )
+    stale = [i for i in items
+             if i.get("relationships", {}).get("appStoreVersion", {})
+                 .get("data", {}).get("id") not in (version_id, None)]
+    if stale:
+        raise SubmitError(
+            f"draft review submission {submission_id} contains item(s) for a "
+            "different version — remove them in App Store Connect first."
+        )
+    if not attached:
         client.mutate(
             "POST", "/v1/reviewSubmissionItems",
             {"data": {"type": "reviewSubmissionItems", "relationships": {

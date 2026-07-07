@@ -14,9 +14,10 @@ import DistavoCore
 /// - A **private aggregate device** combines the default output (clock) +
 ///   the default microphone + the tap, with drift compensation, so one IOProc
 ///   delivers aligned buffers. Private = invisible in Audio MIDI Setup.
-/// - Output is a **stereo WAV**: left = microphone, right = system audio.
-///   Everything is torn down on stop; the only persistent artifacts are the
-///   two permission toggles in System Settings.
+/// - Output is a **stereo WAV**: left = microphone, right = system audio,
+///   loudness-balanced on stop (`StereoBalancer`) so a quiet speaker isn't
+///   drowned by the meeting side. Everything is torn down on stop; the only
+///   persistent artifacts are the two permission toggles in System Settings.
 ///
 /// Tap/aggregate sequence adapted from insidegui/AudioCap (BSD-2 — NOTICES.md).
 @available(macOS 14.2, *)
@@ -28,6 +29,7 @@ final class MeetingRecorder {
     private var aggregateID: AudioObjectID = .unknown
     private var ioProcID: AudioDeviceIOProcID?
     private var file: AVAudioFile?
+    private var partURL: URL?
     private var outputBuffer: AVAudioPCMBuffer?
     private var micChannelCount = 1
 
@@ -90,13 +92,16 @@ final class MeetingRecorder {
                 subDevices.append([kAudioSubDeviceUIDKey: inputUID,
                                    kAudioSubDeviceDriftCompensationKey: true])
             }
+            // No kAudioAggregateDeviceTapAutoStartKey: that key makes
+            // AudioDeviceStart WAIT for the first tapped audio, so nothing —
+            // including the mic — would be recorded until some app plays
+            // sound (a spoken preamble before joining a call was lost).
             let description: [String: Any] = [
                 kAudioAggregateDeviceNameKey: "Distavo Meeting Recorder",
                 kAudioAggregateDeviceUIDKey: UUID().uuidString,
                 kAudioAggregateDeviceMainSubDeviceKey: outputUID,
                 kAudioAggregateDeviceIsPrivateKey: true,
                 kAudioAggregateDeviceIsStackedKey: false,
-                kAudioAggregateDeviceTapAutoStartKey: true,
                 kAudioAggregateDeviceSubDeviceListKey: subDevices,
                 kAudioAggregateDeviceTapListKey: [
                     [kAudioSubTapUIDKey: tapDescription.uuid.uuidString,
@@ -125,8 +130,13 @@ final class MeetingRecorder {
                 AVLinearPCMBitDepthKey: 32,
                 AVLinearPCMIsFloatKey: true,
             ]
-            file = try AVAudioFile(forWriting: url, settings: settings,
+            // Record under a .part name the folder scanner ignores; stop()
+            // balances the channels and renames to the final .wav, so the
+            // pipeline can never pick up a half-written or unbalanced file.
+            let part = url.appendingPathExtension("part")
+            file = try AVAudioFile(forWriting: part, settings: settings,
                                    commonFormat: .pcmFormatFloat32, interleaved: false)
+            partURL = part
             fileURL = url
             micPeak = 0
             tapPeak = 0
@@ -161,14 +171,51 @@ final class MeetingRecorder {
     }
 
     /// Stops, tears down the tap + aggregate completely, and reports whether
-    /// each side of the recording actually contained signal.
+    /// each side of the recording actually contained signal. The file appears
+    /// under its final `.wav` name only after the (asynchronous) channel
+    /// balance finishes, so the folder scanner never sees it early.
     func stop() -> Outcome? {
-        guard isRecording, let url = fileURL else { return nil }
+        guard isRecording, let url = fileURL, let part = partURL else { return nil }
         isRecording = false
-        teardown()
+        teardown()  // closes `file`, so `part` is fully flushed
+        queue.async { Self.finalize(part: part, to: url) }
         return Outcome(url: url,
                        microphoneHeard: micPeak > 0.001,
                        systemAudioHeard: tapPeak > 0.001)
+    }
+
+    /// Balance mic vs system-audio loudness and move `part` to its final
+    /// name. If balancing fails, deliver the raw recording — never lose a
+    /// meeting to post-processing.
+    private static func finalize(part: URL, to url: URL) {
+        do {
+            try StereoBalancer.balance(from: part, to: url)
+        } catch {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.moveItem(at: part, to: url)
+        }
+    }
+
+    /// Startup recovery: a crash mid-recording or mid-finalise leaves a
+    /// `.wav.part` behind. Finalise it now so the pipeline picks it up.
+    /// Returns the recovered final URLs.
+    static func recoverOrphanedRecordings(in folder: URL) -> [URL] {
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: folder.path) else { return [] }
+        var recovered: [URL] = []
+        for name in names where name.hasSuffix(".wav.part") {
+            let part = folder.appendingPathComponent(name)
+            let url = part.deletingPathExtension()
+            if fm.fileExists(atPath: url.path) {
+                // Finalise had already produced the .wav; the .part is a
+                // leftover duplicate.
+                try? fm.removeItem(at: part)
+                continue
+            }
+            finalize(part: part, to: url)
+            if fm.fileExists(atPath: url.path) { recovered.append(url) }
+        }
+        return recovered
     }
 
     private func teardown() {

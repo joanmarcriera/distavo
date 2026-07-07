@@ -1,4 +1,3 @@
-• Built-in meeting recorder: capture the meeting audio playing on your Mac plus your microphone with one click — no extra software needed (macOS 14.4+).
-• On-device transcription with speaker labels, powered by WhisperKit on Apple Silicon. Nothing leaves your Mac.
-• Pick the transcription model that fits your Mac; download and remove models from Settings.
-• Faster, clearer meeting notes end to end.
+• Meeting recorder fix: your microphone is now captured from the moment you press record — a spoken preamble before the meeting audio starts is no longer lost.
+• Balanced recordings: the mic side and the meeting side are automatically evened out in volume, so a quiet speaker isn't drowned by the call audio.
+• Recordings-in-progress are hidden from the transcription pipeline until they're finished, so a note can never be produced from a half-written file.

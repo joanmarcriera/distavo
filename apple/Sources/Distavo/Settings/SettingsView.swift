@@ -10,6 +10,8 @@ struct SettingsView: View {
     @State private var draft: Config
     @State private var openAtLogin: Bool
     @State private var conn: (whisperx: Bool?, server: Bool?, local: Bool?) = (nil, nil, nil)
+    @State private var showingPermissions = false
+    @State private var lanWarningHosts: [String] = []
     @State private var saved = false
     #if EDITION_DIRECT
     @State private var autoUpdates = true
@@ -164,11 +166,18 @@ struct SettingsView: View {
                     dot("Server Ollama", conn.server)
                     dot("Local Ollama", conn.local)
                 }
-                Button("Test connection") {
-                    Task {
-                        let r = await controller.testConnections(draft)
-                        conn = (r.whisperx, r.ollamaServer, r.ollamaLocal)
+                HStack {
+                    Button("Test connection") {
+                        Task {
+                            let r = await controller.testConnections(draft)
+                            conn = (r.whisperx, r.ollamaServer, r.ollamaLocal)
+                            lanWarningHosts = await controller.localUnreachableHosts(draft, r)
+                        }
                     }
+                    Button("Check permissions…") { showingPermissions = true }
+                }
+                if !lanWarningHosts.isEmpty {
+                    lanPermissionWarning
                 }
             }
 
@@ -196,9 +205,29 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 640)
+        .sheet(isPresented: $showingPermissions) { PermissionsView() }
         #if EDITION_DIRECT
         .onAppear { autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true }
         #endif
+    }
+
+    /// Shown after a failed Test Connections when the unreachable server is on the
+    /// LAN — the classic missing/stale Local Network permission case.
+    private var lanPermissionWarning: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Can’t reach \(lanWarningHosts.joined(separator: ", ")) — "
+                     + "\(lanWarningHosts.count == 1 ? "it is" : "they are") on your local network. "
+                     + "This is usually the macOS Local Network permission.")
+                    .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("Fix permissions…") { showingPermissions = true }
+                    .controlSize(.small)
+            }
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 
     private func folderRow(_ label: String, _ path: String) -> some View {

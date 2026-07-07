@@ -32,7 +32,10 @@ cd apple/DistavoCore && swift test --filter PipelineTests   # run one test suite
 cd apple/DistavoEmbedded && swift test    # embedded-engine tests (slow first run: builds WhisperKit)
 cd apple && xcodebuild -project Distavo.xcodeproj -scheme Distavo \
   -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
-# build a specific edition: add  -xcconfig configs/{Direct,Setapp,AppStore}.xcconfig
+# One scheme/target per edition (Sparkle links into Direct only):
+#   Direct    → -scheme Distavo         -configuration Release  -xcconfig configs/Direct.xcconfig
+#   App Store → -scheme Distavo-AppStore -configuration Release-AppStore
+#   Setapp    → -scheme Distavo-Setapp   -configuration Release
 ```
 
 `Distavo.xcodeproj` is **generated and gitignored** — regenerate from `apple/project.yml`. There is
@@ -102,11 +105,16 @@ App target (`apple/Sources/Distavo/`):
   checklist in `docs/meeting-capture-verification.md`.
 
 ### Editions
+Each edition is its own target (`Distavo` = Direct, `Distavo-AppStore`, `Distavo-Setapp`) sharing the
+`DistavoApp` target template in `project.yml`; all ship as `Distavo.app` (`PRODUCT_NAME`). The split
+exists so **Sparkle links into the Direct target only** — the App Store forbids third-party updaters
+and Setapp ships its own, so those builds must not embed it (verified in `docs/update-verification.md`).
 `SWIFT_ACTIVE_COMPILATION_CONDITIONS` in each xcconfig selects edition behavior via `#if`:
 `EDITION_DIRECT` (+ `DONATE_ENABLED`), `EDITION_SETAPP`, `EDITION_APPSTORE`. Keep edition-specific
 UI gated — the **App Store** build must contain **no external-payment link** (the Lemon Squeezy
-donate item is `DONATE_ENABLED`/Direct-only) and **no sandbox-prohibited automation** (the "Run in
-Terminal" helper is `#if !EDITION_APPSTORE`).
+donate item is `DONATE_ENABLED`/Direct-only), **no sandbox-prohibited automation** (the "Run in
+Terminal" helper is `#if !EDITION_APPSTORE`), and **no Sparkle** (the "Check for Updates…" item and
+updater are `#if EDITION_DIRECT`).
 
 ## Key behaviors to preserve
 

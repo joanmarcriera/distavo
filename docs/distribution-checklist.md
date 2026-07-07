@@ -224,13 +224,19 @@ To simulate a fresh download (adds the quarantine flag) before testing on anothe
 xattr -w com.apple.quarantine "0081;00000000;Safari;" build/export-direct/Distavo.app
 ```
 
-### 2.7 Auto-update (optional) — Sparkle
+### 2.7 Auto-update — Sparkle (implemented; needs the signing key)
 
-For GitHub/DMG distribution, [Sparkle 2](https://sparkle-project.org/) is the standard auto-update
-framework. Add it via SPM (`https://github.com/sparkle-project/Sparkle`), host an `appcast.xml`
-(e.g. on GitHub Pages / a Release asset), and sign each update with your Sparkle EdDSA key
-(`generate_keys` / `sign_update`). Sparkle is **only** for the Direct edition — Setapp ships its own
-updater and the App Store updates through the store. Not required to launch.
+[Sparkle 2](https://sparkle-project.org/) is wired into the **Direct** edition only: the `Distavo`
+target links the Sparkle SPM package, `SparkleUpdater` drives a "Check for Updates…" menu item and a
+Settings toggle (both `#if EDITION_DIRECT`), and `release.yml` generates + signs `appcast.xml` on
+tag. The App Store and Setapp targets don't link Sparkle (Setapp ships its own updater; the App Store
+updates through the store).
+
+**Remaining one-time setup** (EdDSA `generate_keys` → `SUPublicEDKey` + the `SPARKLE_ED_PRIVATE_KEY`
+secret, and hosting `appcast.xml` at the constant `SUFeedURL`) plus the manual update-verification
+checklist live in **`docs/update-verification.md`**. Until the key is set, `SUPublicEDKey` is empty
+and Sparkle refuses updates (safe), and the release appcast step no-ops — so shipping a Direct build
+before Sparkle is configured is harmless.
 
 ---
 

@@ -6,11 +6,16 @@ options:
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
-# Three build configurations from one target, each pinned to an edition xcconfig
-# below: Debug/Release build the Direct edition; Release-AppStore builds the
-# sandboxed Mac App Store edition. The release-appstore.yml workflow archives the
-# `Distavo-AppStore` scheme so the App Store build provably uses AppStore.xcconfig
-# (bundle id + app-sandbox entitlements) rather than a fragile -xcconfig override.
+# One edition per target, sharing the DistavoApp template. Sparkle is linked ONLY
+# into the Direct target — the App Store forbids third-party updaters and Setapp
+# ships its own, so those builds must not embed Sparkle. (Direct and Setapp used
+# to share one target differentiated by a command-line xcconfig, which cannot
+# link a dependency for only one of them — hence the split.)
+#
+# The three project configs are kept so the existing release workflows are
+# unchanged: release.yml builds `-scheme Distavo -configuration Release`, and
+# release-appstore.yml archives `-scheme Distavo-AppStore` at config
+# Release-AppStore. Each target maps every config to its own edition xcconfig.
 configs:
   Debug: debug
   Release: release
@@ -29,14 +34,14 @@ packages:
     path: DistavoCore
   DistavoEmbedded:
     path: DistavoEmbedded
-targets:
-  Distavo:
+  # Direct-edition auto-update. Only the Distavo (Direct) target depends on it.
+  Sparkle:
+    url: https://github.com/sparkle-project/Sparkle
+    from: "2.6.4"
+targetTemplates:
+  DistavoApp:
     type: application
     platform: macOS
-    configFiles:
-      Debug: configs/Direct.xcconfig
-      Release: configs/Direct.xcconfig
-      Release-AppStore: configs/AppStore.xcconfig
     dependencies:
       - package: DistavoCore
       - package: DistavoEmbedded
@@ -45,6 +50,10 @@ targets:
       - path: Resources
     settings:
       base:
+        # Every edition ships as "Distavo.app" even though the targets differ
+        # (Distavo-AppStore / Distavo-Setapp) — otherwise the product would be
+        # named after the target and break the release pipelines.
+        PRODUCT_NAME: Distavo
         GENERATE_INFOPLIST_FILE: YES
         # Merged into the generated plist — holds NSAudioCaptureUsageDescription,
         # which has no INFOPLIST_KEY_* equivalent.
@@ -57,21 +66,64 @@ targets:
         INFOPLIST_KEY_NSAppleEventsUsageDescription: "Distavo opens Terminal to run the optional install commands you choose."
         INFOPLIST_KEY_NSLocalNetworkUsageDescription: "Distavo connects to the WhisperX and Ollama servers you run on your local network to transcribe and summarise recordings."
         INFOPLIST_KEY_NSMicrophoneUsageDescription: "Distavo records your voice through the microphone when you choose Record meeting. Recordings stay on this Mac."
+targets:
+  # ── Direct edition (GitHub / notarized DMG) — the only target with Sparkle ──
+  Distavo:
+    templates: [DistavoApp]
+    configFiles:
+      Debug: configs/Direct.xcconfig
+      Release: configs/Direct.xcconfig
+      Release-AppStore: configs/Direct.xcconfig
+    dependencies:
+      - package: Sparkle
+    settings:
+      base:
+        # Direct-only plist: adds SUFeedURL / SUPublicEDKey (Sparkle keys have no
+        # INFOPLIST_KEY_* equivalent) on top of the shared audio/encryption keys.
+        INFOPLIST_FILE: Distavo-Direct-Info.plist
+  # ── Mac App Store edition (sandboxed) — no Sparkle ──
+  Distavo-AppStore:
+    templates: [DistavoApp]
+    configFiles:
+      Debug: configs/AppStore.xcconfig
+      Release: configs/AppStore.xcconfig
+      Release-AppStore: configs/AppStore.xcconfig
+  # ── Setapp edition — no Sparkle (Setapp ships its own updater) ──
+  Distavo-Setapp:
+    templates: [DistavoApp]
+    configFiles:
+      Debug: configs/Setapp.xcconfig
+      Release: configs/Setapp.xcconfig
+      Release-AppStore: configs/Setapp.xcconfig
+    settings:
+      base:
+        # Setapp requires a hand-authored Info.plist (NSUpdateSecurityPolicy etc.).
+        # Set at target level so it overrides the template's generated plist.
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Setapp-Info.plist
+        ASSETCATALOG_COMPILER_STANDALONE_ICON_BEHAVIOR: All
 schemes:
+  # Direct: release.yml builds `-scheme Distavo -configuration Release`.
   Distavo:
     build:
       targets:
         Distavo: all
     run:
       config: Debug
-  # App Store edition. `xcodebuild -scheme Distavo-AppStore archive` (no
-  # -configuration) uses the archive action's config below = Release-AppStore,
-  # which maps to configs/AppStore.xcconfig via the target's configFiles.
+  # App Store: release-appstore.yml archives `-scheme Distavo-AppStore` (no
+  # -configuration → the archive action's config below = Release-AppStore).
   Distavo-AppStore:
     build:
       targets:
-        Distavo: all
+        Distavo-AppStore: all
     run:
       config: Release-AppStore
     archive:
       config: Release-AppStore
+  # Setapp: manual build — `xcodebuild -scheme Distavo-Setapp -configuration Release`.
+  Distavo-Setapp:
+    build:
+      targets:
+        Distavo-Setapp: all
+    run:
+      config: Release

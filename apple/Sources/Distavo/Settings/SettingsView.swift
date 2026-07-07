@@ -11,6 +11,9 @@ struct SettingsView: View {
     @State private var openAtLogin: Bool
     @State private var conn: (whisperx: Bool?, server: Bool?, local: Bool?) = (nil, nil, nil)
     @State private var saved = false
+    #if EDITION_DIRECT
+    @State private var autoUpdates = true
+    #endif
     @State private var modelsOnDisk = EmbeddedModelStore.hasDownloadedModels()
         ? EmbeddedModelStore.diskUsageLabel() : nil
 
@@ -169,6 +172,16 @@ struct SettingsView: View {
                 }
             }
 
+            #if EDITION_DIRECT
+            Section("Updates") {
+                Toggle("Automatically check for updates", isOn: $autoUpdates)
+                    .onChange(of: autoUpdates) { _, on in
+                        controller.updater?.automaticallyChecksForUpdates = on
+                    }
+                Button("Check for updates now…") { controller.updater?.checkForUpdates() }
+            }
+            #endif
+
             HStack {
                 if saved {
                     Text("Saved — applied immediately.").foregroundStyle(.green).font(.callout)
@@ -183,6 +196,9 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 640)
+        #if EDITION_DIRECT
+        .onAppear { autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true }
+        #endif
     }
 
     private func folderRow(_ label: String, _ path: String) -> some View {

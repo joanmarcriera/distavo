@@ -130,17 +130,17 @@ The submitted zip must not exceed **1 GB**.
 
 ```bash
 xcodebuild -project Distavo.xcodeproj \
-  -scheme Distavo \
+  -scheme Distavo-Setapp \
   -configuration Release \
-  -xcconfig configs/Setapp.xcconfig \
   -archivePath build/Distavo-Setapp.xcarchive \
   archive \
   DEVELOPMENT_TEAM=<TEAM_ID> \
   CODE_SIGN_IDENTITY="Developer ID Application"
 ```
 
-> `-xcconfig configs/Setapp.xcconfig` is what makes the bundle ID
-> `uk.co.riera.distavo-setapp` and sets `EDITION_SETAPP`. Or run the wrapper:
+> The `Distavo-Setapp` target (config `Setapp.xcconfig`) makes the bundle ID
+> `uk.co.riera.distavo-setapp`, sets `EDITION_SETAPP`, uses `Setapp-Info.plist`, and — unlike the
+> Direct target — does **not** link Sparkle. Or run the wrapper:
 > `TEAM_ID=… NOTARY_PROFILE=distavo-notary ./scripts/build-and-notarize.sh setapp`,
 > which does the archive → export → notarize → staple in one go.
 

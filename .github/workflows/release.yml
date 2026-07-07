@@ -123,6 +123,33 @@ jobs:
           codesign --verify --strict --verbose=2 build/export/Distavo.app
           spctl -a -vvv --type exec build/export/Distavo.app
 
+      # Sparkle appcast for the Direct edition. No-ops until the EdDSA signing
+      # key exists (SPARKLE_ED_PRIVATE_KEY secret), so releases before Sparkle is
+      # set up are unaffected. The signed appcast.xml is attached to the Release;
+      # host it at the constant SUFeedURL (https://distavo.com/appcast.xml) so the
+      # in-app updater can find it. See docs/update-verification.md.
+      - name: Generate + sign Sparkle appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          cd apple
+          if [ -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]; then
+            echo "SPARKLE_ED_PRIVATE_KEY not set — skipping appcast (Sparkle not configured yet)."
+            exit 0
+          fi
+          SPARKLE_VERSION=2.6.4
+          curl -fsSL -o /tmp/sparkle.tar.xz \
+            "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
+          mkdir -p /tmp/sparkle && tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > /tmp/sparkle_ed_priv
+          mkdir -p build/appcast && cp build/Distavo.dmg build/appcast/
+          /tmp/sparkle/bin/generate_appcast \
+            --ed-key-file /tmp/sparkle_ed_priv \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+            build/appcast
+          rm -f /tmp/sparkle_ed_priv
+          echo "Generated appcast:"; cat build/appcast/appcast.xml
+
       - name: Upload DMG artifact (dry run)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
@@ -135,6 +162,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" apple/build/Distavo.dmg \
+          assets="apple/build/Distavo.dmg"
+          # Attach the signed appcast when Sparkle is configured (see the
+          # "Generate + sign Sparkle appcast" step above).
+          if [ -f apple/build/appcast/appcast.xml ]; then
+            assets="$assets apple/build/appcast/appcast.xml"
+          fi
+          gh release create "$GITHUB_REF_NAME" $assets \
             --title "Distavo $GITHUB_REF_NAME" --generate-notes \
-          || gh release upload "$GITHUB_REF_NAME" apple/build/Distavo.dmg --clobber
+          || gh release upload "$GITHUB_REF_NAME" $assets --clobber

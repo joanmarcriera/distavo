@@ -7,6 +7,17 @@ public enum ProcessStatus: String, Equatable {
     case failed
 }
 
+/// Coarse progress reported at each pipeline stage boundary. Works for both
+/// transcription backends (unlike the embedded engine's fine-grained progress
+/// messages, which the WhisperX server path cannot provide). The app maps these
+/// onto the menu-bar icon: `converting → loading`, `transcribing`/`summarising
+/// → transcribing`.
+public enum ProcessingPhase: String, Equatable, Sendable {
+    case converting
+    case transcribing
+    case summarising
+}
+
 public struct ProcessResult: Equatable {
     public let status: ProcessStatus
     public let base: String
@@ -30,17 +41,22 @@ public struct PipelineDeps {
     public var summarise: (_ transcript: String, _ url: String, _ model: String,
                            _ options: SummariseOptions, _ noteOwner: String,
                            _ userSpeaker: String) async throws -> String
+    /// Optional stage-boundary progress. Defaults to nil so tests and callers
+    /// that don't care are unaffected (preserves the DI seam).
+    public var onPhase: (@Sendable (ProcessingPhase) -> Void)?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
         transcribe: @escaping (URL, TranscribeConfig) async throws -> [String: Any],
         ollamaReachable: @escaping (String) async -> Bool,
-        summarise: @escaping (String, String, String, SummariseOptions, String, String) async throws -> String
+        summarise: @escaping (String, String, String, SummariseOptions, String, String) async throws -> String,
+        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil
     ) {
         self.convertToWav = convertToWav
         self.transcribe = transcribe
         self.ollamaReachable = ollamaReachable
         self.summarise = summarise
+        self.onPhase = onPhase
     }
 
     /// Real dependencies wired to AVFoundation + the HTTP clients.
@@ -112,8 +128,10 @@ public enum Pipeline {
 
         do {
             let wavPath = workDir.appendingPathComponent("\(base).wav")
+            deps.onPhase?(.converting)
             try await deps.convertToWav(path, wavPath)
 
+            deps.onPhase?(.transcribing)
             let result = try await deps.transcribe(wavPath, config.transcribe)
             let clean = TranscriptCleaner.clean(TranscriptCleaner.segments(from: result))
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -123,6 +141,7 @@ public enum Pipeline {
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
 
+            deps.onPhase?(.summarising)
             let summary = try await deps.summarise(
                 clean, target.url, target.model, config.summarise.options,
                 config.noteOwner, config.userSpeaker)

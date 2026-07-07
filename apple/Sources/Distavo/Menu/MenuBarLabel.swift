@@ -1,25 +1,33 @@
 import SwiftUI
 
-/// The menu-bar item view. A waveform glyph with a small status bullet:
-/// amber top-right while processing, green top-left when a new note is ready.
+/// The menu-bar item view. A glyph whose shape + tint reflect the app state:
+/// idle, recording, loading, transcribing, or a new note ready to read.
+/// Distinct symbols (not colour alone) keep the states legible for everyone.
 struct MenuBarLabel: View {
-    let activity: WatcherController.Activity
+    let state: WatcherController.IconState
 
     var body: some View {
-        Image(systemName: "waveform")
-            .overlay(alignment: .topLeading) {
-                if activity == .done { dot(.green) }
-            }
-            .overlay(alignment: .topTrailing) {
-                if activity == .processing { dot(.orange) }
-            }
+        Image(systemName: symbol)
+            .foregroundStyle(tint)
     }
 
-    private func dot(_ color: Color) -> some View {
-        Circle()
-            .fill(color)
-            .frame(width: 5, height: 5)
-            // Nudge the bullets to the icon's corners.
-            .offset(x: activity == .done ? -2 : 2, y: -1)
+    private var symbol: String {
+        switch state {
+        case .idle:         return "waveform"
+        case .recording:    return "record.circle"
+        case .loading:      return "waveform.badge.plus"
+        case .transcribing: return "waveform.badge.magnifyingglass"
+        case .done:         return "waveform.badge.checkmark"
+        }
+    }
+
+    private var tint: Color {
+        switch state {
+        case .idle:         return .primary
+        case .recording:    return .red
+        case .loading:      return .secondary
+        case .transcribing: return .orange
+        case .done:         return .green
+        }
     }
 }

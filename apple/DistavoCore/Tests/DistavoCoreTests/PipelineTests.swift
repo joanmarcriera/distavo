@@ -1,6 +1,14 @@
 import XCTest
 @testable import DistavoCore
 
+/// Thread-safe collector for the `@Sendable` phase callback.
+private final class PhaseRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var phases: [ProcessingPhase] = []
+    func append(_ phase: ProcessingPhase) { lock.lock(); phases.append(phase); lock.unlock() }
+    var all: [ProcessingPhase] { lock.lock(); defer { lock.unlock() }; return phases }
+}
+
 final class PipelineTests: XCTestCase {
 
     private func tempDir() -> URL {
@@ -32,7 +40,8 @@ final class PipelineTests: XCTestCase {
         reachable: @escaping (String) async -> Bool = { _ in true },
         summarise: @escaping (String, String, String, SummariseOptions, String, String) async throws -> String = { _, _, _, _, _, _ in
             "# Meeting notes\n\nA clean, valid summary."
-        }
+        },
+        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil
     ) -> PipelineDeps {
         PipelineDeps(
             convertToWav: { _, dest in
@@ -40,7 +49,8 @@ final class PipelineTests: XCTestCase {
                     at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data([0]).write(to: dest)
             },
-            transcribe: transcribe, ollamaReachable: reachable, summarise: summarise)
+            transcribe: transcribe, ollamaReachable: reachable, summarise: summarise,
+            onPhase: onPhase)
     }
 
     func testSuccessWritesNoteAndMarksDone() async throws {
@@ -102,6 +112,31 @@ final class PipelineTests: XCTestCase {
         cfg.summarise.backend = "local"
         let target = await Pipeline.chooseOllama(cfg, reachable: { _ in false })
         XCTAssertEqual(target?.url, cfg.summarise.local.url)
+    }
+
+    func testEmitsPhasesInPipelineOrder() async throws {
+        let (cfg, input) = try makeEnv()
+        let phases = PhaseRecorder()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(onPhase: { phases.append($0) }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(phases.all, [.converting, .transcribing, .summarising])
+    }
+
+    func testStopsEmittingPhasesAtFailedStage() async throws {
+        let (cfg, input) = try makeEnv()
+        let phases = PhaseRecorder()
+        // Transcription throws → we should have passed .converting and .transcribing
+        // but never reached .summarising.
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in throw URLError(.timedOut) },
+                       onPhase: { phases.append($0) }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(phases.all, [.converting, .transcribing])
     }
 
     func testScanOnceProcessesPending() async throws {

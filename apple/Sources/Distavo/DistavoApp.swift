@@ -11,7 +11,7 @@ struct DistavoApp: App {
         MenuBarExtra {
             StatusMenu(controller: controller)
         } label: {
-            MenuBarLabel(activity: controller.activity)
+            MenuBarLabel(state: controller.iconState)
         }
         .menuBarExtraStyle(.menu)
     }

@@ -1,5 +1,6 @@
 import Foundation
 import AppKit
+import Combine
 import DistavoCore
 import DistavoEmbedded
 
@@ -9,11 +10,12 @@ import DistavoEmbedded
 /// (nonisolated) DistavoCore pipeline; this class only marshals state + UI.
 @MainActor
 final class WatcherController: ObservableObject {
-    /// Drives the menu-bar badge: nothing / processing (amber) / new note (green).
-    enum Activity { case idle, processing, done }
+    /// Drives the menu-bar glyph. Precedence (high→low): a live recording wins,
+    /// then the current processing phase, then an unread new note, then idle.
+    enum IconState { case idle, recording, loading, transcribing, done }
 
     @Published private(set) var status = "Idle"
-    @Published private(set) var activity: Activity = .idle
+    @Published private(set) var iconState: IconState = .idle
     @Published var isPaused = false
     @Published private(set) var allowLocalOllama: Bool
     @Published private(set) var watchIntervalSeconds: Int
@@ -22,8 +24,9 @@ final class WatcherController: ObservableObject {
     @Published private(set) var recentActivity: [String] = []
 
     private(set) var config: Config
-    private let deps: PipelineDeps
+    private var deps: PipelineDeps
     private let notifier = Notifier()
+    private var recordingCancellable: AnyCancellable?
 
     /// Built-in meeting recorder (macOS 14.4+): records system audio + mic
     /// into the watched folder, where the normal pipeline picks it up.
@@ -38,6 +41,9 @@ final class WatcherController: ObservableObject {
 
     private var isScanning = false
     private var processingActive = false
+    /// Which sub-phase the current scan is in (loading vs transcribing); only
+    /// meaningful while `processingActive`.
+    private var processingPhase: IconState = .loading
     private var unseenDone = false
     private var deferredBases: Set<String> = []
     private var lastDone: (base: String, note: URL?, transcript: URL?)?
@@ -71,8 +77,24 @@ final class WatcherController: ObservableObject {
         clearStaleProcessing()
         recentActivity = activityLog.recent(12)
         log("Distavo started")
+        // Map pipeline stage boundaries onto the icon (converting → loading;
+        // transcribing/summarising → transcribing). Both backends emit these.
+        self.deps.onPhase = { [weak self] phase in
+            Task { @MainActor in self?.handlePhase(phase) }
+        }
+        // A live recording flips the icon immediately (capture is a separate
+        // ObservableObject, so observe it explicitly).
+        recordingCancellable = capture.$isRecording
+            .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
         wireEmbeddedProgress()
         start()
+    }
+
+    /// Update the current processing sub-phase from a pipeline stage boundary.
+    private func handlePhase(_ phase: ProcessingPhase) {
+        guard processingActive else { return }
+        processingPhase = (phase == .converting) ? .loading : .transcribing
+        refreshActivity()
     }
 
     /// Surface embedded-engine phases (model download, transcribing,
@@ -84,6 +106,14 @@ final class WatcherController: ObservableObject {
                     guard let self, self.processingActive else { return }
                     self.status = message
                     self.log(message)
+                    // Refine the icon: the embedded engine loads/downloads the
+                    // model before it transcribes — the server path can't.
+                    if message.contains("Download") || message.contains("Loading") {
+                        self.processingPhase = .loading
+                    } else if message.contains("Transcribing") || message.contains("Identifying") {
+                        self.processingPhase = .transcribing
+                    }
+                    self.refreshActivity()
                 }
             }
         }
@@ -125,9 +155,10 @@ final class WatcherController: ObservableObject {
     }
 
     private func refreshActivity() {
-        if processingActive { activity = .processing }
-        else if unseenDone { activity = .done }
-        else { activity = .idle }
+        if capture.isRecording { iconState = .recording }
+        else if processingActive { iconState = processingPhase }
+        else if unseenDone { iconState = .done }
+        else { iconState = .idle }
     }
 
     // MARK: Scanning
@@ -187,6 +218,7 @@ final class WatcherController: ObservableObject {
             return
         }
         processingActive = true
+        processingPhase = .loading
         refreshActivity()
         for path in pending {
             status = "Processing \(path.lastPathComponent)…"

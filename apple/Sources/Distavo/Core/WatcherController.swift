@@ -27,6 +27,9 @@ final class WatcherController: ObservableObject {
     private var deps: PipelineDeps
     private let notifier = Notifier()
     private var recordingCancellable: AnyCancellable?
+    /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
+    /// store handles updates).
+    let updater: AppUpdater? = AppUpdaterFactory.make()
 
     /// Built-in meeting recorder (macOS 14.4+): records system audio + mic
     /// into the watched folder, where the normal pipeline picks it up.

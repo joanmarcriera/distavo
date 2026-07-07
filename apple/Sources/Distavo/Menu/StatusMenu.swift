@@ -64,6 +64,10 @@ struct StatusMenu: View {
             Button("Open full log…") { controller.openLog() }
         }
 
+        #if EDITION_DIRECT
+        Button("Check for Updates…") { controller.updater?.checkForUpdates() }
+        #endif
+
         Button("Settings…") { controller.showSettings() }
 
         Menu("Help") {

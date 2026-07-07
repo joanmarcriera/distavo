@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Direct-edition supplemental Info.plist (merged into the generated plist:
+       GENERATE_INFOPLIST_FILE=YES + INFOPLIST_FILE on the Distavo target). Same
+       as Distavo-Extra-Info.plist PLUS the Sparkle auto-update keys, which must
+       live in a real plist (there is no INFOPLIST_KEY_* build setting for them).
+       Only the Direct target uses this file, so Sparkle keys never reach the
+       App Store / Setapp builds. -->
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Distavo records the meeting audio playing on this Mac (the other participants) when you choose Record meeting. The audio never leaves your Mac except to the transcription/summary engines you configured.</string>
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
+  <!-- Sparkle appcast feed. -->
+  <key>SUFeedURL</key>
+  <string>https://distavo.com/appcast.xml</string>
+  <!-- EdDSA public key from `generate_keys` (see docs/update-verification.md).
+       MUST be filled in before shipping an updatable build — Sparkle refuses to
+       apply updates while this is empty, which is the safe default. -->
+  <key>SUPublicEDKey</key>
+  <string></string>
+</dict>
+</plist>

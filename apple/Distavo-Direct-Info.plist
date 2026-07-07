@@ -16,9 +16,9 @@
   <key>SUFeedURL</key>
   <string>https://distavo.com/appcast.xml</string>
   <!-- EdDSA public key from `generate_keys` (see docs/update-verification.md).
-       MUST be filled in before shipping an updatable build — Sparkle refuses to
-       apply updates while this is empty, which is the safe default. -->
+       The matching private key is in the login Keychain, ~/.tokens, and the
+       SPARKLE_ED_PRIVATE_KEY GitHub Actions secret. Public keys are not secret. -->
   <key>SUPublicEDKey</key>
-  <string></string>
+  <string>jLJKwSK4YnrC9ejzSneLG2Q+7pR84m+Q3vLrgpUUKOQ=</string>
 </dict>
 </plist>

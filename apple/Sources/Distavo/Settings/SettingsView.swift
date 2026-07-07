@@ -18,6 +18,18 @@ struct SettingsView: View {
     private let embeddedSupported = HardwareProbe.supportsEmbeddedTranscription
     private let recommendedModel = EmbeddedModelCatalog.recommended()
 
+    /// The catalog, plus a synthetic entry if the saved code isn't recognised
+    /// (e.g. a past typo like "esp"), so the existing value stays selected and
+    /// visible rather than silently changing — the user can then pick a real one.
+    private var languageChoices: [WhisperLanguage] {
+        let code = draft.transcribe.language
+        if code.isEmpty || WhisperLanguageCatalog.language(forCode: code) != nil {
+            return WhisperLanguageCatalog.all
+        }
+        return [WhisperLanguage(code: code, englishName: "\(code) — not a standard code")]
+            + WhisperLanguageCatalog.all
+    }
+
     init(controller: WatcherController) {
         self.controller = controller
         _draft = State(initialValue: controller.config)
@@ -100,7 +112,11 @@ struct SettingsView: View {
                     }
                 }
 
-                TextField("Language", text: $draft.transcribe.language)
+                Picker("Language", selection: $draft.transcribe.language) {
+                    ForEach(languageChoices) { lang in
+                        Text(lang.englishName).tag(lang.code)
+                    }
+                }
                 HStack {
                     Stepper("Number of speakers: \(draft.transcribe.numSpeakers)",
                             value: $draft.transcribe.numSpeakers, in: 1...10)

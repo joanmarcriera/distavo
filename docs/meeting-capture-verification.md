@@ -42,6 +42,17 @@ defaults delete uk.co.riera.distavo distavo.didExplainCapture
 7. **Zoom/Meet concurrency** — start a test meeting (e.g. meet.google.com with
    yourself), record 30 s: both your voice and the meeting audio are captured
    while the meeting app is actively using mic + speakers.
+7a. **Mic-only preamble** — with **no** system audio playing at all, start a
+   recording, speak immediately for ~10 s, then play any audio, then stop.
+   Your speech must be present **from the first seconds** of the WAV (a
+   regression here means the aggregate waited for the tap — see the
+   `kAudioAggregateDeviceTapAutoStartKey` comment in `MeetingRecorder`).
+   While recording, a `Meeting … .wav.part` file exists; on stop it becomes
+   the final `.wav`.
+7b. **Channel balance** — speak quietly while loud meeting/media audio plays.
+   In the saved WAV both channels come out at comparable loudness (the quiet
+   mic side is boosted, up to +24 dB, never clipped). A channel that was
+   truly silent stays silent.
 8. **Denied system audio** — reset TCC (above), record again but **deny** the
    System Audio Recording prompt: recording still completes, and on stop the
    "no system audio was captured" warning appears and System Settings opens at

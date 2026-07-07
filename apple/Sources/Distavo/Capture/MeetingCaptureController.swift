@@ -34,6 +34,23 @@ final class MeetingCaptureController: ObservableObject {
         self.folderProvider = folderProvider
         self.notify = notify
         self.log = log
+        recoverOrphanedRecordings()
+    }
+
+    /// A crash mid-recording leaves a `.wav.part` in the recordings folder;
+    /// finalise it in the background so that meeting still gets transcribed.
+    private func recoverOrphanedRecordings() {
+        guard #available(macOS 14.4, *) else { return }
+        let folder = folderProvider()
+        Task.detached(priority: .utility) { [weak self] in
+            let recovered = MeetingRecorder.recoverOrphanedRecordings(in: folder)
+            guard !recovered.isEmpty else { return }
+            await MainActor.run {
+                for url in recovered {
+                    self?.log("Recovered interrupted meeting recording: \(url.lastPathComponent)")
+                }
+            }
+        }
     }
 
     func toggle() {

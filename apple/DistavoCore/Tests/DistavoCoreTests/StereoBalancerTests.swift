@@ -114,16 +114,18 @@ final class StereoBalancerTests: XCTestCase {
     }
 
     func testBoostIsCappedAndPeakLimited() throws {
-        // 65 dB apart: the cap (+24 dB) and the peak limit must both hold.
-        let src = try makeStereoWav(left: 0.0005, right: 0.9)
+        // ~43 dB apart, but audible (above silence floor and noise gate):
+        // the wanted gain (~×150) must be capped at maxGain (×16).
+        let src = try makeStereoWav(left: 0.006, right: 0.9)
         let dst = tempURL(".wav")
 
         try StereoBalancer.balance(from: src, to: dst)
 
         let (rms, peak) = try analyze(dst)
-        XCTAssertLessThanOrEqual(peak[0], 1.0)
-        // At most +24 dB (×16) of the original 0.0005 amplitude.
-        XCTAssertLessThanOrEqual(rms[0], 0.0005 * 16.0 * 1.05)
+        XCTAssertLessThanOrEqual(peak[0], StereoBalancer.peakCeiling + 0.001)
+        // Exactly the cap: ×16 of the original 0.006-amplitude sine.
+        XCTAssertGreaterThan(rms[0], 0.05, "cap applied, not skipped")
+        XCTAssertLessThanOrEqual(rms[0], 0.006 * 16.0 / sqrt(2) * 1.05)
         XCTAssertEqual(rms[1], 0.9 / sqrt(2), accuracy: 0.02)
     }
 

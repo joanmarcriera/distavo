@@ -8,3 +8,15 @@ recordings/
 notes/
 whisperx-output/
 out/
+
+# Local AI-assistant / tooling artifacts (machine-generated, per-machine)
+.agents/
+.claude/
+.codebuddy/
+.continue/
+.junie/
+.kiro/
+.playwright-mcp/
+AGENTS.md
+skills-lock.json
+__pycache__/

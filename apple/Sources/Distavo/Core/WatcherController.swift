@@ -371,6 +371,27 @@ final class WatcherController: ObservableObject {
         return (await whisperxOK, await serverOK, await localOK)
     }
 
+    /// Host names of the tested endpoints that are unreachable AND on the local
+    /// network (by name or DNS resolution) — i.e. the ones a missing/stale Local
+    /// Network permission would explain. Runs the DNS resolution off the main
+    /// actor. Loopback (local Ollama) is excluded: it needs no such permission.
+    nonisolated func localUnreachableHosts(
+        _ cfg: Config,
+        _ r: (whisperx: Bool, ollamaServer: Bool, ollamaLocal: Bool)) async -> [String] {
+        await Task.detached {
+            var hosts: [String] = []
+            func check(_ ok: Bool, _ url: String) {
+                guard !ok, !url.isEmpty, NetworkScope.isLocalOrResolvesLocal(url),
+                      let host = URLComponents(string: url)?.host else { return }
+                if !hosts.contains(host) { hosts.append(host) }
+            }
+            if cfg.transcribe.backend != "embedded" { check(r.whisperx, cfg.transcribe.whisperxURL) }
+            check(r.ollamaServer, cfg.summarise.server.url)
+            check(r.ollamaLocal, cfg.summarise.local.url)
+            return hosts
+        }.value
+    }
+
     private func persist() {
         try? Config.save(config, to: Config.defaultConfigURL)
     }

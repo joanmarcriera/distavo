@@ -1,3 +1,2 @@
-• Meeting recorder fix: your microphone is now captured from the moment you press record — a spoken preamble before the meeting audio starts is no longer lost.
-• Balanced recordings: the mic side and the meeting side are automatically evened out in volume, so a quiet speaker isn't drowned by the call audio.
-• Recordings-in-progress are hidden from the transcription pipeline until they're finished, so a note can never be produced from a half-written file.
+• The menu-bar icon now shows what Distavo is doing at a glance: recording, loading, transcribing, or a new note ready to read.
+• Transcription language is now a dropdown — pick from Auto-detect and 100 languages instead of typing a code, so a typo can't quietly break transcription.

@@ -110,7 +110,7 @@ following keys must be present in the Setapp build:
 | `CFBundleName` | `Distavo` |
 | `CFBundleIconFile` | your app icon name |
 | `CFBundleVersion` | build number (integer) |
-| `CFBundleShortVersionString` | marketing version (currently `1.7.0`) |
+| `CFBundleShortVersionString` | marketing version (currently `1.8.0`) |
 | `NSUpdateSecurityPolicy` | allows `com.setapp.DesktopClient.SetappAgent` under team `MEHY5QF425` |
 
 `NSUpdateSecurityPolicy` is already present in `apple/Setapp-Info.plist`.

@@ -12,6 +12,12 @@
   <string>Distavo records the meeting audio playing on this Mac (the other participants) when you choose Record meeting. The audio never leaves your Mac except to the transcription/summary engines you configured.</string>
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <!-- LocalNetworkPrompt browses this Bonjour type to trigger the macOS Local
+       Network permission prompt on demand ("Request Access Now"). -->
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_http._tcp</string>
+  </array>
   <!-- Sparkle appcast feed. -->
   <key>SUFeedURL</key>
   <string>https://distavo.com/appcast.xml</string>

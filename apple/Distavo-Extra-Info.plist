@@ -12,5 +12,11 @@
        skip the per-build export-compliance question. -->
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <!-- LocalNetworkPrompt browses this Bonjour type to trigger the macOS Local
+       Network permission prompt on demand ("Request Access Now"). -->
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_http._tcp</string>
+  </array>
 </dict>
 </plist>

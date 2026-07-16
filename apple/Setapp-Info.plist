@@ -32,6 +32,10 @@
 	<string>Distavo opens Terminal to run the optional install commands you choose.</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright 2026 Joan Marc Riera Duocastella - MIT</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Distavo connects to the WhisperX and Ollama servers you run on your local network to transcribe and summarise recordings.</string>
 	<key>NSPrincipalClass</key>

@@ -1,6 +1,7 @@
 import SwiftUI
 import AVFoundation
 import AppKit
+import DistavoCore
 
 /// A checklist of the macOS privacy permissions Distavo actually uses, with a
 /// deep-link to each System Settings pane. Opened from Settings → Connections
@@ -8,8 +9,15 @@ import AppKit
 /// Connections. See NetworkScope for how a public FQDN that resolves to a LAN IP
 /// still needs Local Network permission.
 struct PermissionsView: View {
+    /// The config whose endpoints decide whether Local Network applies at all.
+    let config: Config
+
     @Environment(\.dismiss) private var dismiss
     @State private var micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+    /// nil while the (DNS-resolving) check runs; then whether any configured
+    /// endpoint is on the LAN — i.e. whether Local Network permission matters.
+    @State private var lanConfigured: Bool?
+    @State private var accessRequested = false
 
     /// Mic + system-audio rows only matter where the built-in recorder runs.
     private var captureSupported: Bool { MeetingCaptureController.isSupported }
@@ -30,14 +38,7 @@ struct PermissionsView: View {
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
-                    PermissionRow(
-                        title: "Local Network",
-                        why: "Reach WhisperX/Ollama servers on your LAN — including public host names (like ollama.lab.example.com) that resolve to a 192.168/10/172 address.",
-                        state: .unknown,
-                        actionTitle: "Open Local Network Settings",
-                        action: { open("Privacy_LocalNetwork") })
-
-                    LocalNetworkNote()
+                    localNetworkSection
 
                     if captureSupported {
                         PermissionRow(
@@ -66,6 +67,50 @@ struct PermissionsView: View {
             .padding()
         }
         .frame(width: 460, height: captureSupported ? 560 : 360)
+        .task {
+            let cfg = config
+            lanConfigured = await Task.detached { NetworkScope.usesLocalNetwork(cfg) }.value
+        }
+    }
+
+    // MARK: - Local Network
+
+    /// The permission is only meaningful once a configured server is actually on
+    /// the LAN — with the default this-Mac (localhost) endpoints, macOS neither
+    /// prompts nor lists the app in the pane, and sending the user there would
+    /// look like a bug (App Review 2.1(a), 1.8.0). And even when it applies,
+    /// macOS only lists the app after its first local-network attempt, so we
+    /// offer to make that attempt on demand.
+    @ViewBuilder private var localNetworkSection: some View {
+        switch lanConfigured {
+        case nil:
+            PermissionRow(
+                title: "Local Network",
+                why: "Checking whether your configured servers are on the local network…",
+                state: .unknown,
+                actionTitle: "Open Local Network Settings",
+                action: { open("Privacy_LocalNetwork") })
+        case .some(false):
+            PermissionRow(
+                title: "Local Network",
+                why: "Not needed yet — your servers run on this Mac (localhost), which macOS doesn’t gate. When you point Distavo at a server on your network (like 192.168… or nas.local), macOS will ask, and Distavo will appear in the Local Network pane.",
+                state: .notNeeded,
+                actionTitle: "Open Local Network Settings",
+                action: { open("Privacy_LocalNetwork") })
+        case .some(true):
+            PermissionRow(
+                title: "Local Network",
+                why: "Reach WhisperX/Ollama servers on your LAN — including public host names (like ollama.lab.example.com) that resolve to a 192.168/10/172 address. Distavo appears in the Local Network pane after its first connection attempt; use Request Access Now to make macOS ask right away.",
+                state: .unknown,
+                actionTitle: accessRequested ? "Requested — check for the macOS prompt" : "Request Access Now",
+                action: {
+                    LocalNetworkPrompt.trigger(config: config)
+                    accessRequested = true
+                },
+                secondaryActionTitle: "Open Local Network Settings",
+                secondaryAction: { open("Privacy_LocalNetwork") })
+            LocalNetworkNote()
+        }
     }
 
     // MARK: - Microphone (the one status macOS lets us read)
@@ -103,13 +148,15 @@ struct PermissionsView: View {
 
 /// One permission line: status glyph, name, why, and an action button.
 private struct PermissionRow: View {
-    enum State { case granted, denied, unknown }
+    enum State { case granted, denied, unknown, notNeeded }
 
     let title: String
     let why: String
     let state: State
     let actionTitle: String
     let action: () -> Void
+    var secondaryActionTitle: String?
+    var secondaryAction: (() -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -120,7 +167,13 @@ private struct PermissionRow: View {
                     Text(statusLabel).font(.caption).foregroundStyle(tint)
                 }
                 Text(why).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                Button(actionTitle, action: action).controlSize(.small).padding(.top, 2)
+                HStack {
+                    Button(actionTitle, action: action).controlSize(.small)
+                    if let title = secondaryActionTitle, let secondary = secondaryAction {
+                        Button(title, action: secondary).controlSize(.small)
+                    }
+                }
+                .padding(.top, 2)
             }
             Spacer(minLength: 0)
         }
@@ -131,6 +184,7 @@ private struct PermissionRow: View {
         case .granted: return "checkmark.circle.fill"
         case .denied: return "xmark.circle.fill"
         case .unknown: return "questionmark.circle.fill"
+        case .notNeeded: return "checkmark.circle"
         }
     }
     private var tint: Color {
@@ -138,6 +192,7 @@ private struct PermissionRow: View {
         case .granted: return .green
         case .denied: return .red
         case .unknown: return .secondary
+        case .notNeeded: return .secondary
         }
     }
     private var statusLabel: String {
@@ -145,6 +200,7 @@ private struct PermissionRow: View {
         case .granted: return "Granted"
         case .denied: return "Not granted"
         case .unknown: return "macOS doesn’t report this — check the pane"
+        case .notNeeded: return "Not needed with your current settings"
         }
     }
 }

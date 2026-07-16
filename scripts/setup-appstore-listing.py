@@ -215,6 +215,12 @@ def setup_review_detail(client: AscClient, version_id: str) -> None:
              "contactPhone": contact["phone"],
              "contactEmail": contact["email"],
              "demoAccountRequired": False}
+    # Reviewer-facing notes (bring-your-own-server explanation — added after the
+    # 1.8.0 Guideline 2.1(a) rejection). Optional file so the script still runs
+    # on repos without one.
+    notes_file = ROOT / "apple" / "metadata" / "review-notes.txt"
+    if notes_file.exists():
+        attrs["notes"] = notes_file.read_text().strip()
     existing = client.get(f"/v1/appStoreVersions/{version_id}/appStoreReviewDetail")
     if existing.get("data"):
         patch_missing(client, "appStoreReviewDetails", "/v1/appStoreReviewDetails",

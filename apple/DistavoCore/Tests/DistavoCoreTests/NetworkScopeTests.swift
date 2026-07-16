@@ -92,6 +92,53 @@ final class NetworkScopeTests: XCTestCase {
         XCTAssertTrue(NetworkScope.usesLocalNetwork(config, resolver: lanResolver))
     }
 
+    // MARK: - diagnose (Test Connections presentation)
+
+    func testDiagnoseReachableWinsRegardlessOfScope() {
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://127.0.0.1:11434", reachable: true,
+                                             resolver: { _ in [] }), .reachable)
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://192.168.0.5:11434", reachable: true,
+                                             resolver: { _ in [] }), .reachable)
+    }
+
+    func testDiagnoseEmptyURLIsNotConfigured() {
+        XCTAssertEqual(NetworkScope.diagnose(url: "", reachable: false,
+                                             resolver: { _ in [] }), .notConfigured)
+    }
+
+    func testDiagnoseLoopbackDownIsExpectedNotFailure() {
+        // The App Review case: fresh install, no Ollama on the Mac — both default
+        // URLs are loopback and unreachable. Must NOT classify as a hard failure.
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://127.0.0.1:11434", reachable: false,
+                                             resolver: { _ in [] }), .loopbackDown)
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://localhost:11434", reachable: false,
+                                             resolver: { _ in [] }), .loopbackDown)
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://[::1]:11434", reachable: false,
+                                             resolver: { _ in [] }), .loopbackDown)
+    }
+
+    func testDiagnoseLanDownByNameAndByResolution() {
+        XCTAssertEqual(NetworkScope.diagnose(url: "http://192.168.0.5:11434", reachable: false,
+                                             resolver: { _ in [] }), .lanDown)
+        XCTAssertEqual(NetworkScope.diagnose(url: "https://ollama.lab.riera.co.uk", reachable: false,
+                                             resolver: lanResolver), .lanDown)
+    }
+
+    func testDiagnosePublicHostDownIsRemote() {
+        XCTAssertEqual(NetworkScope.diagnose(url: "https://api.example.com", reachable: false,
+                                             resolver: publicResolver), .remoteDown)
+    }
+
+    func testIsLoopbackHost() {
+        XCTAssertTrue(NetworkScope.isLoopbackHost("http://127.0.0.1:11434"))
+        XCTAssertTrue(NetworkScope.isLoopbackHost("http://127.1.2.3:11434"))  // whole 127/8
+        XCTAssertTrue(NetworkScope.isLoopbackHost("http://localhost:9000"))
+        XCTAssertTrue(NetworkScope.isLoopbackHost("http://[::1]:11434"))
+        XCTAssertFalse(NetworkScope.isLoopbackHost("http://192.168.0.5:9000"))
+        XCTAssertFalse(NetworkScope.isLoopbackHost("https://api.example.com"))
+        XCTAssertFalse(NetworkScope.isLoopbackHost(""))
+    }
+
     // MARK: - friendlyError
 
     func testFriendlyErrorMentionsLocalNetworkPermission() {

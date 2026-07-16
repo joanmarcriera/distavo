@@ -99,6 +99,39 @@ public enum NetworkScope {
         return urls.contains { isLocalOrResolvesLocal($0, resolver: resolver) }
     }
 
+    /// True if the URL's host is loopback (`localhost`, the whole `127/8` range,
+    /// `::1`). Loopback endpoints need no Local Network permission, and an
+    /// unreachable one usually just means nothing is installed/running on this
+    /// Mac — an expected state, not an app failure.
+    public static func isLoopbackHost(_ urlString: String) -> Bool {
+        guard var host = URLComponents(string: urlString)?.host, !host.isEmpty else { return false }
+        // Depending on SDK, an IPv6 literal may keep its brackets ("[::1]").
+        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
+        if host == "localhost" || host == "::1" { return true }
+        return host.hasPrefix("127.")
+    }
+
+    /// How Test Connections should present an endpoint's result. Distinguishes
+    /// "nothing running on this Mac" (expected on a fresh install without Ollama —
+    /// the App Review 2.1(a) case) from a LAN server that may be blocked by the
+    /// Local Network permission, and from a genuinely broken remote URL.
+    public enum EndpointDiagnosis: Equatable {
+        case reachable       // responded — all good
+        case notConfigured   // no URL set
+        case loopbackDown    // this-Mac endpoint with nothing listening — guidance, not failure
+        case lanDown         // LAN endpoint unreachable — server down or Local Network permission
+        case remoteDown      // public endpoint unreachable — server/URL problem
+    }
+
+    public static func diagnose(url: String, reachable: Bool,
+                                resolver: HostResolver = systemResolver) -> EndpointDiagnosis {
+        if url.isEmpty { return .notConfigured }
+        if reachable { return .reachable }
+        if isLoopbackHost(url) { return .loopbackDown }
+        if isLocalOrResolvesLocal(url, resolver: resolver) { return .lanDown }
+        return .remoteDown
+    }
+
     /// Turn a connection failure into an actionable message, pointing at Local
     /// Network permission when the target is on the LAN (by name or by resolution).
     public static func friendlyError(_ error: Error, service: String, url: String,

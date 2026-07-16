@@ -23,8 +23,8 @@ configs:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.8.0"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "1.9.0"
+    CURRENT_PROJECT_VERSION: "10"
     # Left empty on purpose: CI (release*.yml) and scripts/build-and-notarize.sh
     # inject the real Team ID via `DEVELOPMENT_TEAM=<id>` on the xcodebuild line.
     DEVELOPMENT_TEAM: ""

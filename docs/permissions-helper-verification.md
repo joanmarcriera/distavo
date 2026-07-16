@@ -22,17 +22,41 @@ injected resolver, so only the UI + OS wiring needs a human here.
    LAN IP*, not just a literal `192.168.x` address.
 3. Grant Local Network permission, relaunch, Test again → dot green, warning gone.
 
+## Fresh-install presentation (the App Review 2.1(a) case, 1.8.1)
+
+Apple rejected 1.8.0(9) testing on a Mac with no Ollama: both dots red with no
+explanation, and Distavo absent from the Local Network pane the helper pointed
+at. Verify the fix on a machine (or fresh user account) **without Ollama**,
+config at defaults (both Ollama URLs loopback):
+
+1. Settings → **Test connection**. Expect: Server/Local Ollama dots go **amber**
+   (not red) and the inline info box explains Ollama isn't running on this Mac,
+   that Distavo still records/transcribes, and how to install/point at a server.
+2. **Check permissions…** → the Local Network row reads **"Not needed with your
+   current settings"** and explains macOS will ask once a LAN server is set.
+   No dead-end "toggle it on" instruction, no orange after-update note.
+3. Set Server Ollama to a LAN URL (e.g. `http://192.168.0.5:11434`) → reopen the
+   sheet → the row becomes actionable with **Request Access Now**. Click it:
+   the macOS Local Network prompt appears (first time), and Distavo now shows in
+   System Settings → Privacy & Security → Local Network.
+   Reset between attempts: `tccutil reset All uk.co.riera.distavo` (or the
+   edition's bundle id) — Apple's own tip from the rejection.
+4. A failing **public** URL (e.g. `https://ollama.example.com`) shows a red dot
+   plus the generic "check the server is running and the URL is correct" line —
+   no Local Network claim.
+
 ## Permissions sheet
 
-4. Settings → Connections → **Check permissions…** opens the sheet.
-5. **Local Network** row: "Open Local Network Settings" opens the correct pane;
-   the orange note explains the after-update **off→on + relaunch** fix.
-6. On macOS **14.4+** the **Microphone** and **System Audio Recording** rows show.
+5. Settings → Connections → **Check permissions…** opens the sheet.
+6. **Local Network** row (when a LAN endpoint is configured): "Request Access
+   Now" triggers the prompt; "Open Local Network Settings" opens the correct
+   pane; the orange note explains the after-update **off→on + relaunch** fix.
+7. On macOS **14.4+** the **Microphone** and **System Audio Recording** rows show.
    - Microphone reflects real state: green "Granted" when allowed; "Request
      Access…" when undetermined (clicking prompts and the row updates); "Open
      Microphone Settings" when denied.
    - Audio row opens the System Audio Recording pane.
-7. On macOS **< 14.4** only the Local Network row shows (capture unsupported).
+8. On macOS **< 14.4** only the Local Network row shows (capture unsupported).
 
 ## The real-world trigger this fixes
 

@@ -1,0 +1,9 @@
+Distavo is a bring-your-own-server app: transcription runs fully on-device (Apple Silicon, WhisperKit). The optional summarisation step uses an Ollama server the USER runs themselves — on their own Mac or their own network. By design there is no cloud service, no account, and no telemetry.
+
+What you will see on a review machine that has no Ollama server installed (this addresses both issues from the 1.8.0 (9) review, submission 337cdeaf-0229-45a6-8846-11d026537b65):
+
+1) Settings -> Connections -> "Test connection": the two Ollama indicators show AMBER with an explanation that Ollama is not running on this Mac, that recording and on-device transcription still work, and how to complete setup (install Ollama or point at a server on the network). In 1.8.0 these were unexplained red dots; this version fixes that.
+
+2) Local Network permission: with the default configuration both Ollama endpoints are localhost, so the app never uses the local network — macOS therefore does not prompt and does not list Distavo under System Settings -> Privacy & Security -> Local Network. This is expected macOS behaviour, and the in-app Permissions helper now says so explicitly ("Not needed with your current settings"). To see the prompt: in Settings set "Server Ollama URL" to any LAN address (for example http://192.168.1.10:11434), open "Check permissions...", and click "Request Access Now" — the macOS Local Network prompt appears and Distavo becomes listed in the pane.
+
+To exercise the full pipeline end-to-end: install Ollama from https://ollama.com, run "ollama pull llama3.2", leave it running, then use the menu-bar item "Record meeting" (or drop any short audio file into the watched folder shown in Settings). Transcription happens on-device; the Markdown note is completed via the local Ollama and written to the notes folder.

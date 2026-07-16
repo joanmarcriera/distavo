@@ -392,6 +392,24 @@ final class WatcherController: ObservableObject {
         }.value
     }
 
+    /// Per-endpoint presentation of a Test Connections result (off the main
+    /// actor — diagnose may resolve DNS). The WhisperX slot is nil with the
+    /// embedded engine, where there is no server to talk about.
+    nonisolated func diagnoseConnections(
+        _ cfg: Config,
+        _ r: (whisperx: Bool, ollamaServer: Bool, ollamaLocal: Bool)) async
+        -> (whisperx: NetworkScope.EndpointDiagnosis?,
+            server: NetworkScope.EndpointDiagnosis,
+            local: NetworkScope.EndpointDiagnosis) {
+        await Task.detached {
+            let whisperx: NetworkScope.EndpointDiagnosis? = cfg.transcribe.backend == "embedded"
+                ? nil : NetworkScope.diagnose(url: cfg.transcribe.whisperxURL, reachable: r.whisperx)
+            return (whisperx,
+                    NetworkScope.diagnose(url: cfg.summarise.server.url, reachable: r.ollamaServer),
+                    NetworkScope.diagnose(url: cfg.summarise.local.url, reachable: r.ollamaLocal))
+        }.value
+    }
+
     private func persist() {
         try? Config.save(config, to: Config.defaultConfigURL)
     }

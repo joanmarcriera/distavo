@@ -9,7 +9,9 @@ struct SettingsView: View {
 
     @State private var draft: Config
     @State private var openAtLogin: Bool
-    @State private var conn: (whisperx: Bool?, server: Bool?, local: Bool?) = (nil, nil, nil)
+    @State private var diag: (whisperx: NetworkScope.EndpointDiagnosis?,
+                              server: NetworkScope.EndpointDiagnosis?,
+                              local: NetworkScope.EndpointDiagnosis?) = (nil, nil, nil)
     @State private var showingPermissions = false
     @State private var lanWarningHosts: [String] = []
     @State private var saved = false
@@ -161,20 +163,29 @@ struct SettingsView: View {
             Section("Connections") {
                 HStack(spacing: 16) {
                     if draft.transcribe.backend != "embedded" {
-                        dot("WhisperX", conn.whisperx)
+                        dot("WhisperX", diag.whisperx)
                     }
-                    dot("Server Ollama", conn.server)
-                    dot("Local Ollama", conn.local)
+                    dot("Server Ollama", diag.server)
+                    dot("Local Ollama", diag.local)
                 }
                 HStack {
                     Button("Test connection") {
                         Task {
                             let r = await controller.testConnections(draft)
-                            conn = (r.whisperx, r.ollamaServer, r.ollamaLocal)
+                            let d = await controller.diagnoseConnections(draft, r)
+                            diag = (d.whisperx, d.server, d.local)
                             lanWarningHosts = await controller.localUnreachableHosts(draft, r)
                         }
                     }
                     Button("Check permissions…") { showingPermissions = true }
+                }
+                if ollamaNotRunningLocally {
+                    localOllamaGuidance
+                }
+                if let remote = remoteDownLabels {
+                    Text("Can’t reach \(remote) — check the server is running and the URL is correct.")
+                        .font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 if !lanWarningHosts.isEmpty {
                     lanPermissionWarning
@@ -205,7 +216,7 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .frame(width: 520, height: 640)
-        .sheet(isPresented: $showingPermissions) { PermissionsView() }
+        .sheet(isPresented: $showingPermissions) { PermissionsView(config: draft) }
         #if EDITION_DIRECT
         .onAppear { autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true }
         #endif
@@ -241,11 +252,48 @@ struct SettingsView: View {
         }
     }
 
-    private func dot(_ label: String, _ state: Bool?) -> some View {
-        let color: Color = state.map { $0 ? .green : .red } ?? .gray
+    /// A "not running on this Mac" (loopback) result is expected on a machine
+    /// without Ollama installed — amber guidance, never a red failure. Red is
+    /// reserved for a configured LAN/remote server that doesn't answer.
+    private func dot(_ label: String, _ state: NetworkScope.EndpointDiagnosis?) -> some View {
+        let color: Color
+        switch state {
+        case .reachable: color = .green
+        case .loopbackDown: color = .orange
+        case .lanDown, .remoteDown: color = .red
+        case .notConfigured, nil: color = .gray
+        }
         return HStack(spacing: 6) {
             Circle().fill(color).frame(width: 9, height: 9)
             Text(label).font(.callout)
         }
+    }
+
+    private var ollamaNotRunningLocally: Bool {
+        diag.server == .loopbackDown || diag.local == .loopbackDown
+    }
+
+    /// Labels of endpoints that failed as plain remote/URL problems (no LAN or
+    /// loopback story) — they get the generic one-liner.
+    private var remoteDownLabels: String? {
+        var labels: [String] = []
+        if diag.whisperx == .remoteDown { labels.append("WhisperX") }
+        if diag.server == .remoteDown { labels.append("Server Ollama") }
+        if diag.local == .remoteDown { labels.append("Local Ollama") }
+        return labels.isEmpty ? nil : labels.joined(separator: ", ")
+    }
+
+    /// Shown when an Ollama endpoint on this Mac isn't answering: on a machine
+    /// without Ollama installed that is the normal starting state, so explain
+    /// what still works and what to do — don't present it as a failure.
+    private var localOllamaGuidance: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "info.circle.fill").foregroundStyle(.orange)
+            Text("Ollama isn’t running on this Mac — that’s the normal starting point. Distavo still records and transcribes; notes are completed once a summariser is available. Install Ollama from ollama.com and run it, or point “Server Ollama” at one on your network.")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(10)
+        .background(Color.orange.opacity(0.10), in: RoundedRectangle(cornerRadius: 8))
     }
 }

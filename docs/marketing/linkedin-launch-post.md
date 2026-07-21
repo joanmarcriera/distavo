@@ -2,7 +2,12 @@
 
 Drafted 2026-07-21. Facts verified against the repo and the live store listing
 (v1.4.0, released 2026-07-13, https://apps.apple.com/us/app/distavo/id6785437932).
-Post manually after review — do not auto-publish.
+
+**Status: Variant A scheduled via Postiz** (postId `cmrunm074000any6z2l17jg6c`) to
+Marc's personal LinkedIn for 2026-07-22 07:15 UTC, with the `01-main-menu.png`
+screenshot attached; bullets converted to `•` for LinkedIn plain-text rendering.
+Tracking: Vikunja tasks #1006 (verify publish), #1007 (stale site copy), #1008
+(follow-up touch).
 
 ---
 

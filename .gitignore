@@ -11,7 +11,12 @@ out/
 
 # Local AI-assistant / tooling artifacts (machine-generated, per-machine)
 .agents/
-.claude/
+.claude/*
+# ...except the repo's own tracked Claude skills (vendored autoskill symlinks stay ignored)
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/distavo-native-verify/
+!.claude/skills/distavo-release/
 .codebuddy/
 .continue/
 .junie/

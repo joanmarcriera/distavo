@@ -2,4 +2,4 @@
 • Transcription language is now a dropdown — pick from Auto-detect and 100 languages instead of typing a code, so a typo can't quietly break transcription.
 • More reliable connections to your own transcription and summary servers: a new "Check permissions…" helper spots and fixes a macOS Local Network permission that could quietly go stale after an update.
 • Clearer first-run experience: if Ollama isn't running yet, Test Connections now explains what still works and how to finish setup instead of showing unexplained red dots.
-• Local Network permission made simple: the permissions helper tells you when the permission actually applies, and a new "Request Access Now" button makes macOS ask immediately.
+• Permission prompts now use neutral "Continue" wording and make it clear that you can change your choices anytime in System Settings.

@@ -2,11 +2,18 @@
 
 ## Current objective
 
-Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
-`Distavo.app` bundle embeds a Mac App Store provisioning profile.
+Resolve the App Review microphone-permission pre-prompt issue for the next App
+Store submission by using neutral continuation wording and preserving clear
+denied-permission recovery.
 
 ## Completed work
 
+- Replaced pre-permission "Request Access" actions with Apple's recommended
+  "Continue" wording for Microphone and Local Network prompts.
+- Made the permissions-sheet introduction consent-neutral and documented that
+  choices can be changed in System Settings.
+- Updated App Review notes, release notes, and the manual permissions checklist
+  to match the shipped UI.
 - App Store 1.1.0 build 2 was uploaded from CI in the previous cycle.
 - Static website source was added under `ops/site`.
 - Setapp submission playbook now reflects repo-side metadata and packaging
@@ -27,6 +34,10 @@ Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
 
 ## Current implementation state
 
+- The one-time meeting-capture explanation and the Permissions helper both use
+  "Continue" before macOS requests microphone access.
+- If microphone access is already denied, Distavo offers a link to Microphone
+  Settings instead of trying to request access again.
 - `ops/site` is deployed as the public static website.
 - The website explains that recording consent, data/privacy use, sharing, and
   court/tribunal admissibility are separate legal questions.
@@ -43,6 +54,12 @@ Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
 
 ## Files changed
 
+- `apple/Sources/Distavo/Settings/PermissionsView.swift`
+- `apple/Distavo-Extra-Info.plist`
+- `apple/Distavo-Direct-Info.plist`
+- `apple/metadata/review-notes.txt`
+- `apple/metadata/whats-new/en-GB.txt`
+- `docs/permissions-helper-verification.md`
 - `ops/site/`
 - `apple/Setapp-Info.plist`
 - `apple/configs/Setapp.xcconfig`
@@ -59,6 +76,15 @@ Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
 
 ## Tests run
 
+- `plutil -lint apple/Distavo-Extra-Info.plist apple/Distavo-Direct-Info.plist`
+  — passed.
+- `cd apple && xcodegen generate` — passed.
+- `xcodebuild` of the `Distavo-AppStore` scheme in `Release-AppStore` with code
+  signing disabled — passed.
+- Current source, App Store metadata, manual verification guide, and compiled
+  App Store `.app` scan for `Request Access` / `Grant each one` — no matches.
+- Built App Store `Info.plist` inspection — passed: bundle ID and both
+  Microphone/System Audio usage descriptions are present.
 - `plutil -lint apple/Setapp-Info.plist` — passed.
 - `bash -n apple/scripts/build-and-notarize.sh` — passed.
 - Static website link/asset/title/meta parser over `ops/site` — passed.
@@ -112,6 +138,13 @@ Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
 - ITMS-90889 for Distavo 1.1.0 build 2: delivery succeeded, but TestFlight
   cannot use the build because `Distavo.app` is missing a provisioning profile.
 
+## Incoming Apple review issue
+
+- App Review rejected the custom microphone pre-prompt action label "Request
+  Access" and requested neutral wording such as "Continue" or "Next".
+- The repo-side fix is complete; a newly signed build still needs submission
+  and App Review approval.
+
 ## Unresolved risks
 
 - The new version bump workflow must be merged to `main` before it can enforce
@@ -132,5 +165,5 @@ Fix Apple ITMS-90889 for the next App Store delivery by ensuring the main
 
 ## Next recommended action
 
-Add `MAC_APP_STORE_PROVISIONING_PROFILE_BASE64` to GitHub Actions secrets, then
-rerun the App Store upload workflow for the next build.
+Submit the next signed App Store build with the updated
+`apple/metadata/review-notes.txt`, then wait for App Review confirmation.

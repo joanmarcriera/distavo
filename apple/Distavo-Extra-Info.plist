@@ -13,7 +13,7 @@
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
   <!-- LocalNetworkPrompt browses this Bonjour type to trigger the macOS Local
-       Network permission prompt on demand ("Request Access Now"). -->
+       Network permission prompt when the user chooses Continue. -->
   <key>NSBonjourServices</key>
   <array>
     <string>_http._tcp</string>

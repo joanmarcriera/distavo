@@ -36,7 +36,7 @@ config at defaults (both Ollama URLs loopback):
    current settings"** and explains macOS will ask once a LAN server is set.
    No dead-end "toggle it on" instruction, no orange after-update note.
 3. Set Server Ollama to a LAN URL (e.g. `http://192.168.0.5:11434`) → reopen the
-   sheet → the row becomes actionable with **Request Access Now**. Click it:
+   sheet → the row becomes actionable with **Continue**. Click it:
    the macOS Local Network prompt appears (first time), and Distavo now shows in
    System Settings → Privacy & Security → Local Network.
    Reset between attempts: `tccutil reset All uk.co.riera.distavo` (or the
@@ -48,12 +48,12 @@ config at defaults (both Ollama URLs loopback):
 ## Permissions sheet
 
 5. Settings → Connections → **Check permissions…** opens the sheet.
-6. **Local Network** row (when a LAN endpoint is configured): "Request Access
-   Now" triggers the prompt; "Open Local Network Settings" opens the correct
+6. **Local Network** row (when a LAN endpoint is configured): **Continue**
+   triggers the prompt; "Open Local Network Settings" opens the correct
    pane; the orange note explains the after-update **off→on + relaunch** fix.
 7. On macOS **14.4+** the **Microphone** and **System Audio Recording** rows show.
-   - Microphone reflects real state: green "Granted" when allowed; "Request
-     Access…" when undetermined (clicking prompts and the row updates); "Open
+   - Microphone reflects real state: green "Granted" when allowed; **Continue**
+     when undetermined (clicking prompts and the row updates); "Open
      Microphone Settings" when denied.
    - Audio row opens the System Audio Recording pane.
 8. On macOS **< 14.4** only the Local Network row shows (capture unsupported).

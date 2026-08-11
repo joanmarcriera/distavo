@@ -16,6 +16,11 @@
 
 ## Done
 
+- [x] Fix App Review microphone permission pre-prompt wording.
+  Completion criteria: pre-permission actions use neutral "Continue" wording,
+  denied microphone access routes to System Settings, reviewer metadata matches
+  the UI, and the App Store target builds successfully.
+
 - [x] Fix App Store TestFlight provisioning warning.
   Completion criteria: App Store release workflow installs an explicit Mac App
   Store provisioning profile, pins it during archive/export, and fails before

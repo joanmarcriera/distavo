@@ -17,7 +17,6 @@ struct PermissionsView: View {
     /// nil while the (DNS-resolving) check runs; then whether any configured
     /// endpoint is on the LAN — i.e. whether Local Network permission matters.
     @State private var lanConfigured: Bool?
-    @State private var accessRequested = false
 
     /// Mic + system-audio rows only matter where the built-in recorder runs.
     private var captureSupported: Bool { MeetingCaptureController.isSupported }
@@ -31,7 +30,7 @@ struct PermissionsView: View {
             .padding([.horizontal, .top])
             .padding(.bottom, 8)
 
-            Text("Distavo needs these macOS permissions to reach your servers and record meetings. Grant each one, then run Test Connections again.")
+            Text("Review the macOS permissions Distavo uses to reach your servers and record meetings. You can change your choices anytime in System Settings.")
                 .font(.callout).foregroundStyle(.secondary)
                 .padding(.horizontal)
                 .padding(.bottom, 12)
@@ -100,12 +99,11 @@ struct PermissionsView: View {
         case .some(true):
             PermissionRow(
                 title: "Local Network",
-                why: "Reach WhisperX/Ollama servers on your LAN — including public host names (like ollama.lab.example.com) that resolve to a 192.168/10/172 address. Distavo appears in the Local Network pane after its first connection attempt; use Request Access Now to make macOS ask right away.",
+                why: "Reach WhisperX/Ollama servers on your LAN — including public host names (like ollama.lab.example.com) that resolve to a 192.168/10/172 address. Distavo appears in the Local Network pane after its first connection attempt; choose Continue to let macOS ask now.",
                 state: .unknown,
-                actionTitle: accessRequested ? "Requested — check for the macOS prompt" : "Request Access Now",
+                actionTitle: "Continue",
                 action: {
                     LocalNetworkPrompt.trigger(config: config)
-                    accessRequested = true
                 },
                 secondaryActionTitle: "Open Local Network Settings",
                 secondaryAction: { open("Privacy_LocalNetwork") })
@@ -124,7 +122,7 @@ struct PermissionsView: View {
     }
 
     private var micActionTitle: String {
-        micStatus == .notDetermined ? "Request Access…" : "Open Microphone Settings"
+        micStatus == .notDetermined ? "Continue" : "Open Microphone Settings"
     }
 
     private func micAction() {

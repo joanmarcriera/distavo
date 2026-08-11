@@ -1,5 +1,12 @@
 # Tasks
 
+## In progress
+
+- [ ] Release and submit Distavo 1.9.1 build 11 to App Review.
+  Completion criteria: the signed package embeds the Mac App Store provisioning
+  profile, App Store Connect accepts build 11 without ITMS-90889, and version
+  1.9.1 reaches `WAITING_FOR_REVIEW`.
+
 ## Blocked on Marc
 
 - [ ] Create or access the Setapp vendor account.

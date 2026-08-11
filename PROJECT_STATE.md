@@ -2,12 +2,15 @@
 
 ## Current objective
 
-Resolve the App Review microphone-permission pre-prompt issue for the next App
-Store submission by using neutral continuation wording and preserving clear
-denied-permission recovery.
+Release Distavo 1.9.1 build 11 through GitHub and submit it to App Review as the
+replacement for rejected version 1.9.0 build 10.
 
 ## Completed work
 
+- Confirmed live through App Store Connect that build 10 is `VALID`, version
+  1.9.0 is `REJECTED`, and version 1.4.0 is `READY_FOR_DISTRIBUTION`. Per Marc's
+  release direction, the replacement uses version 1.9.1 build 11; the
+  idempotent submission script will rename the editable rejected version record.
 - Replaced pre-permission "Request Access" actions with Apple's recommended
   "Continue" wording for Microphone and Local Network prompts.
 - Made the permissions-sheet introduction consent-neutral and documented that
@@ -34,6 +37,7 @@ denied-permission recovery.
 
 ## Current implementation state
 
+- `apple/project.yml` now identifies the replacement as version 1.9.1 build 11.
 - The one-time meeting-capture explanation and the Permissions helper both use
   "Continue" before macOS requests microphone access.
 - If microphone access is already denied, Distavo offers a link to Microphone
@@ -54,6 +58,7 @@ denied-permission recovery.
 
 ## Files changed
 
+- `apple/project.yml`
 - `apple/Sources/Distavo/Settings/PermissionsView.swift`
 - `apple/Distavo-Extra-Info.plist`
 - `apple/Distavo-Direct-Info.plist`
@@ -76,6 +81,9 @@ denied-permission recovery.
 
 ## Tests run
 
+- App Store Connect dry-run through the version phase — passed: resolved the
+  live Distavo app, found 1.9.0 build 10 `VALID`, and identified its `REJECTED`
+  version record as editable without mutation.
 - `plutil -lint apple/Distavo-Extra-Info.plist apple/Distavo-Direct-Info.plist`
   — passed.
 - `cd apple && xcodegen generate` — passed.
@@ -165,5 +173,6 @@ denied-permission recovery.
 
 ## Next recommended action
 
-Submit the next signed App Store build with the updated
-`apple/metadata/review-notes.txt`, then wait for App Review confirmation.
+Commit and push build 11, manually dispatch `release-appstore.yml`, approve its
+`app-store-submission` environment gate, and verify App Store Connect reaches
+`WAITING_FOR_REVIEW`.

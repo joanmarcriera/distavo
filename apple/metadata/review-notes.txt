@@ -1,6 +1,6 @@
 Distavo is a bring-your-own-server app: transcription runs fully on-device (Apple Silicon, WhisperKit). The optional summarisation step uses an Ollama server the USER runs themselves — on their own Mac or their own network. By design there is no cloud service, no account, and no telemetry.
 
-What you will see on a review machine that has no Ollama server installed (this addresses both issues from the 1.8.0 (9) review, submission 337cdeaf-0229-45a6-8846-11d026537b65):
+What you will see on a review machine that has no Ollama server installed (items 1–2 address the 1.8.0 (9) review, submission 337cdeaf-0229-45a6-8846-11d026537b65; item 3 addresses the latest microphone-permission wording rejection):
 
 1) Settings -> Connections -> "Test connection": the two Ollama indicators show AMBER with an explanation that Ollama is not running on this Mac, that recording and on-device transcription still work, and how to complete setup (install Ollama or point at a server on the network). In 1.8.0 these were unexplained red dots; this version fixes that.
 

@@ -1,11 +1,11 @@
 # Tasks
 
-## In progress
+## Backlog
 
-- [ ] Release and submit Distavo 1.9.1 build 11 to App Review.
-  Completion criteria: the signed package embeds the Mac App Store provisioning
-  profile, App Store Connect accepts build 11 without ITMS-90889, and version
-  1.9.1 reaches `WAITING_FOR_REVIEW`.
+- [ ] Support unresolved-issue resubmissions in the App Store submission tool.
+  Completion criteria: `submit-appstore-review.py` safely updates and resubmits
+  the existing `UNRESOLVED_ISSUES` submission after attaching a replacement
+  build, with tests covering stale/different-version safeguards.
 
 ## Blocked on Marc
 
@@ -22,6 +22,11 @@
   Completion criteria: first version is submitted for Setapp review.
 
 ## Done
+
+- [x] Release and submit Distavo 1.9.1 build 11 to App Review.
+  Completion criteria: the signed package embeds the Mac App Store provisioning
+  profile, App Store Connect accepts build 11 without ITMS-90889, and version
+  1.9.1 reaches `WAITING_FOR_REVIEW`.
 
 - [x] Fix App Review microphone permission pre-prompt wording.
   Completion criteria: pre-permission actions use neutral "Continue" wording,

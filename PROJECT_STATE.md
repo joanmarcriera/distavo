@@ -2,11 +2,18 @@
 
 ## Current objective
 
-Release Distavo 1.9.1 build 11 through GitHub and submit it to App Review as the
+Await App Review's decision on Distavo 1.9.1 build 11, submitted as the
 replacement for rejected version 1.9.0 build 10.
 
 ## Completed work
 
+- Pushed `main` and tag `v1.9.1` to GitHub at commit `17a6010`.
+- GitHub Actions signed and uploaded App Store build 11 successfully with the
+  Mac App Store provisioning profile embedded and no ITMS-90889 warning.
+- Updated the existing unresolved App Review item to 1.9.1 build 11 and
+  resubmitted it; App Store Connect now reports `Waiting for Review`.
+- The Direct release workflow succeeded and published `Distavo.dmg` plus
+  `appcast.xml` in the GitHub v1.9.1 release.
 - Confirmed live through App Store Connect that build 10 is `VALID`, version
   1.9.0 is `REJECTED`, and version 1.4.0 is `READY_FOR_DISTRIBUTION`. Per Marc's
   release direction, the replacement uses version 1.9.1 build 11; the
@@ -37,6 +44,9 @@ replacement for rejected version 1.9.0 build 10.
 
 ## Current implementation state
 
+- App Store Connect submission `9fe470f8-1df5-4059-aa55-be53d8a2232a` contains
+  1.9.1 build 11 and is `Waiting for Review`.
+- GitHub release v1.9.1 is public with the signed/notarized DMG and appcast.
 - `apple/project.yml` now identifies the replacement as version 1.9.1 build 11.
 - The one-time meeting-capture explanation and the Permissions helper both use
   "Continue" before macOS requests microphone access.
@@ -81,6 +91,15 @@ replacement for rejected version 1.9.0 build 10.
 
 ## Tests run
 
+- GitHub Actions `upload-appstore` job — passed: signed archive/export,
+  provisioning-profile checks, package signature, upload, and ITMS-90889 scan.
+- Live App Store Connect inspection — passed: 1.9.1 build 11 is attached to the
+  existing submission and reports `Waiting for Review` with an August 11, 2026
+  submission date.
+- GitHub Actions Direct release — passed; the v1.9.1 release contains
+  `Distavo.dmg` and `appcast.xml`.
+- GitHub remote verification — passed: `main` and `v1.9.1` both resolve to
+  `17a60107c6f98385b1417375fdcc75d656d89338`.
 - App Store Connect dry-run through the version phase — passed: resolved the
   live Distavo app, found 1.9.0 build 10 `VALID`, and identified its `REJECTED`
   version record as editable without mutation.
@@ -150,18 +169,15 @@ replacement for rejected version 1.9.0 build 10.
 
 - App Review rejected the custom microphone pre-prompt action label "Request
   Access" and requested neutral wording such as "Continue" or "Next".
-- The repo-side fix is complete; a newly signed build still needs submission
-  and App Review approval.
+- The fixed 1.9.1 build 11 is now `Waiting for Review`; Apple approval remains
+  external.
 
 ## Unresolved risks
 
-- The new version bump workflow must be merged to `main` before it can enforce
-  future main-merge version bumps.
-- The next App Store upload requires a new GitHub Actions secret:
-  `MAC_APP_STORE_PROVISIONING_PROFILE_BASE64`.
-- Full end-to-end App Store signing/export/upload validation still requires
-  the Apple signing certificates, App Store Connect API key, and new
-  provisioning-profile secret in GitHub Actions.
+- `submit-appstore-review.py` deliberately stops on `UNRESOLVED_ISSUES`; after
+  it updated the version/build, this resubmission required App Store Connect's
+  `Update Review` and `Resubmit to App Review` UI actions. The upload was
+  successful, but the overall App Store workflow run is therefore red.
 - Setapp Framework integration still requires the vendor dashboard public key
   and SDK archive.
 - The first Setapp build must still be uploaded through the Setapp Web UI.
@@ -173,6 +189,5 @@ replacement for rejected version 1.9.0 build 10.
 
 ## Next recommended action
 
-Commit and push build 11, manually dispatch `release-appstore.yml`, approve its
-`app-store-submission` environment gate, and verify App Store Connect reaches
-`WAITING_FOR_REVIEW`.
+Wait for App Review. If Apple raises another issue, inspect the new review
+message and live submission state before changing or uploading another build.

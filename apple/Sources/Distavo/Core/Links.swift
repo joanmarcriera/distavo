@@ -15,5 +15,11 @@ enum Links {
     /// Third-party licenses for the built-in transcription engine.
     static let noticesURLString = "https://github.com/\(repoSlug)/blob/main/NOTICES.md"
 
+    /// Feedback form on the product site. Direct-edition only (`EDITION_DIRECT`)
+    /// per the product decision — the App Store and Setapp builds keep their
+    /// outbound links limited to the GitHub issue tracker.
+    /// Trailing slash is canonical: `/feedback` 301-redirects to `/feedback/`.
+    static let feedbackURLString = "https://distavo.com/feedback/"
+
     static let donateURL = URL(string: donateURLString)
 }

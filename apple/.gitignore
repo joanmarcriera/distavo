@@ -2,6 +2,9 @@
 Distavo.xcodeproj/
 # Build output
 build/
+# Per-edition verification builds (one derivedDataPath per scheme, see the
+# distavo-native-verify skill) — build-Distavo, build-Distavo-AppStore, ...
+build-*/
 DerivedData/
 .build/
 *.xcuserstate

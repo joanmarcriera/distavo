@@ -3,7 +3,9 @@ import AppKit
 
 /// The MenuBarExtra menu contents. One Button per item, matching the Python
 /// rumps menu. "Support Distavo…" is present only when the donate link is set
-/// AND the edition defines DONATE_ENABLED.
+/// AND the edition defines DONATE_ENABLED; "Send Feedback…" is EDITION_DIRECT
+/// only. "Report an Issue…" ships in every edition (GitHub issues are allowed
+/// by both the App Store and Setapp).
 struct StatusMenu: View {
     @ObservedObject var controller: WatcherController
     @ObservedObject var capture: MeetingCaptureController
@@ -82,6 +84,11 @@ struct StatusMenu: View {
             Button("Report an Issue…") {
                 if let url = Support.issueURL() { NSWorkspace.shared.open(url) }
             }
+            #if EDITION_DIRECT
+            Button("Send Feedback…") {
+                if let url = URL(string: Links.feedbackURLString) { NSWorkspace.shared.open(url) }
+            }
+            #endif
             Button("Open-source acknowledgements…") {
                 if let url = URL(string: Links.noticesURLString) { NSWorkspace.shared.open(url) }
             }

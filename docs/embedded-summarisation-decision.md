@@ -59,6 +59,48 @@ budget**. Anything longer than a short call needs map-reduce chunking.
 For comparison, the current Ollama path runs at `num_ctx: 65536` with `num_predict: 6144` — two
 orders of magnitude more headroom.
 
+## Field results — a real 97-minute meeting (2026-09-05)
+
+Run through the full embedded pipeline and A/B'd against Ollama on the *same* transcript
+(`EmbeddedPipelineLiveTests`). Transcription: 97 min of audio in **371 s** (~16× realtime), 356
+speaker turns, 32 559 chars. The transcript needed **4 chunks**.
+
+| | on-device (AFM 3B) | Ollama `llama3.1:8b` |
+|---|---|---|
+| Time | 73 s | 34 s |
+| Sections | 16/16 | 16/16 |
+| Substantive sections | 15 | 16 |
+| Action-item rows | **6** | 1 |
+| `SummaryValidator` | clean | clean |
+
+**The on-device note held up better than expected, and the 8B model worse.** Ollama wrote better
+prose but **hallucinated** — it expanded "EBI" into "Enterprise Business Intelligence" (it is the
+European Bioinformatics Institute) and speculated about a speaker's employer, both of which the
+prompt explicitly forbids. It also echoed instruction text into the output ("Rank the 3-5 follow-up
+moves…") and extracted only **one** action item. The on-device note invented no organisation,
+correctly kept named third parties distinct from speaker labels, and extracted six actions.
+
+Map-reduce did **not** hollow out the meeting: the content is grounded in what was actually said.
+
+Known defects in the on-device output, both prompt-tuning rather than architecture:
+- Every action row is stamped `Post-engagement / not yet active` — it over-applies the prompt's
+  hiring/onboarding deadline rule.
+- "Possible transcription corrections" lists verbatim quotes instead of proposed corrections.
+- Speaker labels drift between `SPEAKER_00` and "Speaker 00", and a couple of sections repeat.
+
+This is one meeting and one sample — not a quality guarantee. But it is enough to say the on-device
+path produces a genuinely usable note on a long real recording, which is what the flag was gating.
+
+### What the field test also caught
+
+The first run **failed outright** with `exceededContextWindowSize`, from two budgeting defects:
+`charsPerToken` was calibrated at 4.0 against the prompt template (prose, 4.10) while real
+transcripts measure **3.46** and a bare speaker line **2.22** — a 15% under-count — and the budget
+allocated the window down to the last token, which the model rejects. Fixed by recalibrating to
+3.0, reserving a 128-token margin, and having the engine measure the real count with
+`tokenCount(for:)` and clamp the response. Synthetic tests never caught this because synthetic
+transcripts are too tidy.
+
 ## Trade-offs
 
 | | A — Foundation Models | B — llama.cpp |

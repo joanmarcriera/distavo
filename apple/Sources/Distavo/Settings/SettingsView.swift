@@ -135,13 +135,29 @@ struct SettingsView: View {
                 }
             }
 
-            Section("Summarisation (Ollama)") {
+            Section(draft.summarise.embeddedEnabled ? "Summarisation" : "Summarisation (Ollama)") {
                 HStack {
                     Picker("Backend", selection: $draft.summarise.backend) {
                         Text("Server (GPU)").tag("server")
                         Text("Local Mac").tag("local")
+                        // Opt-in preview (summarise.embedded_enabled); hidden
+                        // otherwise so the default install is unchanged.
+                        if draft.summarise.embeddedEnabled {
+                            Text("Built-in (this Mac)").tag("embedded")
+                        }
                     }
-                    HelpButton(text: "‘Server (GPU)’ uses the Server Ollama URL; ‘Local Mac’ uses the Local Ollama URL on this Mac. If the server is offline you can allow the local fallback below.")
+                    HelpButton(text: draft.summarise.embeddedEnabled
+                        ? "‘Server (GPU)’ uses the Server Ollama URL; ‘Local Mac’ uses the Local Ollama URL on this Mac. ‘Built-in’ summarises with Apple Intelligence on this Mac — no server or install, but it handles long meetings in several passes and is less detailed than Ollama."
+                        : "‘Server (GPU)’ uses the Server Ollama URL; ‘Local Mac’ uses the Local Ollama URL on this Mac. If the server is offline you can allow the local fallback below.")
+                }
+                if draft.summarise.embeddedEnabled && draft.summarise.backend == "embedded" {
+                    if let reason = EmbeddedSummariser.unavailableReason() {
+                        Text("⚠︎ \(reason.localizedDescription)")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Summarising on this Mac with Apple Intelligence — nothing leaves the device and no Ollama is needed. Long recordings are summarised in several passes, which is less detailed than an Ollama model.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     TextField("Server Ollama URL", text: $draft.summarise.server.url)

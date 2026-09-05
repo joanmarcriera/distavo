@@ -101,24 +101,35 @@ final class WatcherController: ObservableObject {
     }
 
     /// Surface embedded-engine phases (model download, transcribing,
-    /// diarizing) in the menu status and the activity log.
+    /// diarizing, and the on-device summariser's map-reduce passes) in the menu
+    /// status and the activity log.
     private func wireEmbeddedProgress() {
         Task {
             await EmbeddedTranscriber.shared.setProgressHandler { [weak self] message in
-                Task { @MainActor in
-                    guard let self, self.processingActive else { return }
-                    self.status = message
-                    self.log(message)
-                    // Refine the icon: the embedded engine loads/downloads the
-                    // model before it transcribes — the server path can't.
-                    if message.contains("Download") || message.contains("Loading") {
-                        self.processingPhase = .loading
-                    } else if message.contains("Transcribing") || message.contains("Identifying") {
-                        self.processingPhase = .transcribing
-                    }
-                    self.refreshActivity()
-                }
+                self?.reportEmbeddedProgress(message)
             }
+        }
+        // On-device summarisation reports "Summarising part 2 of 6…" style
+        // progress; a long meeting is many passes and would otherwise look stuck.
+        EmbeddedSummariser.setProgressHandler { [weak self] message in
+            self?.reportEmbeddedProgress(message)
+        }
+    }
+
+    private nonisolated func reportEmbeddedProgress(_ message: String) {
+        Task { @MainActor [weak self] in
+            guard let self, self.processingActive else { return }
+            self.status = message
+            self.log(message)
+            // Refine the icon: the embedded engine loads/downloads the
+            // model before it transcribes — the server path can't.
+            if message.contains("Download") || message.contains("Loading") {
+                self.processingPhase = .loading
+            } else if message.contains("Transcribing") || message.contains("Identifying")
+                        || message.contains("Summarising") || message.contains("Condensing") {
+                self.processingPhase = .transcribing
+            }
+            self.refreshActivity()
         }
     }
 

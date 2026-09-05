@@ -1,5 +1,2 @@
-• The menu-bar icon now shows what Distavo is doing at a glance: recording, loading, transcribing, or a new note ready to read.
-• Transcription language is now a dropdown — pick from Auto-detect and 100 languages instead of typing a code, so a typo can't quietly break transcription.
-• More reliable connections to your own transcription and summary servers: a new "Check permissions…" helper spots and fixes a macOS Local Network permission that could quietly go stale after an update.
-• Clearer first-run experience: if Ollama isn't running yet, Test Connections now explains what still works and how to finish setup instead of showing unexplained red dots.
-• Permission prompts now use neutral "Continue" wording and make it clear that you can change your choices anytime in System Settings.
+• Early preview, off by default: Distavo can now write your meeting notes entirely on this Mac using Apple Intelligence, with no summarisation server to install. Turn it on by setting "embedded_enabled" in Distavo's settings file, then choose "Built-in (this Mac)" as the summarisation backend. Long recordings are summarised in several passes, so notes are less detailed than a full Ollama model — Ollama remains the default.
+• Summarisation now picks its engine through a single code path, so a recording still waits politely for your server to come back instead of being marked as failed.

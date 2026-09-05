@@ -183,14 +183,18 @@ public enum EmbeddedSummariser {
             let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
             let chunks = EmbeddedSummaryPlanner.chunks(
                 transcript: merged, budgetTokens: mapBudget.transcriptTokens)
-            guard chunks.count > 1 else { break }
+            guard !chunks.isEmpty else { break }
             var condensed: [String] = []
             for (i, chunk) in chunks.enumerated() {
                 condensed.append(try await generate(
                     EmbeddedSummaryPrompt.map(chunk: chunk, index: i + 1, total: chunks.count),
                     maxOutputTokens: mapBudget.reservedForOutput))
             }
-            merged = EmbeddedSummaryPrompt.merge(partials: condensed)
+            let folded = EmbeddedSummaryPrompt.merge(partials: condensed)
+            // A single chunk still folds (the bullets get terser), but if a round
+            // stops shrinking, further rounds are wasted model calls.
+            guard folded.count < merged.count else { merged = folded; break }
+            merged = folded
         }
 
         // Still too long after bounded folding — truncate on a line boundary so
@@ -209,14 +213,31 @@ public enum EmbeddedSummariser {
     /// commonest cause of `exceededContextWindowSize`.
     @available(macOS 26, *)
     private static func generate(_ prompt: String, maxOutputTokens: Int) async throws -> String {
-        let session = LanguageModelSession(model: SystemLanguageModel.default)
+        let model = SystemLanguageModel.default
+        // Clamp the answer against the REAL token count of this prompt. The
+        // character heuristic in DistavoCore is deliberately pessimistic but
+        // still only an estimate; asking for more output than the window can
+        // hold is what raises exceededContextWindowSize. Measuring here means a
+        // heuristic miss costs a shorter answer, not a failed recording.
+        var outputTokens = maxOutputTokens
+        if #available(macOS 26.4, *), let measured = try? await model.tokenCount(for: Prompt(prompt)) {
+            let available = model.contextSize - measured - EmbeddedSummaryBudget.defaultSafetyMargin
+            guard available > 0 else {
+                throw EmbeddedSummariserError.failed(
+                    "a section of the recording was still too long after chunking "
+                    + "(\(measured) tokens vs a \(model.contextSize)-token window)")
+            }
+            outputTokens = min(maxOutputTokens, available)
+        }
+
+        let session = LanguageModelSession(model: model)
         do {
             // Temperature matches the Ollama path's 0.1 — meeting notes should be
             // reproducible, not creative.
             let response = try await session.respond(
                 to: prompt,
                 options: GenerationOptions(temperature: 0.1,
-                                           maximumResponseTokens: maxOutputTokens))
+                                           maximumResponseTokens: outputTokens))
             let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
             if text.isEmpty { throw EmbeddedSummariserError.emptyResult }
             return text

@@ -14,27 +14,54 @@ final class EmbeddedSummaryTests: XCTestCase {
     // MARK: Token estimation
 
     func testEstimateRoundsUp() {
+        let cpt = EmbeddedSummaryTokens.charsPerToken
         XCTAssertEqual(EmbeddedSummaryTokens.estimate(""), 0)
-        XCTAssertEqual(EmbeddedSummaryTokens.estimate("a"), 1)       // 1/4 -> 1
-        XCTAssertEqual(EmbeddedSummaryTokens.estimate(String(repeating: "a", count: 4)), 1)
-        XCTAssertEqual(EmbeddedSummaryTokens.estimate(String(repeating: "a", count: 5)), 2)
+        XCTAssertEqual(EmbeddedSummaryTokens.estimate("a"), 1)
+        // Exactly one token's worth of characters stays one token; one more rounds up.
+        let exact = Int(cpt)
+        XCTAssertEqual(EmbeddedSummaryTokens.estimate(String(repeating: "a", count: exact)), 1)
+        XCTAssertEqual(EmbeddedSummaryTokens.estimate(String(repeating: "a", count: exact + 1)), 2)
     }
 
-    /// The heuristic must not UNDER-count relative to Apple's real tokenizer
-    /// (4.10 chars/token measured on Distavo's own prompt) — under-counting
-    /// overflows the context window at generation time.
-    func testEstimateIsConservativeVersusMeasuredDensity() {
-        let text = String(repeating: "word ", count: 1000)   // 5000 chars
-        let measuredTokens = Int(Double(text.count) / 4.10)  // what Apple would report
-        XCTAssertGreaterThanOrEqual(EmbeddedSummaryTokens.estimate(text), measuredTokens)
+    /// **Regression — this is the bug a real 97-minute recording exposed.**
+    ///
+    /// The heuristic was calibrated at 4.0 chars/token against Distavo's prompt
+    /// template (prose, 4.10). Real transcripts measure **3.46** chars/token and
+    /// a single `SPEAKER_00:` line measures **2.22**, so the estimate under-counted
+    /// a real transcript by 1263 tokens and overflowed the context window.
+    /// The constant must stay at or below the measured transcript density.
+    func testEstimateIsConservativeVersusMeasuredTranscriptDensity() {
+        let measuredTranscriptDensity = 3.46
+        XCTAssertLessThanOrEqual(
+            EmbeddedSummaryTokens.charsPerToken, measuredTranscriptDensity,
+            "charsPerToken must not exceed the density measured on a real transcript")
+
+        // A transcript-shaped body must be estimated at or above what Apple's
+        // tokenizer actually reported for that shape.
+        let transcript = (0..<300)
+            .map { "SPEAKER_0\($0 % 2): Point number \($0) about the migration timeline." }
+            .joined(separator: "\n")
+        let realTokens = Int(Double(transcript.count) / measuredTranscriptDensity)
+        XCTAssertGreaterThanOrEqual(EmbeddedSummaryTokens.estimate(transcript), realTokens)
     }
 
     // MARK: Budgets
 
-    func testBudgetSubtractsInstructionsAndOutput() {
+    func testBudgetSubtractsInstructionsOutputAndMargin() {
+        let b = EmbeddedSummaryBudget(
+            contextSize: 4096, reservedForOutput: 1800, instructionTokens: 800, safetyMargin: 128)
+        XCTAssertEqual(b.transcriptTokens, 4096 - 1800 - 800 - 128)
+    }
+
+    /// **Regression.** Allocating the window down to the last token fails even
+    /// when the arithmetic is exact — the model raises exceededContextWindowSize
+    /// when it cannot finish *within* the window. Some slack must always remain.
+    func testBudgetAlwaysLeavesSlack() {
         let b = EmbeddedSummaryBudget(
             contextSize: 4096, reservedForOutput: 1800, instructionTokens: 800)
-        XCTAssertEqual(b.transcriptTokens, 1496)
+        XCTAssertGreaterThan(b.safetyMargin, 0)
+        XCTAssertLessThan(b.transcriptTokens + b.reservedForOutput + b.instructionTokens,
+                          b.contextSize, "budget must not consume the entire window")
     }
 
     func testBudgetNeverNegative() {

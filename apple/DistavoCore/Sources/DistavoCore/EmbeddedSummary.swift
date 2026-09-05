@@ -18,11 +18,17 @@ import Foundation
 /// character heuristic is enough here because it only has to pick chunk
 /// boundaries, and the engine re-checks the real count before generating.
 public enum EmbeddedSummaryTokens {
-    /// Measured at 4.10 chars/token on Distavo's own prompt with Apple's
-    /// tokenizer. Deliberately rounded DOWN to 4.0 so estimates come out
-    /// slightly high — over-estimating shrinks chunks, which is the safe
-    /// direction; under-estimating overflows the context and fails the call.
-    public static let charsPerToken = 4.0
+    /// **Calibrated on transcripts, not prose.** Apple's tokenizer measures
+    /// 4.10 chars/token on Distavo's prompt template (clean English), but only
+    /// **3.46** on a real 97-minute meeting transcript, and **2.22** on a single
+    /// `SPEAKER_00: ...` line — speaker labels, disfluencies, names and numbers
+    /// all tokenize far worse than prose.
+    ///
+    /// A 4.0 constant under-counted a real transcript by 1263 tokens (15%) and
+    /// overflowed the context window in the field. 3.0 is below the measured
+    /// transcript density on purpose: over-estimating only shrinks chunks, while
+    /// under-estimating fails the whole recording.
+    public static let charsPerToken = 3.0
 
     public static func estimate(_ text: String) -> Int {
         Int(ceil(Double(text.count) / charsPerToken))
@@ -38,17 +44,26 @@ public struct EmbeddedSummaryBudget: Equatable {
     public let reservedForOutput: Int
     /// Tokens the instruction text costs.
     public let instructionTokens: Int
+    /// Slack left unallocated. Spending the window down to the last token fails
+    /// even when the arithmetic is exact: the model raises
+    /// `exceededContextWindowSize` when it cannot finish a response *within* the
+    /// window, so the boundary itself is not usable.
+    public let safetyMargin: Int
 
-    public init(contextSize: Int, reservedForOutput: Int, instructionTokens: Int) {
+    public static let defaultSafetyMargin = 128
+
+    public init(contextSize: Int, reservedForOutput: Int, instructionTokens: Int,
+                safetyMargin: Int = defaultSafetyMargin) {
         self.contextSize = contextSize
         self.reservedForOutput = reservedForOutput
         self.instructionTokens = instructionTokens
+        self.safetyMargin = safetyMargin
     }
 
     /// Tokens of transcript that fit. Never negative — a budget that cannot fit
     /// its own instructions yields 0, which the planner treats as "unusable".
     public var transcriptTokens: Int {
-        max(0, contextSize - reservedForOutput - instructionTokens)
+        max(0, contextSize - reservedForOutput - instructionTokens - safetyMargin)
     }
 
     /// Budget for a **map** step: the compact per-chunk prompt, whose answer is

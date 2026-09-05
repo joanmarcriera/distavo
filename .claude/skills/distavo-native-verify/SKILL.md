@@ -71,9 +71,13 @@ binary contains the Lemon Squeezy URL. Assert on the **menu label** ("Support Di
 "Send Feedback"), not the URL.
 
 **Gotcha — CI never fires automatically.** `.github/workflows/ci.yml` is `workflow_dispatch` only
-(dev moved to Forgejo `git.riera.co.uk`; GitHub is a push-mirror, so push/PR triggers were removed
-to stop burning Actions minutes on every mirror sync). Run the three loops above yourself, or
-dispatch `ci.yml` manually — don't assume a green mirror push means it ran.
+(push/PR triggers were removed to stop burning Actions minutes). Run the three loops above
+yourself, or dispatch `ci.yml` manually — don't assume a green push means CI ran.
+
+**Remote direction — Distavo is the exception.** Unlike Marc's private repos, GitHub
+(`joanmarcriera/distavo`) is **primary** here and Forgejo (`marc/distavo`) is a **read-only
+mirror**: `git push forgejo main` fails with "Mirror Repository marc/distavo is read-only"
+(verified 2026-09-05). Push and tag to `origin`.
 
 **Gotcha — CI's edition loop reuses one scheme.** `ci.yml` always builds `-scheme Distavo` and only
 swaps `-xcconfig configs/$edition.xcconfig`; it does **not** archive the separate `Distavo-AppStore`

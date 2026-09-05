@@ -17,6 +17,7 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.summarise.backend, "server")
         XCTAssertEqual(c.summarise.server.model, "llama3.1:8b")
         XCTAssertFalse(c.summarise.allowLocalFallback)
+        XCTAssertFalse(c.summarise.embeddedEnabled)
         XCTAssertEqual(c.summarise.options.numCtx, 65536)
         XCTAssertEqual(c.summarise.options.seed, 42)
         XCTAssertEqual(c.noteOwner, "Me")
@@ -77,5 +78,47 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.summarise.server.url, "http://192.168.0.5:30068")
         XCTAssertEqual(c.summarise.local.url, "http://192.168.0.5:30068")
         XCTAssertEqual(c.summarise.server.model, "qwen2.5:7b-instruct")
+    }
+
+    // MARK: Embedded summarisation flag (Vikunja #336)
+
+    /// A config written before the flag existed must decode with the feature
+    /// OFF — upgrading must never silently switch a working Ollama user onto
+    /// the on-device engine (same rule as transcribe.backend).
+    func testConfigPredatingEmbeddedFlagDecodesDisabled() throws {
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let json = """
+        {"summarise": {"backend": "server", "server": {"url": "http://nas:11434"}}}
+        """
+        try json.write(to: url, atomically: true, encoding: .utf8)
+        let c = try Config.load(from: url)
+        XCTAssertFalse(c.summarise.embeddedEnabled)
+        XCTAssertEqual(c.summarise.backend, "server")
+        XCTAssertEqual(c.summarise.server.url, "http://nas:11434")
+    }
+
+    func testEmbeddedFlagRoundTripsThroughJSON() throws {
+        let url = tempFile()
+        var c = Config()
+        c.summarise.embeddedEnabled = true
+        c.summarise.backend = "embedded"
+        try Config.save(c, to: url)
+
+        let raw = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(raw.contains("embedded_enabled"), "key must use the JSON snake_case name")
+
+        let reloaded = try Config.load(from: url)
+        XCTAssertTrue(reloaded.summarise.embeddedEnabled)
+        XCTAssertEqual(reloaded.summarise.backend, "embedded")
+    }
+
+    /// Fresh installs must not opt into on-device summarisation either.
+    func testRecommendedForThisMacKeepsEmbeddedSummarisationOff() {
+        let c = Config.recommendedForThisMac(embeddedSupported: true,
+                                             memoryBytes: 32 * 1024 * 1024 * 1024)
+        XCTAssertFalse(c.summarise.embeddedEnabled)
+        XCTAssertEqual(c.summarise.backend, "server")
     }
 }

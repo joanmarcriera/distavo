@@ -97,24 +97,38 @@ public struct TranscribeConfig: Codable, Equatable {
 }
 
 public struct SummariseConfig: Codable, Equatable {
+    /// "server" / "local" (both Ollama) or "embedded" (Apple Foundation Models
+    /// on this Mac). "embedded" is only honoured when `embeddedEnabled` is true —
+    /// see `Pipeline.chooseSummariser`.
     public var backend: String
     /// Both `server` and `local` are user-controlled Ollama endpoints. Distavo has
     /// NO cloud/hosted summarisation path by design — real transcript content is
     /// only ever sent to these user-configured URLs. Do not add a cloud backend.
+    /// The "embedded" backend is on-device and likewise never leaves the Mac;
+    /// Apple's Private Cloud Compute model is deliberately NOT used (see
+    /// docs/embedded-summarisation-decision.md).
     public var server: OllamaTarget
     public var local: OllamaTarget
     public var allowLocalFallback: Bool
+    /// Feature flag for on-device summarisation (Vikunja #336). Defaults to
+    /// false, so existing configs and fresh installs both keep Ollama. Acts as a
+    /// real kill switch: with this false, `backend == "embedded"` falls back to
+    /// the Ollama path rather than failing, and Settings does not offer it.
+    public var embeddedEnabled: Bool
     public var options: SummariseOptions
 
     enum CodingKeys: String, CodingKey {
-        case backend, server, local, allowLocalFallback = "allow_local_fallback", options
+        case backend, server, local, allowLocalFallback = "allow_local_fallback"
+        case embeddedEnabled = "embedded_enabled", options
     }
 
     public init(backend: String = "server", server: OllamaTarget = .init(),
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
+                embeddedEnabled: Bool = false,
                 options: SummariseOptions = .init()) {
         self.backend = backend; self.server = server; self.local = local
-        self.allowLocalFallback = allowLocalFallback; self.options = options
+        self.allowLocalFallback = allowLocalFallback
+        self.embeddedEnabled = embeddedEnabled; self.options = options
     }
 
     public init(from decoder: Decoder) throws {
@@ -124,6 +138,7 @@ public struct SummariseConfig: Codable, Equatable {
         server = try c.decodeIfPresent(OllamaTarget.self, forKey: .server) ?? d.server
         local = try c.decodeIfPresent(OllamaTarget.self, forKey: .local) ?? d.local
         allowLocalFallback = try c.decodeIfPresent(Bool.self, forKey: .allowLocalFallback) ?? d.allowLocalFallback
+        embeddedEnabled = try c.decodeIfPresent(Bool.self, forKey: .embeddedEnabled) ?? d.embeddedEnabled
         options = try c.decodeIfPresent(SummariseOptions.self, forKey: .options) ?? d.options
     }
 }

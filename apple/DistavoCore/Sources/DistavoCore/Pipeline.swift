@@ -44,10 +44,37 @@ public struct ProcessResult: Equatable {
 
 /// Injectable effects, mirroring the Python `deps` SimpleNamespace seam so the
 /// pipeline can be tested without servers, ffmpeg, or AVFoundation.
+/// Whether the on-device summariser can run right now, and if not, whether that
+/// is a condition that resolves itself.
+///
+/// The distinction drives durability: a *transient* reason (Apple Intelligence
+/// still downloading, or switched off and switchable back on) is the on-device
+/// analogue of "server offline" and must DEFER, so the recording is retried.
+/// An *unsupported* reason (wrong OS, ineligible Mac) can never resolve on this
+/// machine, so it fails once with guidance to switch back to Ollama rather than
+/// re-deferring forever.
+public enum EmbeddedReadiness: Equatable {
+    case ready
+    case temporarilyUnavailable(String)
+    case unsupported(String)
+}
+
+/// The outcome of picking a summariser: use one, defer (retry later), or fail.
+enum SummariserChoice: Equatable {
+    case use(SummariseTarget)
+    case deferred(String)
+    case unavailable(String)
+}
+
 public struct PipelineDeps {
     public var convertToWav: (URL, URL) async throws -> Void
     public var transcribe: (URL, TranscribeConfig) async throws -> [String: Any]
     public var ollamaReachable: (String) async -> Bool
+    /// Readiness of the on-device summariser. DistavoCore is dependency-free and
+    /// cannot import DistavoEmbedded, so this comes in through the DI seam like
+    /// `ollamaReachable`. Defaults to `.ready`, keeping every existing caller and
+    /// test unchanged; the app layer wires it to `EmbeddedSummariser`.
+    public var embeddedReadiness: () async -> EmbeddedReadiness
     public var summarise: (_ transcript: String, _ target: SummariseTarget,
                            _ options: SummariseOptions, _ noteOwner: String,
                            _ userSpeaker: String) async throws -> String
@@ -60,13 +87,15 @@ public struct PipelineDeps {
         transcribe: @escaping (URL, TranscribeConfig) async throws -> [String: Any],
         ollamaReachable: @escaping (String) async -> Bool,
         summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String) async throws -> String,
-        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil
+        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
+        embeddedReadiness: @escaping () async -> EmbeddedReadiness = { .ready }
     ) {
         self.convertToWav = convertToWav
         self.transcribe = transcribe
         self.ollamaReachable = ollamaReachable
         self.summarise = summarise
         self.onPhase = onPhase
+        self.embeddedReadiness = embeddedReadiness
     }
 
     /// Real dependencies wired to AVFoundation + the HTTP clients.
@@ -93,24 +122,42 @@ public struct PipelineDeps {
 /// Port of `meeting_pipeline/pipeline.py`.
 public enum Pipeline {
 
-    /// Choose where to summarise, or signal deferral (nil).
+    /// Choose where to summarise, or signal deferral.
     ///
-    /// Only the Ollama path can defer — it is the one that depends on a server
-    /// being reachable. The embedded engine runs on this Mac with no network, so
-    /// it is returned immediately and never produces `deferredNeedLocal`.
+    /// Both backends can defer, for the same reason: a dependency that is
+    /// temporarily absent but will come back. For Ollama that is an unreachable
+    /// server; for the embedded engine it is Apple Intelligence still
+    /// downloading its model, or being switched off — genuinely transient
+    /// conditions that resolve in minutes. Returning `.use(.embedded)`
+    /// regardless meant summarise threw, processOne marked the base FAILED, and
+    /// `DistavoState.iterPending` then skipped it forever, so a recording was
+    /// never retried for a condition that fixed itself.
+    ///
+    /// A reason that can never resolve on this Mac (unsupported OS, ineligible
+    /// hardware) still fails, so the user is told to switch back to Ollama
+    /// instead of the recording sitting deferred indefinitely.
     ///
     /// `summarise.embeddedEnabled` gates the embedded backend as a kill switch:
     /// when it is false, a config asking for "embedded" falls through to the
     /// normal Ollama selection rather than failing.
     static func chooseSummariser(
-        _ config: Config, reachable: (String) async -> Bool
-    ) async -> SummariseTarget? {
+        _ config: Config, reachable: (String) async -> Bool,
+        embeddedReadiness: () async -> EmbeddedReadiness = { .ready }
+    ) async -> SummariserChoice {
         let s = config.summarise
-        if s.backend == "embedded" && s.embeddedEnabled { return .embedded }
-        if s.backend == "local" { return .ollama(url: s.local.url, model: s.local.model) }
-        if await reachable(s.server.url) { return .ollama(url: s.server.url, model: s.server.model) }
-        if s.allowLocalFallback { return .ollama(url: s.local.url, model: s.local.model) }
-        return nil
+        if s.backend == "embedded" && s.embeddedEnabled {
+            switch await embeddedReadiness() {
+            case .ready: return .use(.embedded)
+            case .temporarilyUnavailable(let why): return .deferred(why)
+            case .unsupported(let why): return .unavailable(why)
+            }
+        }
+        if s.backend == "local" { return .use(.ollama(url: s.local.url, model: s.local.model)) }
+        if await reachable(s.server.url) {
+            return .use(.ollama(url: s.server.url, model: s.server.model))
+        }
+        if s.allowLocalFallback { return .use(.ollama(url: s.local.url, model: s.local.model)) }
+        return .deferred("Server Ollama offline; local fallback not allowed yet")
     }
 
     public static func processOne(
@@ -142,9 +189,18 @@ public enum Pipeline {
             return ProcessResult(status: .skipped, base: base, message: "already being processed")
         }
 
-        guard let target = await chooseSummariser(config, reachable: deps.ollamaReachable) else {
-            return ProcessResult(status: .deferredNeedLocal, base: base,
-                                 message: "Server Ollama offline; local fallback not allowed yet")
+        let target: SummariseTarget
+        switch await chooseSummariser(config, reachable: deps.ollamaReachable,
+                                      embeddedReadiness: deps.embeddedReadiness) {
+        case .use(let chosen):
+            target = chosen
+        case .deferred(let why):
+            return ProcessResult(status: .deferredNeedLocal, base: base, message: why)
+        case .unavailable(let why):
+            // Permanent on this Mac — record it so the user sees a note-less
+            // recording explained, instead of it being retried every scan.
+            state.markFailed(base, why)
+            return ProcessResult(status: .failed, base: base, message: why)
         }
 
         state.markProcessing(base)

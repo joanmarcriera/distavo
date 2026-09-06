@@ -120,29 +120,32 @@ final class PipelineTests: XCTestCase {
     func testChooseSummariserLocalBackend() async {
         var cfg = Config()
         cfg.summarise.backend = "local"
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertEqual(target, .ollama(url: cfg.summarise.local.url, model: cfg.summarise.local.model))
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .use(.ollama(url: cfg.summarise.local.url,
+                                            model: cfg.summarise.local.model)))
     }
 
     func testChooseSummariserPrefersReachableServer() async {
         let cfg = Config()
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in true })
-        XCTAssertEqual(target, .ollama(url: cfg.summarise.server.url, model: cfg.summarise.server.model))
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in true })
+        XCTAssertEqual(choice, .use(.ollama(url: cfg.summarise.server.url,
+                                            model: cfg.summarise.server.model)))
     }
 
     /// The deferral behaviour the app depends on: server offline + no fallback
     /// must defer, never fail.
     func testChooseSummariserDefersWhenServerOfflineAndNoFallback() async {
         let cfg = Config()
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertNil(target)
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .deferred("Server Ollama offline; local fallback not allowed yet"))
     }
 
     func testChooseSummariserFallsBackToLocalWhenAllowed() async {
         var cfg = Config()
         cfg.summarise.allowLocalFallback = true
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertEqual(target, .ollama(url: cfg.summarise.local.url, model: cfg.summarise.local.model))
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .use(.ollama(url: cfg.summarise.local.url,
+                                            model: cfg.summarise.local.model)))
     }
 
     func testChooseSummariserPicksEmbeddedWhenEnabled() async {
@@ -150,8 +153,8 @@ final class PipelineTests: XCTestCase {
         cfg.summarise.backend = "embedded"
         cfg.summarise.embeddedEnabled = true
         // Unreachable server must not matter — the embedded engine needs no network.
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertEqual(target, .embedded)
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .use(.embedded))
     }
 
     /// The feature flag is a kill switch: with it off, a config asking for
@@ -160,8 +163,9 @@ final class PipelineTests: XCTestCase {
         var cfg = Config()
         cfg.summarise.backend = "embedded"
         cfg.summarise.embeddedEnabled = false
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in true })
-        XCTAssertEqual(target, .ollama(url: cfg.summarise.server.url, model: cfg.summarise.server.model))
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in true })
+        XCTAssertEqual(choice, .use(.ollama(url: cfg.summarise.server.url,
+                                            model: cfg.summarise.server.model)))
     }
 
     /// ...and with the flag off and no server, it must still DEFER (the
@@ -170,8 +174,84 @@ final class PipelineTests: XCTestCase {
         var cfg = Config()
         cfg.summarise.backend = "embedded"
         cfg.summarise.embeddedEnabled = false
-        let target = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertNil(target)
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .deferred("Server Ollama offline; local fallback not allowed yet"))
+    }
+
+    // MARK: Embedded readiness (transient vs permanent)
+
+    private func embeddedConfig() -> Config {
+        var cfg = Config()
+        cfg.summarise.backend = "embedded"
+        cfg.summarise.embeddedEnabled = true
+        return cfg
+    }
+
+    /// Apple Intelligence still downloading is the on-device analogue of
+    /// "server offline": it resolves itself in minutes, so the recording must
+    /// be DEFERRED and retried, never marked failed (a failed marker makes
+    /// iterPending skip it forever).
+    func testEmbeddedModelNotReadyDefersRatherThanFails() async {
+        let choice = await Pipeline.chooseSummariser(
+            embeddedConfig(), reachable: { _ in false },
+            embeddedReadiness: { .temporarilyUnavailable("model still downloading") })
+        XCTAssertEqual(choice, .deferred("model still downloading"))
+    }
+
+    /// Apple Intelligence switched off is also user-fixable, so also a deferral.
+    func testEmbeddedNotEnabledDefers() async {
+        let choice = await Pipeline.chooseSummariser(
+            embeddedConfig(), reachable: { _ in false },
+            embeddedReadiness: { .temporarilyUnavailable("Apple Intelligence is turned off") })
+        XCTAssertEqual(choice, .deferred("Apple Intelligence is turned off"))
+    }
+
+    /// A condition that can never resolve on this Mac must NOT defer forever —
+    /// it fails once, so the user is told to switch back to Ollama.
+    func testEmbeddedUnsupportedOSFailsRatherThanDefersForever() async {
+        let choice = await Pipeline.chooseSummariser(
+            embeddedConfig(), reachable: { _ in false },
+            embeddedReadiness: { .unsupported("needs macOS 26 or later") })
+        XCTAssertEqual(choice, .unavailable("needs macOS 26 or later"))
+    }
+
+    /// Readiness must not be consulted at all when the embedded backend is not
+    /// selected — an Ollama user should never pay for an Apple Intelligence probe.
+    func testEmbeddedReadinessNotConsultedForOllamaBackend() async {
+        var probed = false
+        let cfg = Config()  // default: server backend
+        _ = await Pipeline.chooseSummariser(
+            cfg, reachable: { _ in true },
+            embeddedReadiness: { probed = true; return .ready })
+        XCTAssertFalse(probed)
+    }
+
+    /// End-to-end: a transient embedded failure leaves NO failed marker, so the
+    /// next scan picks the recording up again. This is the whole point.
+    func testTransientEmbeddedUnavailabilityLeavesRecordingRetryable() async throws {
+        let (cfgBase, input) = try makeEnv()
+        var cfg = cfgBase
+        cfg.summarise.backend = "embedded"
+        cfg.summarise.embeddedEnabled = true
+
+        var d = deps()
+        d.embeddedReadiness = { .temporarilyUnavailable("model still downloading") }
+
+        let result = await Pipeline.processOne(path: input, config: cfg, deps: d,
+                                               stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .deferredNeedLocal)
+
+        // The recording must still be pending — not silently stuck failed.
+        let recordingsDir = Config.resolvePath(cfg.recordingsDir)
+        let workDir = Config.resolvePath(cfg.workDir)
+        let store = try DistavoState.Store(
+            stateDir: workDir.appendingPathComponent(".state"),
+            notesDir: Config.resolvePath(cfg.notesDir))
+        XCTAssertFalse(store.isFailed("demo"), "a deferral must not write a failed marker")
+        // Compare by name: the directory enumerator resolves /var -> /private/var.
+        let pending = DistavoState.iterPending(recordingsDir: recordingsDir, state: store)
+            .map(\.lastPathComponent)
+        XCTAssertTrue(pending.contains("demo.opus"), "deferred recording must remain pending")
     }
 
     /// End-to-end through processOne: the embedded target reaches the summarise

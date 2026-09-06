@@ -32,6 +32,22 @@ extension PipelineDeps {
             return try await ollamaSummarise(transcript, target, options, owner, speaker)
         }
 
+        // Readiness of the on-device summariser, so chooseSummariser can DEFER a
+        // recording (rather than fail it permanently) when Apple Intelligence is
+        // merely still downloading or switched off — the on-device analogue of
+        // "Ollama server offline". Conditions that can never resolve on this Mac
+        // stay failures, pointing the user back at Ollama.
+        deps.embeddedReadiness = {
+            guard let reason = EmbeddedSummariser.unavailableReason() else { return .ready }
+            let why = reason.errorDescription ?? "On-device summarisation is unavailable."
+            switch reason {
+            case .modelNotReady, .appleIntelligenceNotEnabled:
+                return .temporarilyUnavailable(why)
+            default:
+                return .unsupported(why)
+            }
+        }
+
         return deps
     }
 }

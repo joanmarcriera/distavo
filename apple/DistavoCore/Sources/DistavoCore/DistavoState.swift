@@ -137,6 +137,26 @@ public enum DistavoState {
             clearProcessing(base)
         }
 
+        /// Every recording currently sitting on a `.failed` marker, with the
+        /// error that was recorded, sorted by base name.
+        ///
+        /// A `.failed` marker persists until "Process now" clears it, and
+        /// `iterPending` skips failed bases — so without a way to enumerate them
+        /// a permanently-failed recording is invisible, discoverable only by
+        /// noticing a missing note or reading the activity log.
+        public func failedBases() -> [(base: String, error: String)] {
+            let items = (try? fm.contentsOfDirectory(
+                at: stateDir, includingPropertiesForKeys: nil)) ?? []
+            return items
+                .filter { $0.pathExtension == "failed" }
+                .map { url in
+                    let reason = (try? String(contentsOf: url, encoding: .utf8))?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    return (url.deletingPathExtension().lastPathComponent, reason)
+                }
+                .sorted { $0.0 < $1.0 }
+        }
+
         private func removeMarkers(suffix: String) {
             let items = (try? fm.contentsOfDirectory(
                 at: stateDir, includingPropertiesForKeys: nil)) ?? []

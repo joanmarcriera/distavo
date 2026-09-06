@@ -27,6 +27,10 @@ final class WatcherController: ObservableObject {
     @Published private(set) var hasLastTranscript = false
     @Published private(set) var lastError: String?
     @Published private(set) var recentActivity: [String] = []
+    /// Recordings sitting on a `.failed` marker. Unlike `lastError` (which only
+    /// reflects the current run and resets on relaunch), this is read from disk,
+    /// so a recording that failed weeks ago stays visible until it is retried.
+    @Published private(set) var failedRecordings: [(base: String, error: String)] = []
 
     private(set) var config: Config
     private var deps: PipelineDeps
@@ -156,6 +160,7 @@ final class WatcherController: ObservableObject {
             UserDefaults.standard.set(true, forKey: Self.onboardedKey)
         }
         seedLastNoteFromDisk()
+        refreshFailedRecordings()
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
             if !isPaused { await scanOnce() }
@@ -211,6 +216,24 @@ final class WatcherController: ObservableObject {
     }
 
     private func clearStaleProcessing() { store()?.clearStaleProcessing() }
+
+    /// Re-read the failed set from disk so the menu reflects reality rather than
+    /// only what happened since launch.
+    private func refreshFailedRecordings() {
+        failedRecordings = store()?.failedBases() ?? []
+    }
+
+    /// Clear the failed markers and rescan, so a user who sees the warning has a
+    /// way to act on it. Previously the only route was "Process now", which does
+    /// not say that it retries failures.
+    func retryFailedRecordings() {
+        Task { [weak self] in
+            guard let self else { return }
+            self.log("Retrying \(self.failedRecordings.count) failed recording(s)")
+            self.store()?.retryFailed()
+            await self.scanOnce()
+        }
+    }
 
     /// Warn (once) that macOS is about to ask for Local Network permission, so the
     /// user understands the prompt and clicks Allow. Only when a LAN server is set.
@@ -283,6 +306,7 @@ final class WatcherController: ObservableObject {
             handle(result)
         }
         processingActive = false
+        refreshFailedRecordings()
         refreshActivity()
     }
 

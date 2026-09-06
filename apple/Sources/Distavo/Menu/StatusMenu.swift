@@ -20,6 +20,15 @@ struct StatusMenu: View {
         if let error = controller.lastError {
             Text("⚠︎ \(error)")
         }
+        // Read from the .failed markers on disk, so recordings that failed in an
+        // earlier run stay visible instead of silently never producing a note.
+        if !controller.failedRecordings.isEmpty {
+            let count = controller.failedRecordings.count
+            Text("⚠︎ \(count) recording\(count == 1 ? "" : "s") failed — no note was written")
+            Button("Retry \(count) failed recording\(count == 1 ? "" : "s")") {
+                controller.retryFailedRecordings()
+            }
+        }
 
         Divider()
 

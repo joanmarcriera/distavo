@@ -188,4 +188,54 @@ final class StateTests: XCTestCase {
         XCTAssertNil(DistavoState.newestNote(
             inNotesDir: empty.appendingPathComponent("does-not-exist")))
     }
+
+    // MARK: failedBases
+
+    private func freshStore() throws -> DistavoState.Store {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("distavo-failed-\(UUID().uuidString)")
+        return try DistavoState.Store(stateDir: root.appendingPathComponent(".state"),
+                                      notesDir: root.appendingPathComponent("notes"))
+    }
+
+    /// The visibility fix: a recording that failed in an earlier run must remain
+    /// enumerable, with its reason, so the menu can surface it. iterPending
+    /// deliberately skips failed bases, so this is the only way to find them.
+    func testFailedBasesListsEachFailureWithItsReason() throws {
+        let store = try freshStore()
+        store.markFailed("Meeting 2026-07-07 12.36.59", "could not start reading")
+        store.markFailed("Meeting 2026-07-07 14.47.35", "could not start reading")
+        store.markDone("Meeting 2026-08-01 09.00.00")
+
+        let failed = try XCTUnwrap(store.failedBases() as [(base: String, error: String)]?)
+        XCTAssertEqual(failed.map(\.base),
+                       ["Meeting 2026-07-07 12.36.59", "Meeting 2026-07-07 14.47.35"])
+        XCTAssertTrue(failed.allSatisfy { $0.error == "could not start reading" })
+    }
+
+    func testFailedBasesIsEmptyWhenNothingFailed() throws {
+        let store = try freshStore()
+        store.markDone("ok")
+        XCTAssertTrue(store.failedBases().isEmpty)
+    }
+
+    /// retryFailed is what the new menu action calls — it must actually empty
+    /// the set, otherwise the warning would never clear.
+    func testRetryFailedClearsTheFailedSet() throws {
+        let store = try freshStore()
+        store.markFailed("a", "boom")
+        store.markFailed("b", "boom")
+        XCTAssertEqual(store.failedBases().count, 2)
+        store.retryFailed()
+        XCTAssertTrue(store.failedBases().isEmpty)
+    }
+
+    /// markDone must clear that base's failure, so a recording fixed by a retry
+    /// stops being reported.
+    func testMarkDoneClearsAPriorFailure() throws {
+        let store = try freshStore()
+        store.markFailed("a", "boom")
+        store.markDone("a")
+        XCTAssertTrue(store.failedBases().isEmpty)
+    }
 }

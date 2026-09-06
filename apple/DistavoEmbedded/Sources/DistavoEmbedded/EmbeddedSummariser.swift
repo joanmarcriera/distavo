@@ -23,6 +23,7 @@ public enum EmbeddedSummariserError: LocalizedError, Equatable {
     case appleIntelligenceNotEnabled
     case modelNotReady
     case emptyResult
+    case contextTooSmall
     case refused(String)
     case failed(String)
 
@@ -42,6 +43,10 @@ public enum EmbeddedSummariserError: LocalizedError, Equatable {
                 + "shortly, or use Ollama in Settings."
         case .emptyResult:
             return "On-device summarisation produced no text."
+        case .contextTooSmall:
+            return "The on-device model's context window is too small to summarise "
+                + "anything — it cannot hold the instructions and an answer at once. "
+                + "Use Ollama in Settings instead."
         case .refused(let why):
             return "The on-device model declined to summarise this recording (\(why)). "
                 + "Ollama has no such content filter — switch to it in Settings."
@@ -134,6 +139,9 @@ public enum EmbeddedSummariser {
             let prompt = Prompt.build(
                 transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker)
             return try await generate(prompt, maxOutputTokens: finalBudget.reservedForOutput)
+
+        case .contextTooSmall:
+            throw EmbeddedSummariserError.contextTooSmall
 
         case .mapReduce(let chunks):
             guard !chunks.isEmpty else { throw EmbeddedSummariserError.emptyResult }

@@ -211,4 +211,25 @@ final class EmbeddedSummaryTests: XCTestCase {
         XCTAssertTrue(prompt.contains("budget agreed"))
         XCTAssertTrue(prompt.contains("Marc"))
     }
+
+    /// A context window too small to hold the map instructions plus reserved
+    /// output yields a DISTINCT plan, so the error can blame the window instead
+    /// of reporting "produced no text" and sending the user to check the model.
+    func testPlanReportsContextTooSmallRatherThanEmptyChunks() {
+        let plan = EmbeddedSummaryPlanner.plan(
+            transcript: String(repeating: "SPEAKER_00: hello there\n", count: 200),
+            contextSize: 64, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        XCTAssertEqual(plan, .contextTooSmall)
+    }
+
+    /// The normal map-reduce path must be unaffected.
+    func testPlanStillMapReducesWithARealContextWindow() {
+        let plan = EmbeddedSummaryPlanner.plan(
+            transcript: String(repeating: "SPEAKER_00: hello there\n", count: 2000),
+            contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        guard case .mapReduce(let chunks) = plan else {
+            return XCTFail("expected mapReduce, got \(plan)")
+        }
+        XCTAssertFalse(chunks.isEmpty)
+    }
 }

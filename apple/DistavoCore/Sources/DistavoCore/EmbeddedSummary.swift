@@ -96,6 +96,12 @@ public enum EmbeddedSummaryPlan: Equatable {
     case single
     /// Too long — summarise each chunk, then summarise the summaries.
     case mapReduce(chunks: [String])
+    /// The context window cannot even hold the map instructions plus the space
+    /// reserved for an answer, so no chunk of ANY size would fit. Distinct from
+    /// `.mapReduce(chunks: [])` so the surfaced error can blame the window
+    /// rather than the model: "produced no text" sends the user to check Apple
+    /// Intelligence when the real fault is a context size that is too small.
+    case contextTooSmall
 }
 
 public enum EmbeddedSummaryPlanner {
@@ -183,6 +189,7 @@ public enum EmbeddedSummaryPlanner {
             return .single
         }
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
+        guard mapBudget.transcriptTokens > 0 else { return .contextTooSmall }
         return .mapReduce(
             chunks: chunks(transcript: transcript, budgetTokens: mapBudget.transcriptTokens))
     }

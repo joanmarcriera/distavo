@@ -6,6 +6,11 @@ import DistavoCore
 public enum EmbeddedTranscriberError: LocalizedError {
     case unsupportedHardware
     case emptyResult
+    /// A model could not be loaded. `offline` is carried separately because
+    /// WhisperKit's own message leads with "Model not found. Please check the
+    /// model or repo name" even when the real cause was no internet connection,
+    /// which sends the user to re-pick a model that was never the problem.
+    case modelUnavailable(model: String, offline: Bool, underlying: String)
 
     public var errorDescription: String? {
         switch self {
@@ -14,6 +19,14 @@ public enum EmbeddedTranscriberError: LocalizedError {
                 + "transcription engine to a WhisperX server in Settings."
         case .emptyResult:
             return "Built-in transcription produced no text."
+        case let .modelUnavailable(model, offline, underlying):
+            if offline {
+                return "No internet connection, so the \(model) model could not be "
+                    + "downloaded. Distavo only needs the network for this one-time "
+                    + "download — reconnect and it will retry automatically. "
+                    + "(\(underlying))"
+            }
+            return "Could not load the \(model) model: \(underlying)"
         }
     }
 }
@@ -93,7 +106,12 @@ public actor EmbeddedTranscriber {
             verbose: false,
             load: true,
             download: true)
-        let whisper = try await WhisperKit(whisperConfig)
+        let whisper: WhisperKit
+        do {
+            whisper = try await WhisperKit(whisperConfig)
+        } catch {
+            throw Self.modelError(error, model: model.displayName)
+        }
 
         report("Transcribing on this Mac…")
         var options = DecodingOptions()
@@ -113,12 +131,26 @@ public actor EmbeddedTranscriber {
             download: true,
             load: true,
             verbose: false)
-        let speakerKit = try await SpeakerKit(speakerConfig)
+        let speakerKit: SpeakerKit
+        do {
+            speakerKit = try await SpeakerKit(speakerConfig)
+        } catch {
+            throw Self.modelError(error, model: "speaker identification")
+        }
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
         let diarization = try await speakerKit.diarize(
             audioArray: audio,
             options: PyannoteDiarizationOptions(numberOfSpeakers: config.numSpeakers))
         let groups = diarization.addSpeakerInfo(to: results, strategy: .subsegment)
         return EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups)
+    }
+
+    /// Classify a model load/download failure so the surfaced message names the
+    /// real cause rather than repeating the SDK's misleading primary message.
+    static func modelError(_ error: Error, model: String) -> EmbeddedTranscriberError {
+        .modelUnavailable(model: model,
+                          offline: NetworkScope.describesOfflineFailure(error),
+                          underlying: (error as? LocalizedError)?.errorDescription
+                              ?? error.localizedDescription)
     }
 }

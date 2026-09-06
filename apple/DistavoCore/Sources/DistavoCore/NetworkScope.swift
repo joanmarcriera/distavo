@@ -132,6 +132,36 @@ public enum NetworkScope {
         return .remoteDown
     }
 
+    /// True when a failure was ultimately caused by having no usable network.
+    ///
+    /// Needed because third-party SDKs often *stringify* the underlying URLError
+    /// into their own message instead of nesting it as a castable `Error`.
+    /// WhisperKit does exactly that: losing the network while fetching a model
+    /// surfaces as `Model not found. Please check the model or repo name and try
+    /// again. Error: downloadError("The Internet connection appears to be
+    /// offline.")` — a primary message that sends the user to check their model
+    /// choice when the real fault is the connection. So try the typed cast
+    /// first, then fall back to matching the wrapped text.
+    public static func describesOfflineFailure(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .cannotFindHost,
+                 .cannotConnectToHost, .dnsLookupFailed, .timedOut,
+                 .dataNotAllowed, .internationalRoamingOff:
+                return true
+            default:
+                return false
+            }
+        }
+        let text = "\(error)".lowercased()
+        return ["the internet connection appears to be offline",
+                "the network connection was lost",
+                "a data connection is not currently allowed",
+                "could not connect to the server",
+                "hostname could not be found",
+                "appears to be offline"].contains { text.contains($0) }
+    }
+
     /// True when the failure itself tells us name resolution is unavailable.
     /// `friendlyError` runs on the failure path, *after* URLSession has already
     /// spent its timeout, so a second synchronous `getaddrinfo` would block a

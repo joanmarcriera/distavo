@@ -209,4 +209,36 @@ final class NetworkScopeTests: XCTestCase {
         XCTAssertEqual(resolverCalls, 0)
         XCTAssertTrue(message.contains("Local Network"))
     }
+
+    // MARK: - describesOfflineFailure
+
+    /// The real 2026-07-31 log line: WhisperKit stringifies the URLError into
+    /// its own message, so the typed cast fails and only text matching can tell
+    /// us the user was simply offline.
+    func testDetectsOfflineInsideWhisperKitsWrappedMessage() {
+        struct SDKError: Error, CustomStringConvertible {
+            var description: String {
+                "Model not found. Please check the model or repo name and try again. "
+                    + #"Error: downloadError("The Internet connection appears to be offline.")"#
+            }
+        }
+        XCTAssertTrue(NetworkScope.describesOfflineFailure(SDKError()))
+    }
+
+    func testDetectsOfflineFromATypedURLError() {
+        XCTAssertTrue(NetworkScope.describesOfflineFailure(URLError(.notConnectedToInternet)))
+        XCTAssertTrue(NetworkScope.describesOfflineFailure(URLError(.networkConnectionLost)))
+        XCTAssertTrue(NetworkScope.describesOfflineFailure(URLError(.dnsLookupFailed)))
+    }
+
+    /// Must not claim "you are offline" for failures that are nothing of the kind —
+    /// that would just swap one misleading message for another.
+    func testDoesNotClaimOfflineForUnrelatedFailures() {
+        struct Corrupt: Error, CustomStringConvertible {
+            var description: String { "checksum mismatch in model weights" }
+        }
+        XCTAssertFalse(NetworkScope.describesOfflineFailure(Corrupt()))
+        XCTAssertFalse(NetworkScope.describesOfflineFailure(URLError(.badURL)))
+        XCTAssertFalse(NetworkScope.describesOfflineFailure(URLError(.unsupportedURL)))
+    }
 }

@@ -154,4 +154,38 @@ final class StateTests: XCTestCase {
             .map { DistavoState.baseFor(recordingsDir: rec, path: $0) }.sorted()
         XCTAssertEqual(bases, ["Anglia-water__recording", "Dsit__recording"])
     }
+
+    // MARK: newestNote
+
+    private func notesDirWith(_ files: [(String, TimeInterval)]) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("distavo-notes-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for (name, ageSeconds) in files {
+            let url = dir.appendingPathComponent(name)
+            try "note".write(to: url, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.modificationDate: Date(timeIntervalSinceNow: -ageSeconds)], ofItemAtPath: url.path)
+        }
+        return dir
+    }
+
+    /// The whole point: after a relaunch the menu must find the newest note that
+    /// already exists on disk, not wait for a new recording to be processed.
+    func testNewestNotePicksTheMostRecentlyModified() throws {
+        let dir = try notesDirWith([("old.md", 9000), ("newest.md", 10), ("middle.md", 500)])
+        XCTAssertEqual(DistavoState.newestNote(inNotesDir: dir)?.lastPathComponent, "newest.md")
+    }
+
+    func testNewestNoteIgnoresNonMarkdownFiles() throws {
+        let dir = try notesDirWith([("note.md", 900), ("scratch.txt", 1), ("audio.wav", 1)])
+        XCTAssertEqual(DistavoState.newestNote(inNotesDir: dir)?.lastPathComponent, "note.md")
+    }
+
+    func testNewestNoteReturnsNilForEmptyOrMissingDir() throws {
+        let empty = try notesDirWith([])
+        XCTAssertNil(DistavoState.newestNote(inNotesDir: empty))
+        XCTAssertNil(DistavoState.newestNote(
+            inNotesDir: empty.appendingPathComponent("does-not-exist")))
+    }
 }

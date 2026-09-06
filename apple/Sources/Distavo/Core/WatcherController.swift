@@ -20,6 +20,11 @@ final class WatcherController: ObservableObject {
     @Published private(set) var allowLocalOllama: Bool
     @Published private(set) var watchIntervalSeconds: Int
     @Published private(set) var hasLastNote = false
+    /// Separate from `hasLastNote`: the note survives in notesDir but its cleaned
+    /// transcript lives in the work dir, which the user may have cleared. Gating
+    /// both menu items on one flag would enable "Copy last transcript" with
+    /// nothing to copy.
+    @Published private(set) var hasLastTranscript = false
     @Published private(set) var lastError: String?
     @Published private(set) var recentActivity: [String] = []
 
@@ -150,11 +155,32 @@ final class WatcherController: ObservableObject {
                                 : "Choose your folders and point Distavo at your WhisperX & Ollama servers to begin.")
             UserDefaults.standard.set(true, forKey: Self.onboardedKey)
         }
+        seedLastNoteFromDisk()
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
             if !isPaused { await scanOnce() }
             try? await Task.sleep(nanoseconds: UInt64(max(1, watchIntervalSeconds)) * 1_000_000_000)
         }
+    }
+
+    /// Seed "last note" from the newest note already on disk.
+    ///
+    /// `hasLastNote` used to start false and only become true after a recording
+    /// was processed *in this run*, so after every relaunch both "Copy last
+    /// transcript" and "Open last note" were greyed out even with a folder full
+    /// of real notes. Only seeds when nothing has been processed yet this run,
+    /// so it can never overwrite a fresher in-session result.
+    private func seedLastNoteFromDisk() {
+        guard lastDone == nil,
+              let note = DistavoState.newestNote(
+                inNotesDir: Config.resolvePath(config.notesDir)) else { return }
+        let base = note.deletingPathExtension().lastPathComponent
+        let transcript = Config.resolvePath(config.workDir)
+            .appendingPathComponent("\(base).transcript.clean.txt")
+        let haveTranscript = FileManager.default.fileExists(atPath: transcript.path)
+        lastDone = (base, note, haveTranscript ? transcript : nil)
+        hasLastNote = true
+        hasLastTranscript = haveTranscript
     }
 
     func showSettings() { SettingsWindowController.shared.show(self) }
@@ -266,7 +292,8 @@ final class WatcherController: ObservableObject {
             status = "Last note: \(result.base)"
             deferredBases.remove(result.base)
             lastDone = (result.base, result.notePath, result.transcriptPath)
-            hasLastNote = true
+            hasLastNote = result.notePath != nil
+            hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             lastError = nil
             log("Saved note: \(result.base)")
@@ -382,6 +409,7 @@ final class WatcherController: ObservableObject {
         if newConfig.summarise.allowLocalFallback && !wasAllowed { deferredBases.removeAll() }
         // New settings may fix a prior failure — clear failed markers and retry.
         lastError = nil
+        seedLastNoteFromDisk()   // the notes folder may have just been re-pointed
         maybeWarnLocalNetwork()
         processNow()
     }

@@ -156,6 +156,28 @@ public enum DistavoState {
     }
 
     /// List recordings still needing work (recursive, sorted, marker-filtered).
+    /// The most recently modified note already on disk, if any.
+    ///
+    /// Lets the app seed its "last note" state at launch. Without this, the
+    /// menu's "Open last note" / "Copy last transcript" stay disabled after
+    /// every restart until a new recording happens to be processed — even when
+    /// the notes folder is full of real notes.
+    public static func newestNote(inNotesDir notesDir: URL) -> URL? {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: notesDir, includingPropertiesForKeys: keys) else { return nil }
+        return entries
+            .filter { $0.pathExtension.lowercased() == "md" }
+            .compactMap { url -> (url: URL, date: Date)? in
+                guard let v = try? url.resourceValues(forKeys: Set(keys)),
+                      v.isRegularFile == true,
+                      let date = v.contentModificationDate else { return nil }
+                return (url, date)
+            }
+            .max { $0.date < $1.date }?
+            .url
+    }
+
     public static func iterPending(
         recordingsDir: URL, state: Store, extensions: Set<String> = supportedExtensions
     ) -> [URL] {

@@ -33,7 +33,7 @@ struct StatusMenu: View {
 
         Button("Process now") { controller.processNow() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
-            .disabled(!controller.hasLastNote)
+            .disabled(!controller.hasLastTranscript)
         Button("Open last note") { controller.openLastNote() }
             .disabled(!controller.hasLastNote)
 

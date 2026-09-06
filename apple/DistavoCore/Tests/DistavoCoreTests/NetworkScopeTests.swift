@@ -163,4 +163,50 @@ final class NetworkScopeTests: XCTestCase {
             url: "https://api.example.com", resolver: publicResolver)
         XCTAssertFalse(message.contains("Local Network"))
     }
+
+    /// friendlyError runs after URLSession has already spent its timeout. When
+    /// the failure is itself a DNS failure, resolving again can only burn a
+    /// second resolver timeout to learn the same thing — so it must not.
+    func testFriendlyErrorDoesNotReResolveAfterADNSFailure() {
+        for code in [URLError.Code.cannotFindHost, .dnsLookupFailed,
+                     .notConnectedToInternet, .timedOut] {
+            var resolverCalls = 0
+            let counting: NetworkScope.HostResolver = { _ in
+                resolverCalls += 1
+                return ["192.168.0.5"]
+            }
+            _ = NetworkScope.friendlyError(
+                URLError(code), service: "Ollama",
+                url: "https://ollama.lab.riera.co.uk", resolver: counting)
+            XCTAssertEqual(resolverCalls, 0, "re-resolved on \(code)")
+        }
+    }
+
+    /// The converse: a failure that proves DNS worked (we connected far enough
+    /// to be refused) still resolves, so a public-looking FQDN on the LAN keeps
+    /// its Local Network hint.
+    func testFriendlyErrorStillResolvesWhenDNSDemonstrablyWorked() {
+        var resolverCalls = 0
+        let counting: NetworkScope.HostResolver = { _ in
+            resolverCalls += 1
+            return ["192.168.0.5"]
+        }
+        let message = NetworkScope.friendlyError(
+            URLError(.cannotConnectToHost), service: "Ollama",
+            url: "https://ollama.lab.riera.co.uk", resolver: counting)
+        XCTAssertEqual(resolverCalls, 1)
+        XCTAssertTrue(message.contains("Local Network"))
+    }
+
+    /// A LAN endpoint named by IP keeps its hint on the no-DNS path, because
+    /// the name check alone is enough.
+    func testFriendlyErrorKeepsLanHintForLiteralAddressWithoutResolving() {
+        var resolverCalls = 0
+        let counting: NetworkScope.HostResolver = { _ in resolverCalls += 1; return [] }
+        let message = NetworkScope.friendlyError(
+            URLError(.cannotFindHost), service: "WhisperX",
+            url: "http://192.168.0.5:9000", resolver: counting)
+        XCTAssertEqual(resolverCalls, 0)
+        XCTAssertTrue(message.contains("Local Network"))
+    }
 }

@@ -132,6 +132,22 @@ public enum NetworkScope {
         return .remoteDown
     }
 
+    /// True when the failure itself tells us name resolution is unavailable.
+    /// `friendlyError` runs on the failure path, *after* URLSession has already
+    /// spent its timeout, so a second synchronous `getaddrinfo` would block a
+    /// cooperative-pool thread for another full resolver timeout before the user
+    /// sees any text. In exactly these cases that second resolve is also
+    /// pointless — it can only fail the same way — so fall back to the pure
+    /// name check instead.
+    static func resolutionIsPointless(_ code: URLError.Code) -> Bool {
+        switch code {
+        case .cannotFindHost, .dnsLookupFailed, .notConnectedToInternet, .timedOut:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Turn a connection failure into an actionable message, pointing at Local
     /// Network permission when the target is on the LAN (by name or by resolution).
     public static func friendlyError(_ error: Error, service: String, url: String,
@@ -144,7 +160,11 @@ public enum NetworkScope {
         case .notConnectedToInternet, .cannotConnectToHost, .networkConnectionLost,
              .cannotFindHost, .timedOut, .resourceUnavailable:
             var message = "Could not reach \(service) at \(host)."
-            if isLocalOrResolvesLocal(url, resolver: resolver) {
+            // Only pay for DNS when it can still tell us something (see above).
+            let onLAN = resolutionIsPointless(urlError.code)
+                ? isLocalNetworkHost(url)
+                : isLocalOrResolvesLocal(url, resolver: resolver)
+            if onLAN {
                 message += " Check the server is running and that Distavo has Local Network "
                     + "permission (System Settings → Privacy & Security → Local Network)."
             } else {

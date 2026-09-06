@@ -224,7 +224,7 @@ To simulate a fresh download (adds the quarantine flag) before testing on anothe
 xattr -w com.apple.quarantine "0081;00000000;Safari;" build/export-direct/Distavo.app
 ```
 
-### 2.7 Auto-update — Sparkle (implemented; needs the signing key)
+### 2.7 Auto-update — Sparkle (live since 1.8.0)
 
 [Sparkle 2](https://sparkle-project.org/) is wired into the **Direct** edition only: the `Distavo`
 target links the Sparkle SPM package, `SparkleUpdater` drives a "Check for Updates…" menu item and a
@@ -232,11 +232,24 @@ Settings toggle (both `#if EDITION_DIRECT`), and `release.yml` generates + signs
 tag. The App Store and Setapp targets don't link Sparkle (Setapp ships its own updater; the App Store
 updates through the store).
 
-**Remaining one-time setup** (EdDSA `generate_keys` → `SUPublicEDKey` + the `SPARKLE_ED_PRIVATE_KEY`
-secret, and hosting `appcast.xml` at the constant `SUFeedURL`) plus the manual update-verification
-checklist live in **`docs/update-verification.md`**. Until the key is set, `SUPublicEDKey` is empty
-and Sparkle refuses updates (safe), and the release appcast step no-ops — so shipping a Direct build
-before Sparkle is configured is harmless.
+The one-time setup is **done**: `SUPublicEDKey` in `apple/Distavo-Direct-Info.plist` holds a real
+EdDSA public key, the `SPARKLE_ED_PRIVATE_KEY` secret is set, and shipped Direct builds start the
+updater (`startingUpdater: true`) — so they poll `https://distavo.com/appcast.xml` on a schedule and
+from "Check for Updates…".
+
+> **Publishing the appcast is a required, MANUAL release step.** `release.yml` signs `appcast.xml`
+> and attaches it to the GitHub Release, but nothing copies it to `SUFeedURL`. Skip it and the hosted
+> feed goes stale *silently* — Sparkle reports "you're up to date" while newer versions exist, which
+> is harder to notice than an error. After every Direct release run:
+>
+> ```sh
+> ./ops/publish-appcast.sh vX.Y.Z          # DRY_RUN=1 to check without uploading
+> ```
+>
+> It refuses an appcast that doesn't name the tag or carries no signature, backs up the live file,
+> and verifies the published URL afterwards.
+
+The manual update-verification checklist lives in **`docs/update-verification.md`**.
 
 ---
 

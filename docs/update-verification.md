@@ -11,8 +11,9 @@ prompt), so this is the manual checklist — mirroring `docs/meeting-capture-ver
 - `SparkleUpdater` (`apple/Sources/Distavo/Core/`) is compiled `#if EDITION_DIRECT`; `AppUpdaterFactory`
   returns `nil` elsewhere, so the "Check for Updates…" menu item and the "Automatically check for
   updates" settings toggle only appear in the Direct build.
-- `apple/Distavo-Direct-Info.plist` carries `SUFeedURL = https://distavo.com/appcast.xml` and an
-  **empty** `SUPublicEDKey` (Sparkle refuses updates until it's filled — the safe default).
+- `apple/Distavo-Direct-Info.plist` carries `SUFeedURL = https://distavo.com/appcast.xml` and a
+  **real** `SUPublicEDKey` — so shipped Direct builds do check for updates. (It was empty, the safe
+  default, until 1.8.0.)
 - `.github/workflows/release.yml` generates + signs `appcast.xml` on tag **iff** the
   `SPARKLE_ED_PRIVATE_KEY` secret exists, and attaches it to the GitHub Release.
 
@@ -29,7 +30,8 @@ prompt), so this is the manual checklist — mirroring `docs/meeting-capture-ver
      not secret; commit it).
    - Store the **private** key in `~/.tokens` and add it as the GitHub Actions repo secret
      **`SPARKLE_ED_PRIVATE_KEY`**. **Never commit or print the private key.** Then delete `private.pem`.
-2. **Host the appcast** at the constant `SUFeedURL` — `https://distavo.com/appcast.xml`. Each Direct
+2. **Host the appcast** at the constant `SUFeedURL` — `https://distavo.com/appcast.xml`, via
+   `./ops/publish-appcast.sh vX.Y.Z` after every Direct release (see below). Each Direct
    release attaches the signed `appcast.xml`; publish/sync it to that URL (the enclosure inside it
    already points at the GitHub Release `Distavo.dmg`). SUFeedURL must stay constant, so don't point
    it at a per-release asset URL.

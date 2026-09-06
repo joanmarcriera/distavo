@@ -188,9 +188,25 @@ final class WatcherController: ObservableObject {
 
     /// Warn (once) that macOS is about to ask for Local Network permission, so the
     /// user understands the prompt and clicks Allow. Only when a LAN server is set.
+    ///
+    /// `NetworkScope.usesLocalNetwork` resolves each configured host with a
+    /// synchronous `getaddrinfo`, so it must never run on the main actor: a
+    /// remote summarise URL on a flaky DNS path would freeze the menu bar for
+    /// the full resolver timeout (5-30 s) at launch and on every settings Save.
+    /// Resolve off-actor, then present the alert back on the main actor.
     private func maybeWarnLocalNetwork() {
-        guard NetworkScope.usesLocalNetwork(config),
-              !UserDefaults.standard.bool(forKey: Self.localNetWarnedKey) else { return }
+        guard !UserDefaults.standard.bool(forKey: Self.localNetWarnedKey) else { return }
+        let cfg = config
+        Task.detached(priority: .utility) { [weak self] in
+            guard NetworkScope.usesLocalNetwork(cfg) else { return }
+            await self?.presentLocalNetworkWarning()
+        }
+    }
+
+    private func presentLocalNetworkWarning() {
+        // Re-check: two resolutions can land here (launch + an early Save), and
+        // the flag can only be set once we are back on the main actor.
+        guard !UserDefaults.standard.bool(forKey: Self.localNetWarnedKey) else { return }
         UserDefaults.standard.set(true, forKey: Self.localNetWarnedKey)
         let alert = NSAlert()
         alert.messageText = "Distavo needs Local Network access"

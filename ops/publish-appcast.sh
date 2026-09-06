@@ -55,7 +55,13 @@ fi
 STAMP="$(date +%Y-%m-%d)"
 echo "==> Backing up the live appcast and uploading"
 ssh "$HOST" "test -f '$DOCROOT/appcast.xml' && cp -a '$DOCROOT/appcast.xml' '$DOCROOT/appcast.xml.bak-$STAMP' || true"
-scp -q "$LOCAL" "$HOST:$DOCROOT/appcast.xml"
+# Upload beside the target, then rename into place: the live appcast.xml is
+# root-owned (nginx wrote it) so it cannot be opened for writing, but the
+# directory is ours — and unlink/rename needs directory permission, not file
+# permission. The rename is also atomic, so nginx never serves a half-written
+# feed to a client that is mid-update-check.
+scp -q "$LOCAL" "$HOST:$DOCROOT/.appcast.xml.new"
+ssh "$HOST" "chmod 644 '$DOCROOT/.appcast.xml.new' && mv -f '$DOCROOT/.appcast.xml.new' '$DOCROOT/appcast.xml'"
 
 echo "==> Verifying the published feed"
 PUBLISHED="$(curl -fsS "$URL")"

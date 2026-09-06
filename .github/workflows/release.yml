@@ -141,13 +141,18 @@ jobs:
           curl -fsSL -o /tmp/sparkle.tar.xz \
             "https://github.com/sparkle-project/Sparkle/releases/download/${SPARKLE_VERSION}/Sparkle-${SPARKLE_VERSION}.tar.xz"
           mkdir -p /tmp/sparkle && tar -xf /tmp/sparkle.tar.xz -C /tmp/sparkle
-          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > /tmp/sparkle_ed_priv
+          # The EdDSA private key is the one secret that can forge a Distavo
+          # update. Create it unreadable to other users (umask BEFORE the write,
+          # not chmod after) and remove it on EVERY exit path — `set -e` aborts
+          # the step on a generate_appcast failure, so a trailing `rm` never runs.
+          KEYFILE="$(mktemp -t sparkle_ed_priv)"
+          trap 'rm -f -- "$KEYFILE"' EXIT
+          (umask 077; printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$KEYFILE")
           mkdir -p build/appcast && cp build/Distavo.dmg build/appcast/
           /tmp/sparkle/bin/generate_appcast \
-            --ed-key-file /tmp/sparkle_ed_priv \
+            --ed-key-file "$KEYFILE" \
             --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
             build/appcast
-          rm -f /tmp/sparkle_ed_priv
           echo "Generated appcast:"; cat build/appcast/appcast.xml
 
       - name: Upload DMG artifact (dry run)

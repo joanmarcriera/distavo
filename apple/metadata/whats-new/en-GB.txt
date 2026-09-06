@@ -1,2 +1,6 @@
 • Early preview, off by default: Distavo can now write your meeting notes entirely on this Mac using Apple Intelligence, with no summarisation server to install. Turn it on by setting "embedded_enabled" in Distavo's settings file, then choose "Built-in (this Mac)" as the summarisation backend. Long recordings are summarised in several passes, so notes are less detailed than a full Ollama model — Ollama remains the default.
 • Summarisation now picks its engine through a single code path, so a recording still waits politely for your server to come back instead of being marked as failed.
+• "Copy last transcript" and "Open last note" now work as soon as Distavo starts, instead of staying greyed out until the next recording was processed.
+• Recordings that failed are no longer invisible: the menu now says how many failed and offers to retry them, so a recording can't quietly end up with no note.
+• If the built-in transcription model can't be downloaded because you're offline, Distavo now says so plainly rather than suggesting the model name is wrong.
+• Saving settings no longer briefly freezes the menu when a server address is slow to look up.

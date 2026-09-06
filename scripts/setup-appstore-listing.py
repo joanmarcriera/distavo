@@ -4,7 +4,7 @@
 Fills everything Apple demands before a first review submission that the
 public API supports: subtitle + privacy-policy URL, primary category, the
 age-rating questionnaire, copyright, description/keywords/support URL,
-free pricing, the App Review contact, and desktop screenshots.
+pricing, the App Review contact, and desktop screenshots.
 
 NOT automatable (App Store Connect UI only): publishing the App Privacy
 "data usages" answers.
@@ -170,33 +170,52 @@ def setup_version(client: AscClient, version: dict, listing: dict) -> str:
     return locs[0]["id"] if locs else ""
 
 
-def setup_free_price(client: AscClient, app_id: str) -> None:
+# Distavo's retail price. Set 2026-09-06, replacing the original free listing, so
+# the Mac App Store, the Setapp reference price and distavo.com all agree — Setapp
+# will not consider an app with no stated price (see docs/setapp-submission.md).
+RETAIL_PRICE_USD = "29.00"
+
+
+def setup_price(client: AscClient, app_id: str) -> None:
+    """Set the base-territory (USA) price to RETAIL_PRICE_USD.
+
+    Idempotent and deliberately non-destructive: if any price schedule already
+    exists this returns without touching it, so re-running the listing setup can
+    never silently reprice a live app. To change the price, edit it in App Store
+    Connect or clear the schedule first.
+    """
     resp = client.session.get(
         f"{_submit.API_BASE}/v1/appPriceSchedules/{app_id}/manualPrices",
         headers={"Authorization": f"Bearer {client._bearer()}"}, timeout=60)
     if resp.status_code == 200 and resp.json().get("data"):
         print("price schedule: already set")
         return
-    points = client.get(f"/v1/apps/{app_id}/appPricePoints",
-                        params={"filter[territory]": "USA", "limit": "1"})["data"]
-    if not points:
-        raise SubmitError("no price points returned for territory USA")
-    free_point = points[0]  # price points are sorted ascending; first is 0.00
-    price = free_point.get("attributes", {}).get("customerPrice")
-    if price not in ("0.0", "0.00", "0"):
-        raise SubmitError(f"expected the first USA price point to be free, got {price}")
+    point = None
+    url = (f"{_submit.API_BASE}/v1/apps/{app_id}/appPricePoints"
+           f"?filter[territory]=USA&limit=200")
+    while url and point is None:
+        page = client.session.get(
+            url, headers={"Authorization": f"Bearer {client._bearer()}"}, timeout=60).json()
+        for candidate in page.get("data", []):
+            if candidate.get("attributes", {}).get("customerPrice") in (
+                    RETAIL_PRICE_USD, RETAIL_PRICE_USD.rstrip("0").rstrip(".")):
+                point = candidate
+                break
+        url = page.get("links", {}).get("next")
+    if point is None:
+        raise SubmitError(f"no USA price point at {RETAIL_PRICE_USD}")
     client.mutate(
         "POST", "/v1/appPriceSchedules",
         {"data": {"type": "appPriceSchedules", "relationships": {
             "app": {"data": {"type": "apps", "id": app_id}},
             "baseTerritory": {"data": {"type": "territories", "id": "USA"}},
-            "manualPrices": {"data": [{"type": "appPrices", "id": "${price-free}"}]}},
+            "manualPrices": {"data": [{"type": "appPrices", "id": "${price}"}]}},
           },
-         "included": [{"type": "appPrices", "id": "${price-free}",
+         "included": [{"type": "appPrices", "id": "${price}",
                        "attributes": {"startDate": None},
                        "relationships": {"appPricePoint": {"data": {
-                           "type": "appPricePoints", "id": free_point["id"]}}}}]},
-        "set price schedule to FREE (base territory USA)",
+                           "type": "appPricePoints", "id": point["id"]}}}}]},
+        f"set price schedule to USD {RETAIL_PRICE_USD} (base territory USA)",
     )
 
 
@@ -327,7 +346,7 @@ def main() -> int:
     setup_app_info(client, app_id, listing)
     version = find_editable_version(client, app_id)
     ver_loc_id = setup_version(client, version, listing)
-    setup_free_price(client, app_id)
+    setup_price(client, app_id)
     setup_review_detail(client, version["id"])
     if ver_loc_id:
         upload_screenshots(client, ver_loc_id, args.screenshots_dir)

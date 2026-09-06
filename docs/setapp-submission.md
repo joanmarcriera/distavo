@@ -36,6 +36,29 @@ Sources: [Membership revenue](https://docs.setapp.com/docs/setapp-membership-rev
 · [Single-app distribution revenue](https://docs.setapp.com/docs/single-app-distribution-revenue)
 · [Single-app distribution overview](https://docs.setapp.com/docs/single-app-distribution-overview)
 
+### Pricing (decided 2026-09-06)
+
+**$29 USD, one-time, perpetual, all updates included.** Set live on the Mac App
+Store on 2026-09-06 (it had been listed free since launch), and stated on
+distavo.com so every channel agrees. Setapp asked for the price on 2026-07-24 and
+will not progress a listing without one.
+
+Chosen below MacWhisper (EUR 39), which bundles its own transcription models and so
+does more out of the box. One-time rather than subscription because there is no
+renewal or licence-reminder machinery yet.
+
+Two things to keep in mind when talking to Setapp:
+
+- The **direct DMG stays free** and the source stays MIT. Paying buys the signed,
+  notarized, auto-updating binary and support, not permission — for a tool whose
+  pitch is that meetings never leave your machines, being auditable is the point.
+  This is disclosed to Setapp rather than left to be discovered.
+- Under **Setapp Membership** you are paid for *usage* weighted by price tier, not
+  per download. Distavo still needs a self-hosted WhisperX server for
+  transcription, which most Setapp members will not run, so expect little revenue
+  until there is an on-device transcription path. The on-device summariser added in
+  1.10.0 is the first half of that.
+
 ---
 
 ## 2. Technical build requirements

@@ -116,7 +116,16 @@ MIT — see [LICENSE](LICENSE).
 
 ## Support
 
-Distavo is free and MIT-licensed. If it saves you time, you can support its development:
+Distavo costs **$29 on the [Mac App Store](https://apps.apple.com/app/distavo/id6785437932)** —
+a one-time purchase, no subscription, all future updates included. That is the convenient way to
+buy it: sandboxed, auto-updating, and it funds the work.
+
+The app is also MIT-licensed, so the notarized direct DMG on
+[GitHub Releases](https://github.com/joanmarcriera/distavo/releases) stays free, and you can always
+read or build the source yourself. Paying is for convenience and support, not for permission — the
+point of a tool that promises your meetings never leave your machines is that you can audit it.
+
+If you use the free build and it saves you time, you can support its development:
 
 [![Lemon Squeezy](https://img.shields.io/badge/Lemon%20Squeezy-donate-FFC233?logo=lemonsqueezy&logoColor=black)](https://marcriera.lemonsqueezy.com/checkout/buy/f5f7099b-cf47-43a4-98e4-3dcbe64933c8)
 [![GitHub Sponsors](https://img.shields.io/badge/Sponsor-GitHub-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/joanmarcriera)

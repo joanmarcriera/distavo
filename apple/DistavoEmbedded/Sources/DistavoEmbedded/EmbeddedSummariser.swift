@@ -192,8 +192,11 @@ public enum EmbeddedSummariser {
             }
             let folded = EmbeddedSummaryPrompt.merge(partials: condensed)
             // A single chunk still folds (the bullets get terser), but if a round
-            // stops shrinking, further rounds are wasted model calls.
-            guard folded.count < merged.count else { merged = folded; break }
+            // stops shrinking, further rounds are wasted model calls. Keep the
+            // SMALLER of the two: adopting a folded result that grew would hand
+            // the truncation below a longer string and discard more real content
+            // than necessary.
+            guard folded.count < merged.count else { break }
             merged = folded
         }
 

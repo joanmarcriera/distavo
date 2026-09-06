@@ -94,8 +94,14 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
 
 ## Key behaviors to preserve
 
-- **Server-offline → local fallback flow:** if Ollama is unreachable and local fallback is off, a recording
-  becomes `deferredNeedLocal` (not failed). Enabling "Use local Ollama" clears deferrals and re-scans.
+- **A temporarily-absent dependency defers; it never fails.** If Ollama is unreachable and local
+  fallback is off, a recording becomes `deferredNeedLocal` (not failed); enabling "Use local Ollama"
+  clears deferrals and re-scans. The embedded summariser follows the same rule: `EmbeddedReadiness`
+  `.temporarilyUnavailable` (Apple Intelligence still downloading, or switched off) defers, while
+  only `.unsupported` (wrong OS / ineligible Mac) fails. `chooseSummariser` returns a
+  `SummariserChoice` (`.use`/`.deferred`/`.unavailable`); readiness arrives via the `PipelineDeps`
+  seam so DistavoCore stays dependency-free. This matters because `iterPending` skips failed bases
+  forever — a wrongly-failed recording is never retried.
 - **Foundation Models token budgeting:** the 4096-token context is strict. `EmbeddedSummary.chunkTranscript()`
   partitions input; the reduce step reuses `Prompt.build`, so an on-device note has the same shape as Ollama.
   The feature is a kill switch: with `summarise.embedded_enabled` false, `backend == "embedded"` falls back

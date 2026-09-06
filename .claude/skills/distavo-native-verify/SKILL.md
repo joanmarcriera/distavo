@@ -64,6 +64,10 @@ actual code in `Contents/MacOS/Distavo.debug.dylib`; `Contents/MacOS/Distavo` is
 launcher. Grepping the launcher makes every gate look "absent", including ones that are
 present — check the `.debug.dylib` (or build Release).
 
+**Screenshots are edition-specific too.** `Support Distavo…`, `Check for Updates…` and the Settings
+→ **Updates** section are all compiled out of the App Store / Setapp builds, so a screenshot taken
+from a Direct build must never be uploaded to those listings. See `docs/setapp/ASSETS_CHECKLIST.md`.
+
 **Gotcha — URL constants are NOT gated, only the UI is.** `Links.donateURLString` and
 `Links.feedbackURLString` are plain `static let`s, so the strings appear in every edition's
 binary as unreachable dead data. That is fine and already shipped: the App-Store-reviewed 1.9.1
@@ -107,6 +111,19 @@ NO`) — exercise those schemes directly before a release if you touched target-
 All three ship as `Distavo.app` (`PRODUCT_NAME` pinned in the shared `DistavoApp` target template) —
 don't be surprised the target name differs from the product name.
 
+## Release wrapper — select the edition by SCHEME, never `-xcconfig`
+
+`apple/scripts/build-and-notarize.sh` maps each edition to its own scheme + configuration
+(`direct` → `Distavo`/Release, `setapp` → `Distavo-Setapp`/Release, `appstore` →
+`Distavo-AppStore`/Release-AppStore). It used to pass `-scheme Distavo -xcconfig configs/$E.xcconfig`
+for all three, which silently built the **Direct** target every time — a target-level `configFiles`
+entry outranks a project-level command-line `-xcconfig`. The build, signing and notarization all
+succeed, so the mistake only surfaces as a Setapp/App Review rejection days later.
+
+The wrapper now runs `verify_edition` on the archive *before* notarizing, asserting the bundle id,
+that `Sparkle.framework` is embedded in Direct only, and that `DONATE_ENABLED` is absent from the
+non-Direct binaries. Keep that gate.
+
 ## Compliance gates to check before any commit/release touching editions
 
 ```sh
@@ -140,9 +157,22 @@ grep -rn "EDITION_APPSTORE\|EDITION_DIRECT\|EDITION_SETAPP\|DONATE_ENABLED\|impo
   gated `#if canImport(FoundationModels)` + `@available(macOS 26, *)` — the deployment target is
   still macOS 14. The flag is a kill switch: with it off, `backend == "embedded"` must fall back
   to Ollama, not fail. See `docs/embedded-summarisation-decision.md`.
-- **Only the Ollama path may produce `deferredNeedLocal`.** `Pipeline.chooseSummariser` returns
-  `.embedded` immediately (no network, so nothing to defer on). Don't let a refactor turn a
-  deferral into a failure — `PipelineTests` covers all four selection cases.
+- **A transient dependency must DEFER, never fail** — this is the durability rule, and it applies
+  to *both* backends since 2026-09-06. `Pipeline.chooseSummariser` returns a `SummariserChoice`
+  (`.use` / `.deferred` / `.unavailable`), not an optional:
+  - Ollama defers when the server is unreachable and local fallback is off.
+  - The embedded engine defers when `EmbeddedReadiness` is `.temporarilyUnavailable` — Apple
+    Intelligence still downloading, or switched off. It used to return `.embedded` unconditionally,
+    so summarise threw, `processOne` marked the base **failed**, and `iterPending` then skips failed
+    bases forever — a recording never retried for a condition that fixes itself in minutes.
+  - Only `.unsupported` (wrong OS, ineligible Mac) fails, so it isn't deferred forever on a machine
+    that can never run it.
+
+  Readiness arrives through the `PipelineDeps` seam (`embeddedReadiness`, defaulting to `.ready`)
+  so DistavoCore stays dependency-free; `AppPipelineDeps` wires it to
+  `EmbeddedSummariser.unavailableReason()`. Don't let a refactor collapse "defer" and "cannot" back
+  into one value — `PipelineTests` covers every selection case plus an end-to-end check that a
+  deferred recording leaves no failed marker and stays in `iterPending`.
 - `PipelineDeps` (in `Pipeline.swift`) is the dependency-injection seam all tests use to avoid real
   servers — don't bypass it when editing the pipeline.
 - No linter is configured in this repo.

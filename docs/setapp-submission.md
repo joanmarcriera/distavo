@@ -165,7 +165,10 @@ xcodebuild -project Distavo.xcodeproj \
 > `uk.co.riera.distavo-setapp`, sets `EDITION_SETAPP`, uses `Setapp-Info.plist`, and — unlike the
 > Direct target — does **not** link Sparkle. Or run the wrapper:
 > `TEAM_ID=… NOTARY_PROFILE=distavo-notary ./scripts/build-and-notarize.sh setapp`,
-> which does the archive → export → notarize → staple in one go.
+> which does the archive → export → notarize → staple in one go. The wrapper selects the edition by
+> **scheme + configuration** (never a command-line `-xcconfig`, which a target-level config file
+> outranks) and asserts the archived bundle ID, Sparkle absence and donate-flag absence before
+> notarizing, so a wrong-edition build fails locally instead of at Setapp review.
 
 ### 3.2 Export
 

@@ -22,10 +22,15 @@ cd "$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 EDITION="${1:-}"
 : "${TEAM_ID:?set TEAM_ID to your 10-char Apple Team ID}"
 
+# Each edition is its OWN target with its own configFiles/INFOPLIST_FILE in
+# project.yml. A target-level xcconfig outranks a project-level command-line
+# -xcconfig, so building every edition from `-scheme Distavo` would silently
+# produce the Direct target (bundle id, Sparkle, donate link and all) whatever
+# xcconfig was passed. Always select the edition by SCHEME + CONFIGURATION.
 case "$EDITION" in
-  direct)   XCCONFIG="configs/Direct.xcconfig";   METHOD="developer-id" ;;
-  setapp)   XCCONFIG="configs/Setapp.xcconfig";   METHOD="developer-id" ;;
-  appstore) XCCONFIG="configs/AppStore.xcconfig"; METHOD="app-store-connect" ;;
+  direct)   SCHEME="Distavo";          CONFIG="Release";           METHOD="developer-id" ;;
+  setapp)   SCHEME="Distavo-Setapp";   CONFIG="Release";           METHOD="developer-id" ;;
+  appstore) SCHEME="Distavo-AppStore"; CONFIG="Release-AppStore";  METHOD="app-store-connect" ;;
   *) echo "usage: $0 {direct|setapp|appstore}" >&2; exit 2 ;;
 esac
 
@@ -50,10 +55,53 @@ cat > "$PLIST" <<PLIST
 PLIST
 
 echo "==> Archiving ($EDITION)"
-xcodebuild -project Distavo.xcodeproj -scheme Distavo -configuration Release \
-  -xcconfig "$XCCONFIG" -archivePath "$ARCHIVE" \
+xcodebuild -project Distavo.xcodeproj -scheme "$SCHEME" -configuration "$CONFIG" \
+  -archivePath "$ARCHIVE" \
   -allowProvisioningUpdates \
   DEVELOPMENT_TEAM="$TEAM_ID" CODE_SIGN_STYLE=Automatic archive
+
+# Assert the archive really is the edition that was asked for. The bug this
+# guards against is silent: a wrong scheme still builds, signs and notarizes
+# cleanly, and is only caught by a Setapp/App Review rejection days later.
+verify_edition() {
+  local -r app="$ARCHIVE/Products/Applications/Distavo.app"
+  local -r plist="$app/Contents/Info.plist"
+  local expect_id want_sparkle
+
+  [[ -f "$plist" ]] || { echo "missing archived Info.plist: $plist" >&2; return 1; }
+
+  case "$EDITION" in
+    direct)   expect_id="uk.co.riera.distavo";        want_sparkle=yes ;;
+    setapp)   expect_id="uk.co.riera.distavo-setapp"; want_sparkle=no  ;;
+    appstore) expect_id="uk.co.riera.distavo";        want_sparkle=no  ;;
+  esac
+
+  local -r got_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$plist")"
+  [[ "$got_id" == "$expect_id" ]] || {
+    echo "edition mismatch: built bundle id '$got_id', expected '$expect_id' for $EDITION" >&2
+    return 1
+  }
+
+  # Sparkle must link into Direct ONLY (App Store forbids third-party updaters;
+  # Setapp ships its own). Its presence/absence is the cheapest edition tell.
+  local has_sparkle=no
+  [[ -d "$app/Contents/Frameworks/Sparkle.framework" ]] && has_sparkle=yes
+  [[ "$has_sparkle" == "$want_sparkle" ]] || {
+    echo "edition mismatch: Sparkle.framework present=$has_sparkle, expected $want_sparkle for $EDITION" >&2
+    return 1
+  }
+
+  # The donate link is Direct-only (App Review 3.1.1 / Setapp both forbid it).
+  if [[ "$EDITION" != "direct" ]] && grep -qa "DONATE_ENABLED" "$app/Contents/MacOS/Distavo" 2>/dev/null; then
+    echo "edition mismatch: DONATE_ENABLED found in the $EDITION binary" >&2
+    return 1
+  fi
+
+  echo "    verified: $got_id, Sparkle=$has_sparkle"
+}
+
+echo "==> Verifying edition ($EDITION)"
+verify_edition
 
 echo "==> Exporting"
 xcodebuild -exportArchive -archivePath "$ARCHIVE" \

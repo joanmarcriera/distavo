@@ -1,6 +1,7 @@
-• Meeting notes in Catalan, Spanish — and meetings that switch between them. Two new built-in models from the Barcelona Supercomputing Center (Languages of Spain: Catalan, Spanish, Galician, Basque; and a Catalan-only model) transcribe entirely on your Mac. No other Mac app does this on-device.
+• Meeting notes in Catalan, Spanish — and meetings that switch between them. Two new built-in models from the Barcelona Supercomputing Center (Languages of Spain: Catalan, Spanish, Galician, Basque; and a Catalan-only model) transcribe entirely on your Mac. Distavo is the first Mac app with the Barcelona Supercomputing Center's Catalan models built in.
 • A new "Fast" engine (NVIDIA Parakeet) transcribes an hour-long meeting in seconds for English, French, German, Italian, Portuguese and 20 other European languages.
 • "Automatic" model and language: Distavo listens to three short windows, picks the right engine for what it hears, and downloads it once. Fresh installs start on Automatic; your existing choice is untouched.
 • "Download now" in Settings fetches the models ahead of your first meeting, with progress and Cancel.
 • If a model can't be downloaded because you're offline, the recording now waits and retries automatically instead of being marked failed.
 • If your Language setting is "English" but your meetings aren't, Whisper was quietly translating them. Switch Language to "Automatic — pick the engine by language" in Settings to transcribe them as spoken (built-in engine only — WhisperX users pick a language).
+• Every note now ends with a provenance line: which engine transcribed it and what language was detected.

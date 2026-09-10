@@ -9,3 +9,11 @@ What you will see on a review machine that has no Ollama server installed (items
 3) Microphone permission wording: the one-time explanation shown before the macOS microphone prompt uses the neutral action "Continue". The Permissions helper also uses "Continue" while microphone access is undetermined. If access was denied, Distavo offers "Open Microphone Settings" instead of requesting again.
 
 To exercise the full pipeline end-to-end: install Ollama from https://ollama.com, run "ollama pull llama3.2", leave it running, then use the menu-bar item "Record meeting" (or drop any short audio file into the watched folder shown in Settings). Transcription happens on-device; the Markdown note is completed via the local Ollama and written to the notes folder.
+
+1.11 — built-in transcription model downloads:
+
+On first use, the built-in transcription engine downloads a Core ML model from Hugging Face into ~/Library/Application Support/Distavo/models. Sizes: Whisper large-v3 turbo ("Best") 632 MB, Whisper small ("Compact") 463 MB, NVIDIA Parakeet TDT 0.6B v3 ("Fast") ~460 MB, and the two Barcelona Supercomputing Center Catalan/Spanish models 3.1 GB each. Settings offers "Download now" to fetch a model ahead of the first meeting (with a running total, progress, and Cancel) and "Remove downloaded models" to delete the one folder Distavo manages. Downloads are verified against a manifest of SHA-256 hashes before use; if a download fails because the Mac is offline, the recording waits and is retried automatically rather than being marked failed.
+
+This flow needs no account and involves no telemetry. The App Store build links no third-party binary framework for this feature — the models are downloaded, not bundled.
+
+On a review machine with less than 16 GB of memory, the two Catalan/Spanish models are hidden from the model picker by design (they are not offered, not merely disabled) since they do not run acceptably below that.

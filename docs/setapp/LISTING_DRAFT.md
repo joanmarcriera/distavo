@@ -64,7 +64,14 @@ Works with iCloud Drive, Dropbox, or any synced folder — record on your phone,
 drop the file in, collect the note.
 
 **Choose your transcription engine**
-- Built-in on-device (WhisperKit) — six model sizes from Tiny to Large-v3
+- Catalan and Spanish, on-device — two models from the Barcelona Supercomputing
+  Center's Projecte AINA (Languages of Spain: Catalan, Spanish, Galician,
+  Basque; and a Catalan-only model), for Macs with 16 GB memory or more
+- Fast — NVIDIA Parakeet, for English, French, German, Italian, Portuguese
+  and 20 other European languages
+- Whisper — general-purpose, on-device
+- Automatic — Distavo listens to three short windows and picks the right
+  engine for you
 - Your own WhisperX server — for GPU-accelerated transcription on a NAS or workstation
 
 **Flexible summarisation**
@@ -82,9 +89,11 @@ Summarisation requires an Ollama server you run yourself.
 
 - Records meetings (mic + system audio) with one click
 - Transcribes with speaker labels — on-device or via your own WhisperX server
+- Catalan and Spanish, on-device, from two Barcelona Supercomputing Center models
+- A Fast engine (NVIDIA Parakeet) for 25 European languages
+- Automatic mode picks the right engine for you and downloads it once
 - Summarises to Markdown notes — decisions and action points
 - Folder watcher: drop a file, get a note
-- Six WhisperKit model sizes (Tiny → Large-v3)
 - Ollama summarisation: local, LAN, or fallback — your choice
 - Activity log per recording
 - No cloud, no accounts, no telemetry

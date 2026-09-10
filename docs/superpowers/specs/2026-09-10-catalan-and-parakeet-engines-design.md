@@ -39,8 +39,8 @@ produced no measurable change on two real recordings.
 | `large-v3-turbo` (exists) | WhisperKit | 99 | 632 MB | ≥ 16 GB |
 | `small` (exists) | WhisperKit | 99 | 463 MB | all |
 | `parakeet-tdt-v3` (new) | FluidAudio | 25 European | ~460 MB (int8) | all Apple Silicon |
-| `bsc-los` (new) | WhisperKit, custom repo | ca, es, gl, eu | ~1.6 GB fp16 | ≥ 16 GB (see §6) |
-| `bsc-ca-3370h` (new) | WhisperKit, custom repo | ca | ~1.6 GB fp16 | ≥ 16 GB (see §6) |
+| `bsc-los` (new) | WhisperKit, custom repo | ca, es, gl, eu | 3.1 GB fp16 (measured) | ≥ 16 GB (see §6) |
+| `bsc-ca-3370h` (new) | WhisperKit, custom repo | ca | 3.1 GB fp16 (measured) | ≥ 16 GB (see §6) |
 | `whisper-tiny` (internal) | WhisperKit | — | 77 MB | language detector only |
 
 Plus "Automatic" for model and language, a download coordinator, and "Download now" in Settings.
@@ -161,7 +161,11 @@ gets a new folder name (`…-r2`) plus a catalog bump rather than overwriting.
 `convert.sh <hf-model-id>`: `uv` venv on Python 3.11, whisperkittools at a recorded commit
 (torch 2.5, coremltools), `generate_model.py --model-version <id> --upload-results`,
 `MODEL_REPO_ID=Joanmarcriera/distavo-whisperkit-coreml`, `HF_TOKEN` from `~/.tokens`, never
-printed. fp16 (the Argmax recipe). Writes `manifest.json`. **Spike first (task 2141):** convert
+printed. fp16 (the Argmax recipe), 3.1 GB per model, ~40 min on the M5 Pro. BSC ships `.bin`
+weights that transformers refuses on the converter's pinned torch 2.5, so the script first
+re-saves them as safetensors in a sibling venv and hands the converter a local `<org>/<name>`
+directory (the converter names its output from that relative path). Writes `manifest.json`.
+Published 2026-09-10: LoS from source revision e562381, ca-3370h from 5a5fb60. **Spike first (task 2141):** convert
 LoS, then prove from a clean models folder: download from the custom repo, tokenizer
 resolution, cold load, offline warm reload, transcription with word timestamps, relaunch.
 
@@ -187,7 +191,7 @@ Grouped model picker with human labels and sizes; **Automatic (recommended)** fi
 whose `minimumMemoryGB` exceeds this Mac are shown disabled with the reason. "Preferred Catalan
 model" only under Automatic. Language picker gains **Automatic (detect)**. **Download now**
 shows the total before starting (Automatic = detector + Parakeet + preferred Catalan model,
-≈ 2.1 GB on a 16 GB Mac, ≈ 0.55 GB below), with progress and Cancel. "Models on disk" lists per
+≈ 3.6 GB on a 16 GB Mac, ≈ 0.55 GB below), with progress and Cancel. "Models on disk" lists per
 model. Copy distinguishes Distavo's folder from macOS's own Core ML caches.
 
 ### 5.11 Credits and compliance

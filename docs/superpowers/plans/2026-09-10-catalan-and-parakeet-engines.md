@@ -1977,7 +1977,7 @@ Update the "Models downloaded at runtime" list and the closing sentence to menti
 • If a model can't be downloaded because you're offline, the recording now waits and retries automatically instead of being marked failed.
 ```
 
-- [ ] **Step 3: Version** — `MARKETING_VERSION: "1.11.0"`, `CURRENT_PROJECT_VERSION: "14"` in `apple/project.yml`. Update the CLAUDE.md "What this is" line to mention Parakeet and the BSC models.
+- [ ] **Step 3: Version and measured sizes** — `MARKETING_VERSION: "1.11.0"`, `CURRENT_PROJECT_VERSION: "14"` in `apple/project.yml`. Update the CLAUDE.md "What this is" line to mention Parakeet and the BSC models. Correct the two BSC catalog entries in `EmbeddedSupport.swift` to the published size, `downloadMB: 3100` (each folder measured 3.10 GB on the Hub, 21 files), and re-run `swift test` in DistavoCore.
 
 - [ ] **Step 4: Gates** — run the `distavo-native-verify` skill's three-scheme build and the gate inspection; additionally:
 ```bash

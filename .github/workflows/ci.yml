@@ -23,6 +23,39 @@ jobs:
       - name: Run DistavoEmbedded tests
         run: cd apple/DistavoEmbedded && swift test
 
+      # M10: FluidAudio is consumed with `traits: []` (spec §3) precisely to
+      # avoid linking its prebuilt NemoTextProcessing.xcframework — catch a
+      # dependency bump or a manifest edit that silently turns that trait back
+      # on before it ships in an archive. `swift package show-traits` on our
+      # own manifest lists only OUR package's traits (DistavoEmbedded declares
+      # none), so the meaningful check is the resolved traits we pass TO
+      # FluidAudio (`dump-package`'s `traits` array on that dependency) —
+      # `show-traits --package-id fluidaudio` is run alongside purely so the
+      # log shows what trait exists and would otherwise default on.
+      - name: Verify NemoTextProcessing trait stays disabled
+        run: |
+          cd apple/DistavoEmbedded
+          echo "FluidAudio's available traits (informational — this is the package's own declaration, not our resolved choice):"
+          swift package show-traits --package-id fluidaudio
+          echo
+          echo "Traits DistavoEmbedded's manifest enables for FluidAudio:"
+          traits=$(swift package dump-package | python3 -c '
+import json, sys
+d = json.load(sys.stdin)
+for group in d.get("dependencies", []):
+    for dep in group.get("sourceControl", []):
+        if dep.get("identity") == "fluidaudio":
+            print(json.dumps(dep.get("traits", [])))
+            sys.exit(0)
+print("MISSING", file=sys.stderr)
+sys.exit(1)
+')
+          echo "$traits"
+          if echo "$traits" | grep -qi "NemoTextProcessing"; then
+            echo "::error::FluidAudio's traits now include NemoTextProcessing — Package.swift must keep traits: [] on that dependency (spec §3), or the archive scan gate breaks"
+            exit 1
+          fi
+
       - name: Generate Xcode project
         run: cd apple && xcodegen generate
 

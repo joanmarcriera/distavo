@@ -32,10 +32,15 @@ public enum WordSpeakerAligner {
     public static let carryGap = 1.0
 
     public static func whisperXDictionary(words rawWords: [TimedWord], turns rawTurns: [SpeakerTurn]) -> [String: Any] {
+        // M8: sort by (start, end) rather than start alone, so two entries that
+        // share a start time (a zero-length turn, or a duplicated timestamp in
+        // the ASR output) land in a deterministic, stable order instead of
+        // whatever order `sorted` happens to leave equal-key elements in.
         let words = rawWords
             .filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            .sorted { $0.start < $1.start }
-        let turns = rawTurns.sorted { $0.start < $1.start }
+            .sorted { $0.start == $1.start ? $0.end < $1.end : $0.start < $1.start }
+        let turns = rawTurns
+            .sorted { $0.start == $1.start ? $0.end < $1.end : $0.start < $1.start }
         guard !words.isEmpty else { return ["segments": [[String: Any]]()] }
 
         // 1. Subsegments split on silence.

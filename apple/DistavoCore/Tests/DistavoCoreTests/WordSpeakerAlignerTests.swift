@@ -57,6 +57,15 @@ final class WordSpeakerAlignerTests: XCTestCase {
         XCTAssertEqual(s.map { $0["text"] as? String }, ["One.", "Two?", "Three…", "four"])
     }
 
+    /// M8: two words sharing a start time (e.g. a duplicated ASR timestamp)
+    /// must order deterministically by end time, not by whatever order a
+    /// start-only sort happens to leave them in.
+    func testWordsWithEqualStartSortByEndTime() {
+        let words = [w("second", 0, 2), w("first", 0, 1)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: words, turns: [turn(0, 0, 2)]))
+        XCTAssertEqual(s[0]["text"] as? String, "first second")
+    }
+
     func testEmptyAndOutOfOrderInputsAreHandled() {
         XCTAssertEqual(segs(WordSpeakerAligner.whisperXDictionary(words: [], turns: [])).count, 0)
         let words = [w("b", 1, 2), w("a", 0, 1), w("", 2, 3)]

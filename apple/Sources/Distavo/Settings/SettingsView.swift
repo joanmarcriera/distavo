@@ -79,9 +79,18 @@ struct SettingsView: View {
         }
         return [draft.transcribe.embeddedModel]
     }
+    /// M7: only what "Download now" would actually fetch — a model already on
+    /// disk (or the detector, already downloaded) must not inflate the total
+    /// the button shows before starting.
     private var downloadTotalMB: Int {
-        downloadSet.map { EmbeddedModelCatalog.model(id: $0).downloadMB }.reduce(0, +)
-            + (EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) ? 77 : 0)
+        let modelsMB = downloadSet
+            .map { EmbeddedModelCatalog.model(id: $0) }
+            .filter { !EmbeddedModelStore.isDownloaded($0) }
+            .map(\.downloadMB)
+            .reduce(0, +)
+        let needsDetector = EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel)
+            && !EmbeddedModelStore.isDetectorDownloaded()
+        return modelsMB + (needsDetector ? 77 : 0)
     }
 
     init(controller: WatcherController) {

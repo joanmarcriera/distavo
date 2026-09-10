@@ -9,8 +9,9 @@ recordings and turns each new one into a structured Markdown meeting note. The p
 **AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
 Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the
 user's WhisperX server**, per `transcribe.backend`) → clean → summarise (**Ollama, or Foundation Models if enabled
-on macOS 26+**) → validate → write note. All processing is local-first with no cloud path. **macOS 13+** required
-(built-in engines need Apple Silicon); Foundation Models engine requires macOS 26+.
+on macOS 26+**) → validate → write note. All processing is local-first with no cloud path. **macOS 14+** required (the
+`deploymentTarget` in `apple/project.yml`; built-in engines need Apple Silicon, the Catalan models 16 GB); the
+Foundation Models summariser is an opt-in preview behind `summarise.embedded_enabled` and requires macOS 26+.
 
 > The app ships in three editions from one codebase — **direct download (DMG + Sparkle), Mac App Store (live), and Setapp** — selected by `apple/configs/{Direct,Setapp,AppStore}.xcconfig`. AVFoundation (not ffmpeg, which is GPL) makes App Store distribution possible. See `apple/README.md` and `docs/distribution-checklist.md`.
 >

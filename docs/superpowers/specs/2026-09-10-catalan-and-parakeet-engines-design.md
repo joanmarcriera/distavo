@@ -180,8 +180,9 @@ structured stream; the existing single transcriber callback is fed from it.
 
 ### 5.9 Pipeline wiring (`Sources/Distavo/Core/AppPipelineDeps.swift`)
 
-`deps.transcribe` for `backend == "embedded"`: coordinator ensures the detector → detect (if
-either setting is `"auto"`) → `EngineRouter` → coordinator ensures the chosen model → dispatch to
+`deps.transcribe` for `backend == "embedded"`: detect only when **both** model and language are
+`"auto"` (a fixed language is used as the detection, §5.2) → `EngineRouter` → a "Using <model>
+(<language>)" status line whenever the model was chosen automatically → dispatch to
 `EmbeddedTranscriber` (with repo) or `ParakeetTranscriber`. Retryable conditions throw
 `RetryableDependencyError` (§4). `PipelineDeps` signature unchanged.
 

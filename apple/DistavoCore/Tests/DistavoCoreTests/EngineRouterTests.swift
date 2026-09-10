@@ -68,4 +68,37 @@ final class EngineRouterTests: XCTestCase {
         XCTAssertEqual(r.languageHint, "ca")
         XCTAssertNotNil(r.note)
     }
+
+    /// Galician is in the Catalan family (rules 3–4): any confident Catalan/
+    /// Galician/Basque mix routes to Languages of Spain, hinted with the
+    /// actual detected code — here "gl", not "ca".
+    func testGalicianEnglishMixUsesLanguagesOfSpainWithGalicianHint() {
+        let r = EngineRouter.choose(detections: [d("gl"), d("en")], config: auto(), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "bsc-los")
+        XCTAssertEqual(r.languageHint, "gl")
+    }
+
+    /// Basque-only still isn't the Catalan-only case (rule 3's `onlyCatalan`
+    /// check is literally `set == ["ca"]`), so even with a preferred Catalan
+    /// model configured, Basque-only routes to Languages of Spain hinted "eu".
+    func testBasqueOnlyWithPreferredCatalanModelUsesLanguagesOfSpain() {
+        let r = EngineRouter.choose(detections: [d("eu")], config: auto("bsc-ca-3370h"), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "bsc-los")
+        XCTAssertEqual(r.languageHint, "eu")
+    }
+
+    /// Spanish+English is a Parakeet-covered pair (rule 5b): neither is
+    /// Catalan-family, and both are in parakeetLanguages.
+    func testSpanishEnglishMixUsesParakeet() {
+        let r = EngineRouter.choose(detections: [d("es"), d("en")], config: auto(), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "parakeet-tdt-v3")
+    }
+
+    /// dominantCode ties break deterministically toward the alphabetically
+    /// lower code (`a.key > b.key` in the `max` comparator means the *lower*
+    /// key wins a tie, since `max` keeps the current best on `<`, not `>`).
+    func testDominantCodeTieBreaksToAlphabeticallyLowerCode() {
+        XCTAssertEqual(EngineRouter.dominantCode([d("fr", 0.6), d("de", 0.6)]), "de")
+        XCTAssertEqual(EngineRouter.dominantCode([d("de", 0.6), d("fr", 0.6)]), "de")
+    }
 }

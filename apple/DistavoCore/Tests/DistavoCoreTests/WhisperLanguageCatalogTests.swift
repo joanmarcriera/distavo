@@ -26,6 +26,18 @@ final class WhisperLanguageCatalogTests: XCTestCase {
         XCTAssertEqual(names, names.sorted(), "languages after Auto-detect are alphabetical")
     }
 
+    /// The catalog's own auto-detect sentinel is `""` (empty code), not
+    /// `EmbeddedModelCatalog.automaticID` ("auto") — a different sentinel used
+    /// by the embedded-engine/language config keys. Settings' synthetic-row
+    /// logic (SettingsView.swift) checks `EmbeddedModelCatalog.isAutomatic(code)`
+    /// *before* falling back to `WhisperLanguageCatalog.language(forCode:)`,
+    /// so "auto" is expected to miss this lookup and be handled by that
+    /// separate branch, not folded into the catalog as a language in its own
+    /// right.
+    func testLookupByAutomaticIDSentinelIsNil() {
+        XCTAssertNil(WhisperLanguageCatalog.language(forCode: EmbeddedModelCatalog.automaticID))
+    }
+
     func testHasFullWhisperSet() {
         // Whisper supports ~99 languages; Auto-detect makes it ~100. Guard against
         // a truncated list slipping in.

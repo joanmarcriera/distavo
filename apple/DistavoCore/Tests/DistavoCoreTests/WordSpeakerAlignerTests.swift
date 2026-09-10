@@ -66,6 +66,39 @@ final class WordSpeakerAlignerTests: XCTestCase {
         XCTAssertEqual(s[0]["text"] as? String, "first second")
     }
 
+    /// Chained carry: three subsegments, only the first overlaps a turn; each
+    /// gap to the next is ≤ carryGap (1.0 s), so the carried speaker threads
+    /// through every subsequent subsegment, not just the immediate next one.
+    func testChainedGapsWithinThresholdCarrySpeakerThroughAllSubsegments() {
+        let words = [
+            w("One", 0, 0.3),                 // overlaps turn 0
+            w("two", 1.2, 1.5),                // gap 0.9 s after "One" — carries
+            w("three", 2.4, 2.7),              // gap 0.9 s after "two" — carries
+        ]
+        let turns = [turn(0, 0, 0.5)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: words, turns: turns))
+        XCTAssertEqual(s.count, 1, "all three subsegments must merge under the one carried speaker")
+        XCTAssertEqual(s[0]["speaker"] as? String, "SPEAKER_00")
+        XCTAssertEqual(s[0]["text"] as? String, "One two three")
+    }
+
+    /// Same chain, but the middle gap exceeds carryGap: the carry breaks there,
+    /// so the last two subsegments are unknown (no turn overlaps them either).
+    func testChainedGapsWhereMiddleGapExceedsThresholdBreaksTheCarry() {
+        let words = [
+            w("One", 0, 0.3),                  // overlaps turn 0
+            w("two", 1.5, 1.8),                 // gap 1.2 s after "One" — breaks carry
+            w("three", 2.7, 3.0),                // gap 0.9 s after "two" — but "two" is unknown
+        ]
+        let turns = [turn(0, 0, 0.5)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: words, turns: turns))
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s[0]["speaker"] as? String, "SPEAKER_00")
+        XCTAssertEqual(s[0]["text"] as? String, "One")
+        XCTAssertNil(s[1]["speaker"], "the carry break must leave the rest of the chain unknown")
+        XCTAssertEqual(s[1]["text"] as? String, "two three")
+    }
+
     func testEmptyAndOutOfOrderInputsAreHandled() {
         XCTAssertEqual(segs(WordSpeakerAligner.whisperXDictionary(words: [], turns: [])).count, 0)
         let words = [w("b", 1, 2), w("a", 0, 1), w("", 2, 3)]

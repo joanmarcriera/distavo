@@ -32,9 +32,15 @@ public struct WhisperXClient {
     public func transcribe(
         wavURL: URL, config: TranscribeConfig, timeout: TimeInterval = 3600
     ) async throws -> [String: Any] {
+        // "auto" is Distavo's own sentinel for the built-in engine's per-meeting
+        // router (spec §5.2) — WhisperX has no such concept, so it must never
+        // reach the server as a literal language value. Map it to "" (the
+        // WhisperX server's own "detect for me" spelling) same as an empty
+        // config value already does today.
+        let language = EmbeddedModelCatalog.isAutomatic(config.language) ? "" : config.language
         var components = URLComponents(string: config.whisperxURL.trimmedTrailingSlashes() + "/asr")
         components?.queryItems = [
-            URLQueryItem(name: "language", value: config.language),
+            URLQueryItem(name: "language", value: language),
             URLQueryItem(name: "model", value: config.model),
             URLQueryItem(name: "output_format", value: "json"),
             URLQueryItem(name: "diarize", value: config.diarize ? "true" : "false"),

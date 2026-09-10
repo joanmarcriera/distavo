@@ -193,11 +193,28 @@ struct SettingsView: View {
                 }
 
                 Picker("Language", selection: $draft.transcribe.language) {
+                    // C1: this row drives EngineRouter's per-meeting engine
+                    // choice (spec §5.2) — a choice that only exists on the
+                    // built-in engine. WhisperXClient maps "auto" to "" rather
+                    // than ever sending it to the server, so offering this row
+                    // to a WhisperX user would silently change what language
+                    // WhisperX is told (the server has no per-language engine
+                    // to route to). Show it only for the built-in engine.
+                    if draft.transcribe.backend == "embedded" && embeddedSupported {
+                        Text("Automatic — pick the engine by language (recommended)").tag(EmbeddedModelCatalog.automaticID)
+                    } else if draft.transcribe.language == EmbeddedModelCatalog.automaticID {
+                        // A WhisperX user whose stored language is still "auto"
+                        // (set while on the built-in engine, or a fresh
+                        // install's default) — keep it selected and visible
+                        // instead of the Picker landing on nothing or silently
+                        // switching values, same as the unrecognised-code
+                        // synthetic row in `languageChoices` below.
+                        Text("Automatic — built-in engine only; pick a language for WhisperX").tag(EmbeddedModelCatalog.automaticID)
+                    }
                     // Distinct from the catalog's own "Auto-detect" (tag "", below):
-                    // this one drives EngineRouter's per-meeting engine choice
-                    // (spec §5.2); "Auto-detect" is Whisper's single-pass guess
-                    // within whichever model ends up chosen.
-                    Text("Automatic — pick the engine by language (recommended)").tag(EmbeddedModelCatalog.automaticID)
+                    // the row above drives EngineRouter's per-meeting engine choice;
+                    // "Auto-detect" is Whisper's single-pass guess within whichever
+                    // model ends up chosen.
                     ForEach(languageChoices) { lang in
                         Text(lang.code.isEmpty ? "Auto-detect within the chosen model" : lang.englishName)
                             .tag(lang.code)

@@ -31,6 +31,29 @@ final class WhisperXClientTests: XCTestCase {
         XCTAssertEqual(segments.first?.text, "hi")
     }
 
+    /// "auto" is DistavoCore's own router sentinel (spec §5.2) — the WhisperX
+    /// server has no such concept, so it must never see it as a literal
+    /// language value. It must be mapped to "" instead, same as an already-
+    /// empty language value.
+    func testAutoLanguageIsSentAsEmptyToWhisperX() async throws {
+        let tmpWav = FileManager.default.temporaryDirectory
+            .appendingPathComponent("distavo-\(UUID().uuidString).wav")
+        try Data([0, 1, 2, 3]).write(to: tmpWav)
+        defer { try? FileManager.default.removeItem(at: tmpWav) }
+
+        let session = MockURLProtocol.session { req in
+            let query = req.url?.query ?? ""
+            XCTAssertTrue(query.contains("language="), "expected an empty language= param, got \(query)")
+            XCTAssertFalse(query.contains("language=auto"), "must never leak the router's auto sentinel, got \(query)")
+            return try MockURLProtocol.ok(req.url!, json: ["segments": [[String: Any]]()])
+        }
+
+        var cfg = TranscribeConfig()
+        cfg.whisperxURL = "http://host:9000/"
+        cfg.language = "auto"
+        _ = try await WhisperXClient(session: session).transcribe(wavURL: tmpWav, config: cfg)
+    }
+
     func testMultipartBodyShape() {
         let body = WhisperXClient.multipartBody(
             boundary: "B", fieldName: "audio_file", filename: "x.wav",

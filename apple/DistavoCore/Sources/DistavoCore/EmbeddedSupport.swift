@@ -103,13 +103,13 @@ public enum EmbeddedModelCatalog {
             id: "bsc-los", displayName: "Català · Castellà · Galego · Euskara (BSC Languages of Spain)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "BSC-LT_whisper-large-v3-LoS",
-            languages: .only(languagesOfSpain), downloadMB: 1600, ramGB: 4, minimumMemoryGB: 16,
+            languages: .only(languagesOfSpain), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by the Barcelona Supercomputing Center on 8,110 hours. Best for Catalan, Spanish and mixed meetings."),
         EmbeddedModel(
             id: "bsc-ca-3370h", displayName: "Català (BSC, 3,370 hours)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "BSC-LT_whisper-large-v3-ca-punctuated-3370h",
-            languages: .only(["ca"]), downloadMB: 1600, ramGB: 4, minimumMemoryGB: 16,
+            languages: .only(["ca"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by the Barcelona Supercomputing Center on 3,370 hours of Catalan, with punctuation. Catalan-only meetings."),
     ]
 

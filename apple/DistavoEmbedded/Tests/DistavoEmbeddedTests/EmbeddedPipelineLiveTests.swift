@@ -21,11 +21,16 @@ import DistavoCore
 ///
 /// `DISTAVO_PIPELINE_MODEL` is an `EmbeddedModelCatalog` id (default
 /// `large-v3-turbo`); `DISTAVO_PIPELINE_LANGUAGE` is a Whisper language code or
-/// `auto` (default `en`) — `auto` passes a nil language hint. Together they
-/// exercise the same `EmbeddedTranscriber.shared.transcribe(wavURL:model:
-/// languageHint:config:)` entry point the router uses, so this is also the
-/// harness for proving a custom-repo catalog entry (e.g. `bsc-los`) loads and
-/// transcribes end to end.
+/// `auto` (default `en`) — `auto` passes a nil language hint. The engine is
+/// dispatched on `model.engine`, exactly like `AppPipelineDeps.appLive()`:
+/// `.whisperKit` calls `EmbeddedTranscriber.shared.transcribe(wavURL:model:
+/// languageHint:config:)` (the harness for proving a custom-repo catalog entry
+/// like `bsc-los` loads and transcribes end to end); `.parakeet` calls
+/// `ParakeetTranscriber.shared.transcribe(wavURL:languageHint:config:)` (e.g.
+/// `parakeet-tdt-v3`). Stage-timing messages arrive on different actors per
+/// engine — `EmbeddedTranscriber`'s own handler for WhisperKit,
+/// `ModelCoordinator.shared`'s for Parakeet (`ParakeetTranscriber` has no
+/// handler of its own and reports through the coordinator) — so both are wired.
 ///
 /// **Privacy:** outputs are written to `DISTAVO_PIPELINE_OUT`; the test prints
 /// only metrics, never transcript or note content. Point it at a scratch dir,
@@ -69,26 +74,41 @@ final class EmbeddedPipelineLiveTests: XCTestCase {
             cfg.numSpeakers = Int(env["DISTAVO_PIPELINE_SPEAKERS"] ?? "") ?? 2
             cfg.language = languageCode
 
-            let modelFolder = EmbeddedModelStore.whisperKitDirectory(
-                repo: model.whisperKitRepo, variant: model.whisperKitName)
+            let modelFolder = model.engine == .parakeet
+                ? EmbeddedModelStore.parakeetDirectory
+                : EmbeddedModelStore.whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
             let alreadyOnDisk = EmbeddedModelStore.isDownloaded(model)
-            print("METRIC model_id=\(model.id) model_folder=\(modelFolder.path) "
+            print("METRIC model_id=\(model.id) engine=\(model.engine) model_folder=\(modelFolder.path) "
                   + "model_on_disk_before_run=\(alreadyOnDisk)")
 
             // The actor's own status-line messages ("Transcribing on this
             // Mac…" once the model is loaded, "Identifying speakers…" once
             // transcription hands off to diarization) are the only seam that
             // exposes a load/transcribe/diarize split — the actor's public
-            // return type carries no timing breakdown of its own.
+            // return type carries no timing breakdown of its own. WhisperKit
+            // reports through its own handler; Parakeet has none of its own
+            // and reports through ModelCoordinator (see AppPipelineDeps), so
+            // both are wired and whichever one the engine actually uses fires.
             let stageTimer = StageTimer()
             await EmbeddedTranscriber.shared.setProgressHandler { message in
                 Task { await stageTimer.record(message) }
             }
+            await ModelCoordinator.shared.setProgressHandler { message in
+                Task { await stageTimer.record(message) }
+            }
 
             let t0 = Date()
-            let raw = try await EmbeddedTranscriber.shared.transcribe(
-                wavURL: URL(fileURLWithPath: audioPath), model: model,
-                languageHint: languageHint, config: cfg)
+            let raw: [String: Any]
+            switch model.engine {
+            case .parakeet:
+                raw = try await ParakeetTranscriber.shared.transcribe(
+                    wavURL: URL(fileURLWithPath: audioPath),
+                    languageHint: languageHint, config: cfg)
+            case .whisperKit:
+                raw = try await EmbeddedTranscriber.shared.transcribe(
+                    wavURL: URL(fileURLWithPath: audioPath), model: model,
+                    languageHint: languageHint, config: cfg)
+            }
             let t1 = Date()
             let elapsed = Int(t1.timeIntervalSince(t0))
             let cleaned = TranscriptCleaner.clean(TranscriptCleaner.segments(from: raw))

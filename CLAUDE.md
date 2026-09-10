@@ -4,9 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Distavo** (v1.10.1) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
+**Distavo** (v1.11.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
 recordings and turns each new one into a structured Markdown meeting note. The pipeline is:
-**AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit or the user's WhisperX server**, per `transcribe.backend`) → clean → summarise (**Ollama, or Foundation Models if enabled on macOS 26+**) → validate → write note. All processing is local-first with no cloud path. **macOS 13+** required; Foundation Models engine requires macOS 26+.
+**AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
+Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the
+user's WhisperX server**, per `transcribe.backend`) → clean → summarise (**Ollama, or Foundation Models if enabled
+on macOS 26+**) → validate → write note. All processing is local-first with no cloud path. **macOS 13+** required
+(built-in engines need Apple Silicon); Foundation Models engine requires macOS 26+.
 
 > The app ships in three editions from one codebase — **direct download (DMG + Sparkle), Mac App Store (live), and Setapp** — selected by `apple/configs/{Direct,Setapp,AppStore}.xcconfig`. AVFoundation (not ffmpeg, which is GPL) makes App Store distribution possible. See `apple/README.md` and `docs/distribution-checklist.md`.
 >

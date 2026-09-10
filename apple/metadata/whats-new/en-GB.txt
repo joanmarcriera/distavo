@@ -4,4 +4,4 @@
 • "Download now" in Settings fetches the models ahead of your first meeting, with progress and Cancel.
 • If a model can't be downloaded because you're offline, the recording now waits and retries automatically instead of being marked failed.
 • If your Language setting is "English" but your meetings aren't, Whisper was quietly translating them. Switch Language to "Automatic — pick the engine by language" in Settings to transcribe them as spoken (built-in engine only — WhisperX users pick a language).
-• Every note now ends with a provenance line: which engine transcribed it and what language was detected.
+• Notes transcribed on this Mac now end with a provenance line: which built-in engine transcribed them and what language was detected.

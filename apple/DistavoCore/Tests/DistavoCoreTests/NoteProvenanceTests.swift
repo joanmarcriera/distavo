@@ -43,4 +43,27 @@ final class NoteProvenanceTests: XCTestCase {
         XCTAssertTrue(footer.contains("English 93%"), footer)
         XCTAssertTrue(footer.contains("German 0%"), footer)
     }
+
+    /// The detector runs on up to three windows, so a single-language meeting
+    /// yields one repeated code. The footer must collapse that to one entry,
+    /// at its highest observed probability.
+    func testRepeatedCodeAcrossWindowsCollapsesToOneEntryAtItsHighestProbability() {
+        let footer = NoteProvenance.footer(
+            engine: "Fast (Parakeet, 25 languages)",
+            detections: [(code: "en", probability: 0.91), (code: "en", probability: 0.89), (code: "en", probability: 0.93)])
+        XCTAssertEqual(
+            footer,
+            "\n\n---\n_Transcribed on this Mac with Fast (Parakeet, 25 languages). Detected language: English 93%._")
+    }
+
+    /// Mixed windows: dedupe per code (keeping the max), then order by that
+    /// max probability descending.
+    func testMixedWindowsDedupeAndOrderByHighestProbabilityDescending() {
+        let footer = NoteProvenance.footer(
+            engine: "Languages of Spain (BSC)",
+            detections: [(code: "ca", probability: 0.85), (code: "en", probability: 0.7), (code: "ca", probability: 0.95)])
+        XCTAssertEqual(
+            footer,
+            "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: Catalan 95%, English 70%._")
+    }
 }

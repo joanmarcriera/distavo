@@ -11,11 +11,15 @@
 **Distavo** is a native macOS menu-bar app that watches a folder for audio/video
 recordings and automatically turns each new one into a structured Markdown
 meeting note. It converts the file locally with **AVFoundation**, transcribes it
-on **your own WhisperX server**, summarises the transcript with **your own
-Ollama server**, validates the result, and writes a note to your notes folder.
+with a **built-in on-device engine** (Whisper, a Fast engine for 25 European
+languages, or two Catalan/Spanish models from the Barcelona Supercomputing
+Center) — or on **your own WhisperX server** if you prefer — summarises the
+transcript with **your own Ollama server** (or Apple Foundation Models on
+macOS 26+), validates the result, and writes a note to your notes folder.
 
-Distavo does not bundle any AI servers — you point it at WhisperX and Ollama
-endpoints that you run and trust. **macOS only.**
+Distavo does not require any cloud service: the built-in transcription engines
+run entirely on-device, and for anything else you point Distavo at WhisperX or
+Ollama endpoints that you run and trust. **macOS only.**
 
 ## Screenshots
 
@@ -28,14 +32,20 @@ The native menu and settings window:
 ## Requirements / Prerequisites
 
 - **macOS 13+** (this is a menu-bar app — macOS only).
-- **A reachable WhisperX HTTP endpoint** that you run — see
-  [WhisperX](https://github.com/m-bain/whisperX).
-- **A reachable Ollama HTTP endpoint** with a model pulled (for example
-  `llama3.1:8b`) — see [Ollama](https://ollama.com).
+- **Apple Silicon Mac** for the built-in transcription engines, **macOS 14 or
+  later**. Intel Macs use a WhisperX server instead (see below). The two
+  Catalan/Spanish models additionally need **16 GB of memory or more**.
+- **Ollama for summaries** — a reachable Ollama HTTP endpoint with a model
+  pulled (for example `llama3.1:8b`), see [Ollama](https://ollama.com) —
+  unless you enable **Apple Foundation Models** (macOS 26+), which summarises
+  on-device with no server.
+- Optional: **a reachable WhisperX HTTP endpoint** that you run — see
+  [WhisperX](https://github.com/m-bain/whisperX) — if you'd rather transcribe
+  on your own server than use the built-in engines.
 
-These servers can be on `localhost`, on another machine on your network, or
-anywhere you can reach — Distavo never starts them for you, and only ever talks
-to the URLs you configure.
+Any server you configure (WhisperX, Ollama) can be on `localhost`, on another
+machine on your network, or anywhere you can reach — Distavo never starts it
+for you, and only ever talks to the URLs you configure.
 
 ## Install
 
@@ -60,8 +70,10 @@ its own settings.
 
 Open **Settings…** from the menu bar and fill in:
 
-- your **WhisperX URL** (and model, language, speaker options),
-- your **Ollama URL and model** for summarisation,
+- your **transcription backend** — built-in (choose Automatic, or a specific
+  engine and language) or your own **WhisperX URL**,
+- your **Ollama URL and model** for summarisation (or enable Foundation
+  Models on macOS 26+),
 - the watch / notes / work folders if you want non-default locations.
 
 Use the **Test connection** button to confirm Distavo can reach WhisperX and
@@ -72,10 +84,10 @@ Ollama before you drop in a recording.
 1. Distavo watches the **recordings folder** (default
    `~/Documents/Distavo/recordings`) on a configurable interval.
 2. When a new recording appears, **AVFoundation** converts it locally to WAV.
-3. The WAV is uploaded to your configured **WhisperX** server for
-   transcription.
-4. The cleaned transcript is sent to your configured **Ollama** model for
-   summarisation.
+3. The WAV is transcribed by a **built-in on-device engine** — or uploaded to
+   your configured **WhisperX** server, if you use one instead.
+4. The cleaned transcript is sent to your configured **Ollama** model (or
+   on-device **Apple Foundation Models** on macOS 26+) for summarisation.
 5. The summary is validated and written as Markdown to the **notes folder**
    (default `~/Documents/Distavo/notes/<name>.md`).
 
@@ -91,12 +103,15 @@ Supported input formats include `.wav`, `.m4a`, `.mp3`, `.opus`, `.ogg`,
 Distavo is built to keep your data on machines you control:
 
 - Audio is converted to WAV **locally** with AVFoundation.
-- The WAV is uploaded **only** to the WhisperX server you configured, and the
-  transcript is sent **only** to the Ollama server you configured. These may be
-  remote, so **point Distavo only at servers you trust.**
+- With the built-in engines, transcription happens **entirely on-device** and
+  nothing is uploaded. If you configure a WhisperX server instead, the WAV is
+  uploaded **only** to that server; the transcript is sent **only** to the
+  Ollama server you configured (or processed on-device by Apple Foundation
+  Models). These may be remote, so **point Distavo only at servers you trust.**
 - Notes and transcripts are written in **cleartext** under your home directory.
 - **There is no telemetry and no phone-home.** Nothing is sent anywhere except
-  the WhisperX/Ollama endpoints you set.
+  the WhisperX/Ollama endpoints you configure — and downloading a built-in
+  model the first time it's needed, from Distavo's own Hugging Face repo.
 
 See [PRIVACY.md](PRIVACY.md) for the full statement.
 

@@ -15,6 +15,8 @@ eval "$(grep '^export HF_TOKEN=' ~/.tokens)"; export HF_TOKEN
 # shellcheck disable=SC1091
 source "$work/venv/bin/activate"
 uv pip install -q "git+https://github.com/argmaxinc/whisperkittools.git@${tools_commit}" huggingface_hub
+# The target repo must exist before whisperkittools commits into it; public, per Marc's decision 2026-09-10.
+python -c "from huggingface_hub import HfApi; HfApi().create_repo('$repo', repo_type='model', private=False, exist_ok=True)"
 src_rev="$(python -c "from huggingface_hub import HfApi; print(HfApi().model_info('$model').sha)")"
 out="$work/out"; mkdir -p "$out"
 MODEL_REPO_ID="$repo" whisperkit-generate-model --model-version "$model" --output-dir "$out" --upload-results

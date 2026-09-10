@@ -110,7 +110,7 @@ public actor EmbeddedTranscriber {
         do {
             whisper = try await WhisperKit(whisperConfig)
         } catch {
-            throw Self.modelError(error, model: model.displayName)
+            throw Self.pipelineError(error, model: model.displayName)
         }
 
         report("Transcribing on this Mac…")
@@ -135,7 +135,7 @@ public actor EmbeddedTranscriber {
         do {
             speakerKit = try await SpeakerKit(speakerConfig)
         } catch {
-            throw Self.modelError(error, model: "speaker identification")
+            throw Self.pipelineError(error, model: "speaker identification")
         }
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
         let diarization = try await speakerKit.diarize(
@@ -152,5 +152,16 @@ public actor EmbeddedTranscriber {
                           offline: NetworkScope.describesOfflineFailure(error),
                           underlying: (error as? LocalizedError)?.errorDescription
                               ?? error.localizedDescription)
+    }
+
+    /// The error the pipeline should see: an offline download is a
+    /// `RetryableDependencyError` (the recording stays pending), everything
+    /// else keeps the typed, permanent `EmbeddedTranscriberError`.
+    static func pipelineError(_ error: Error, model: String) -> Error {
+        let typed = modelError(error, model: model)
+        if case let .modelUnavailable(_, offline, _) = typed, offline {
+            return RetryableDependencyError(typed.errorDescription ?? "No internet connection")
+        }
+        return typed
     }
 }

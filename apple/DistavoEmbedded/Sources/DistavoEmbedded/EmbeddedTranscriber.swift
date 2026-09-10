@@ -1,6 +1,12 @@
 import Foundation
 import WhisperKit
 import SpeakerKit
+// Both SpeakerKit and FluidAudio declare a `DiarizationResult` type; this
+// specific-symbol import resolves the unqualified name to SpeakerKit's (the
+// one `SpeakerKit.diarize(...)` actually returns) without needing
+// `SpeakerKit.DiarizationResult`, which the compiler reads as a member of the
+// `SpeakerKit` class rather than the module.
+import struct SpeakerKit.DiarizationResult
 import FluidAudio
 import DistavoCore
 
@@ -12,6 +18,9 @@ public enum EmbeddedTranscriberError: LocalizedError {
     /// model or repo name" even when the real cause was no internet connection,
     /// which sends the user to re-pick a model that was never the problem.
     case modelUnavailable(model: String, offline: Bool, underlying: String)
+    /// The router chose a model this engine cannot run (a Parakeet entry reached
+    /// the WhisperKit transcriber). Permanent: the dispatch is wrong, not the network.
+    case wrongEngine(model: String)
 
     public var errorDescription: String? {
         switch self {
@@ -28,6 +37,8 @@ public enum EmbeddedTranscriberError: LocalizedError {
                     + "(\(underlying))"
             }
             return "Could not load the \(model) model: \(underlying)"
+        case let .wrongEngine(model):
+            return "\(model) is not a Whisper model — choose a Whisper model in Settings, or Automatic."
         }
     }
 }
@@ -158,7 +169,9 @@ public actor EmbeddedTranscriber {
         guard HardwareProbe.supportsEmbeddedTranscription else {
             throw EmbeddedTranscriberError.unsupportedHardware
         }
-        precondition(model.engine == .whisperKit, "EmbeddedTranscriber only runs WhisperKit models")
+        guard model.engine == .whisperKit else {
+            throw EmbeddedTranscriberError.wrongEngine(model: model.displayName)
+        }
         let coordinator = ModelCoordinator.shared
         return try await coordinator.withExclusiveAccess {
             let firstRun = !EmbeddedModelStore.isDownloaded(model)
@@ -169,7 +182,6 @@ public actor EmbeddedTranscriber {
             } else {
                 await self.report("Loading \(model.displayName)…")
             }
-            defer { Task { await coordinator.noteDownload(id: model.id, fraction: nil) } }
 
             let whisperConfig = WhisperKitConfig(
                 model: model.whisperKitName,
@@ -189,7 +201,9 @@ public actor EmbeddedTranscriber {
                 results = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
                 // `whisper` goes out of scope here: the 1–4 GB model is released
                 // before SpeakerKit loads (spec §6 peak-memory rule).
+                await coordinator.noteDownload(id: model.id, fraction: nil)
             } catch {
+                await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw Self.pipelineError(error, model: model.displayName)
             }
 
@@ -202,8 +216,9 @@ public actor EmbeddedTranscriber {
         }
     }
 
-    /// SpeakerKit diarisation of a WhisperKit result (shared with the detector-free path).
-    static func diarize(wavURL: URL, results: [TranscriptionResult], numSpeakers: Int) async throws -> [[SpeakerSegment]] {
+    /// Loads SpeakerKit and runs diarisation — the shared setup for both
+    /// `diarize` (WhisperKit result alignment) and `speakerTurns` (Parakeet).
+    private static func loadDiarization(wavURL: URL, numSpeakers: Int) async throws -> DiarizationResult {
         let speakerConfig = PyannoteConfig(
             downloadBase: EmbeddedModelStore.modelsDirectory.path,
             download: true, load: true, verbose: false)
@@ -211,22 +226,19 @@ public actor EmbeddedTranscriber {
         do { speakerKit = try await SpeakerKit(speakerConfig) }
         catch { throw pipelineError(error, model: "speaker identification") }
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
-        let diarization = try await speakerKit.diarize(
+        return try await speakerKit.diarize(
             audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
+    }
+
+    /// SpeakerKit diarisation of a WhisperKit result (shared with the detector-free path).
+    static func diarize(wavURL: URL, results: [TranscriptionResult], numSpeakers: Int) async throws -> [[SpeakerSegment]] {
+        let diarization = try await loadDiarization(wavURL: wavURL, numSpeakers: numSpeakers)
         return diarization.addSpeakerInfo(to: results, strategy: .subsegment)
     }
 
     /// SpeakerKit turns for an engine that brings its own words (Parakeet).
     static func speakerTurns(wavURL: URL, numSpeakers: Int) async throws -> [SpeakerTurn] {
-        let speakerConfig = PyannoteConfig(
-            downloadBase: EmbeddedModelStore.modelsDirectory.path,
-            download: true, load: true, verbose: false)
-        let speakerKit: SpeakerKit
-        do { speakerKit = try await SpeakerKit(speakerConfig) }
-        catch { throw pipelineError(error, model: "speaker identification") }
-        let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
-        let diarization = try await speakerKit.diarize(
-            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
+        let diarization = try await loadDiarization(wavURL: wavURL, numSpeakers: numSpeakers)
         return diarization.segments.compactMap { seg in
             guard let id = seg.speaker.speakerId else { return nil }
             return SpeakerTurn(speaker: id, start: Double(seg.startTime), end: Double(seg.endTime))

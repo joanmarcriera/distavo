@@ -56,4 +56,26 @@ final class LanguageDetectorWindowTests: XCTestCase {
         let starts = LanguageDetector.windowStarts(totalSeconds: 101, samples: s, sampleRate: rate)
         XCTAssertEqual(starts, [71, 71, 71])
     }
+
+    // MARK: probability(fromLogProb:)
+
+    func testConvertsARealisticLogProbToProbability() {
+        XCTAssertEqual(LanguageDetector.probability(fromLogProb: -0.158), 0.854, accuracy: 0.001)
+    }
+
+    func testZeroLogProbIsCertainty() {
+        XCTAssertEqual(LanguageDetector.probability(fromLogProb: 0), 1)
+    }
+
+    func testAbsentEntryIsZero() {
+        XCTAssertEqual(LanguageDetector.probability(fromLogProb: nil), 0)
+    }
+
+    func testVeryNegativeLogProbIsNearZero() {
+        XCTAssertEqual(LanguageDetector.probability(fromLogProb: -20), 0, accuracy: 0.001)
+    }
+
+    func testPositiveLogProbClampsToOne() {
+        XCTAssertEqual(LanguageDetector.probability(fromLogProb: 3), 1)
+    }
 }

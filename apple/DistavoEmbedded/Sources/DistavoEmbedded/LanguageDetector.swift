@@ -9,6 +9,13 @@ public actor LanguageDetector {
     public static let shared = LanguageDetector()
     public init() {}
 
+    /// WhisperKit's `detectLangauge` reports natural log-probabilities (≤ 0). The router works in
+    /// [0, 1], so convert; an absent entry is 0, and anything above 1 (impossible, guarded) clamps.
+    static func probability(fromLogProb logProb: Float?) -> Float {
+        guard let logProb else { return 0 }
+        return min(1, max(0, Float(exp(Double(logProb)))))
+    }
+
     /// Three window start times (seconds). Pure, unit-tested.
     static func windowStarts(totalSeconds: Double, samples: [Float], sampleRate: Int,
                              window: Double = 30, silenceRMS: Float = 0.01) -> [Double] {
@@ -65,7 +72,7 @@ public actor LanguageDetector {
             var out: [LanguageDetection] = []
             for slice in slices {
                 let (code, probs) = try await whisper.detectLangauge(audioArray: slice)
-                out.append(LanguageDetection(code: code, probability: probs[code] ?? 0))
+                out.append(LanguageDetection(code: code, probability: Self.probability(fromLogProb: probs[code])))
             }
             return out
         }

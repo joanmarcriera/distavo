@@ -1990,6 +1990,7 @@ Update the "Models downloaded at runtime" list and the closing sentence to menti
 • "Automatic" model and language: Distavo listens to three short windows, picks the right engine for what it hears, and downloads it once. Fresh installs start on Automatic; your existing choice is untouched.
 • "Download now" in Settings fetches the models ahead of your first meeting, with progress and Cancel.
 • If a model can't be downloaded because you're offline, the recording now waits and retries automatically instead of being marked failed.
+• If your Language setting is "English" but your meetings aren't, Whisper was quietly translating them. Switch Language to "Automatic — pick the engine by language" in Settings to transcribe them as spoken.
 ```
 
 - [ ] **Step 3: Version and measured sizes** — `MARKETING_VERSION: "1.11.0"`, `CURRENT_PROJECT_VERSION: "14"` in `apple/project.yml`. Update the CLAUDE.md "What this is" line to mention Parakeet and the BSC models. Correct the two BSC catalog entries in `EmbeddedSupport.swift` to the published size, `downloadMB: 3100` (each folder measured 3.10 GB on the Hub, 21 files), and re-run `swift test` in DistavoCore.
@@ -2000,7 +2001,7 @@ cd apple && for sch in Distavo Distavo-AppStore Distavo-Setapp; do find "build-$
 ```
 Expected: nothing printed (no unexpected binaries).
 
-- [ ] **Step 5: Bake-off** — through the **signed** Direct build of this branch (not the live app: shared config), on a copy of the two reference recordings placed in a scratch recordings folder configured in a scratch config file (`DISTAVO_CONFIG` if supported, else temporarily edit the config with a backup and restore it). Record per recording: chosen engine (activity log), wall-clock, transcript word count versus today's transcripts (`Meeting_2026-07-23_10.58.50.transcript.clean.txt`: 7,144 words; `Meeting_2026-09-09_10.58.19`: 2,722 words), and read the Catalan note. Write `docs/superpowers/plans/2026-09-10-bakeoff-results.md` with the numbers (no transcript text). Go/no-go per spec §8.
+- [ ] **Step 5: Bake-off** — **finding from Task 14 (2026-09-10):** today's transcript of the 2026-07-23 meeting (`Meeting_2026-07-23_10.58.50.transcript.clean.txt`, 7,144 words) is 98 % English because the config's `language = "en"` made Whisper *translate* a Catalan/Spanish meeting; it is not a baseline. Compare like with like using the live test (Task 14's env vars), on the 2026-07-23 recording: (a) `DISTAVO_PIPELINE_MODEL=large-v3-turbo DISTAVO_PIPELINE_LANGUAGE=auto` (Whisper's own detection, no translation), (b) `bsc-los` with `ca`, (c) `bsc-los` with `auto`, and on the 2026-09-09 English call: (d) `parakeet-tdt-v3` with `en` and (e) `large-v3-turbo` with `en`. Record per run: wall-clock, model load, word count, language mix of the output (the chunk tagger in the session scratch is fine: en/ca/es/mixed percentages), and summary quality of the resulting note (read the note, not the transcript, and score it on the 14-point rubric from Vikunja #2063). Rule 4 of the router (ca+en → LoS) stays only if (b) or (c) beats (a) on the Catalan note. Write `docs/superpowers/plans/2026-09-10-bakeoff-results.md` with the numbers (no transcript text). Go/no-go per spec §8.
 
 - [ ] **Step 6: Commit**
 

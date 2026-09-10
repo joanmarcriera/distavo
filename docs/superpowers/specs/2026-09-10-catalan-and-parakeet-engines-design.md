@@ -27,6 +27,12 @@ changed the competitive picture in September 2026:
 Distavo's defensible claim after this release: **"Meeting notes in Catalan, Spanish and their
 mix, entirely on your Mac"**, with Parakeet as the fast path for 25 other languages.
 
+**Found during Task 14 (2026-09-10):** with the default `language = "en"`, Whisper does not
+transcribe a Catalan/Spanish meeting — it *translates* it into English (the existing transcript
+of the 2026-07-23 meeting is 98 % English). Every note Distavo has produced for a non-English
+meeting under the default setting was summarised from a machine translation. Automatic language
+(fresh installs) fixes this; existing users are told in What's New to switch.
+
 **Desert Ant Labs is not adopted.** Its bases are open (Voz = Parakeet, Clear = DeepFilterNet 3,
 Ear = whisper-tiny); the SDK requires macOS 15, writes a device ID and per-model usage counters
 to user defaults, forbids disabling that telemetry, requires a "Powered by" line, and Clear

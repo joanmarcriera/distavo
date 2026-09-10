@@ -249,9 +249,10 @@ public enum Pipeline {
             let summary = try await deps.summarise(
                 clean, target, config.summarise.options,
                 config.noteOwner, config.userSpeaker)
-            try summary.write(to: notePath, atomically: true, encoding: .utf8)
+            let noteText = summary + provenanceFooter(from: result)
+            try noteText.write(to: notePath, atomically: true, encoding: .utf8)
 
-            let failures = SummaryValidator.validate(summary)
+            let failures = SummaryValidator.validate(noteText)
             if !failures.isEmpty {
                 let message = failures.joined(separator: "; ")
                 state.markFailed(base, message)
@@ -280,6 +281,21 @@ public enum Pipeline {
             let np = FileManager.default.fileExists(atPath: notePath.path) ? notePath : nil
             return ProcessResult(status: .failed, base: base, message: message, notePath: np)
         }
+    }
+
+    /// Builds the note's provenance footer from the transcribe result's
+    /// optional `"engine"` / `"detections"` keys (set only by the app layer's
+    /// embedded path — `PipelineDeps.live()`'s own transcribe closure never
+    /// sets them, and neither does the WhisperX server response). Empty
+    /// (no footer appended) when `"engine"` is absent.
+    static func provenanceFooter(from transcribeResult: [String: Any]) -> String {
+        guard let engine = transcribeResult["engine"] as? String else { return "" }
+        let detections: [(code: String, probability: Double)] =
+            (transcribeResult["detections"] as? [[String: Any]] ?? []).compactMap { entry in
+                guard let code = entry["code"] as? String else { return nil }
+                return (code: code, probability: entry["probability"] as? Double ?? 0)
+            }
+        return NoteProvenance.footer(engine: engine, detections: detections)
     }
 
     /// Prefer a typed error's human message over the default struct description.

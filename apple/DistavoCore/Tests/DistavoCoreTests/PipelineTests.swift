@@ -77,6 +77,39 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(again.status, .skipped)
     }
 
+    // MARK: Provenance footer (Part 1)
+
+    /// A transcribe result carrying "engine"/"detections" (as the app layer's
+    /// embedded path sets them) makes the written note end with the footer.
+    func testNoteEndsWithFooterWhenEngineIsPresent() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]],
+                 "engine": "Languages of Spain (BSC)",
+                 "detections": [["code": "ca", "probability": 0.92], ["code": "en", "probability": 0.71]]]
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let note = try String(contentsOf: XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertTrue(note.hasSuffix(
+            "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: Catalan 92%, English 71%._"))
+    }
+
+    /// A transcribe result without "engine" (the WhisperX server path, and
+    /// every existing test's default fake) writes a note with no footer at all
+    /// — the existing tests above already cover this by using the default fake.
+    func testNoteHasNoFooterWhenEngineIsAbsent() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let note = try String(contentsOf: XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertFalse(note.contains("Transcribed on this Mac"))
+        XCTAssertFalse(note.contains("---"))
+    }
+
     func testDeferredWhenServerDownAndNoFallback() async throws {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(

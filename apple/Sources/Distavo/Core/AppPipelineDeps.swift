@@ -56,15 +56,25 @@ extension PipelineDeps {
                 await ModelCoordinator.shared.report(
                     "Using \(decision.model.displayName)" + (decision.languageHint.map { " (\($0))" } ?? ""))
             }
+            var result: [String: Any]
             switch decision.model.engine {
             case .parakeet:
-                return try await ParakeetTranscriber.shared.transcribe(
+                result = try await ParakeetTranscriber.shared.transcribe(
                     wavURL: wavURL, languageHint: decision.languageHint, config: transcribeConfig)
             case .whisperKit:
-                return try await EmbeddedTranscriber.shared.transcribe(
+                result = try await EmbeddedTranscriber.shared.transcribe(
                     wavURL: wavURL, model: decision.model,
                     languageHint: decision.languageHint, config: transcribeConfig)
             }
+            // Provenance footer (Vikunja): tell the note which engine
+            // transcribed it and, when the router ran the detector, what
+            // language(s) it found. The server (WhisperX) path never sets
+            // these, so it never gets a footer.
+            result["engine"] = decision.model.displayName
+            if needsDetection {
+                result["detections"] = detections.map { ["code": $0.code, "probability": Double($0.probability)] }
+            }
+            return result
         }
 
         // The target is chosen by Pipeline.chooseSummariser, which only returns

@@ -33,4 +33,14 @@ final class ValidationTests: XCTestCase {
     func testValidateCleanSummaryPasses() {
         XCTAssertEqual(SummaryValidator.validate("This is a perfectly normal short summary."), [])
     }
+
+    /// The provenance footer (Pipeline appends it before validation) must not
+    /// trip the repetition/overlong/empty checks on an otherwise clean note.
+    func testValidateCleanSummaryWithFooterPasses() {
+        let summary = "This is a perfectly normal short summary."
+        let footer = NoteProvenance.footer(
+            engine: "Languages of Spain (BSC)",
+            detections: [(code: "ca", probability: 0.92), (code: "en", probability: 0.71)])
+        XCTAssertEqual(SummaryValidator.validate(summary + footer), [])
+    }
 }

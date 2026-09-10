@@ -45,4 +45,15 @@ final class CleaningTests: XCTestCase {
         let segments = TranscriptCleaner.segments(from: ["text": "just a string"])
         XCTAssertEqual(segments, [Segment(speaker: "SPEAKER_UNKNOWN", text: "just a string")])
     }
+
+    /// The provenance footer's "engine"/"detections" keys (added by the app
+    /// layer's embedded transcribe path) are extra data alongside "segments";
+    /// they must not confuse or alter segment extraction.
+    func testProvenanceKeysAreIgnored() throws {
+        var withExtras = try loadFixture()
+        withExtras["engine"] = "Languages of Spain (BSC)"
+        withExtras["detections"] = [["code": "ca", "probability": 0.92]]
+        let withoutExtras = TranscriptCleaner.segments(from: try loadFixture())
+        XCTAssertEqual(TranscriptCleaner.segments(from: withExtras), withoutExtras)
+    }
 }

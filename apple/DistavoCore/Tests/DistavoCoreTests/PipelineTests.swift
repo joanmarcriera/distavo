@@ -301,6 +301,38 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(phases.all, [.converting, .transcribing])
     }
 
+    /// A model download that fails because the Mac is offline must leave the
+    /// recording pending: no `.failed` marker, retried on the next scan.
+    func testRetryableTranscribeErrorDefersAndRetriesOnNextScan() async throws {
+        let (cfg, input) = try makeEnv()
+        final class Counter: @unchecked Sendable {
+            private let lock = NSLock(); private var n = 0
+            func next() -> Int { lock.lock(); defer { lock.unlock() }; n += 1; return n }
+        }
+        let calls = Counter()
+        let d = deps(transcribe: { _, _ in
+            if calls.next() == 1 { throw RetryableDependencyError("No internet connection") }
+            return ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
+        })
+        let first = await Pipeline.processOne(
+            path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(first.status, .deferred)
+        XCTAssertEqual(first.message, "No internet connection")
+
+        let recordingsDir = Config.resolvePath(cfg.recordingsDir)
+        let workDir = Config.resolvePath(cfg.workDir)
+        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: input)
+        let store = try DistavoState.Store(
+            stateDir: workDir.appendingPathComponent(".state"),
+            notesDir: Config.resolvePath(cfg.notesDir))
+        XCTAssertFalse(store.isFailed(base), "retryable errors must not write .failed")
+        XCTAssertFalse(store.isProcessing(base), ".processing must be cleared so the next scan retries")
+
+        let second = await Pipeline.processOne(
+            path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(second.status, .done)
+    }
+
     func testScanOnceProcessesPending() async throws {
         let (cfg, _) = try makeEnv()
         let results = await Scanner.scanOnce(

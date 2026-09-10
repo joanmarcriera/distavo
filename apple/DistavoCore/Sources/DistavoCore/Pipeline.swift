@@ -4,7 +4,22 @@ public enum ProcessStatus: String, Equatable {
     case done
     case skipped
     case deferredNeedLocal = "deferred_need_local"
+    /// A dependency was temporarily unavailable (offline model download,
+    /// interrupted download, busy model folder). The recording stays pending
+    /// and is retried on the next scan — never marked failed.
+    case deferred
     case failed
+}
+
+/// Thrown by any `PipelineDeps.transcribe` implementation for a condition that
+/// resolves on its own (no internet for a one-time model download, a download
+/// interrupted mid-way, a model folder busy with removal). `Pipeline.processOne`
+/// clears the `.processing` marker and returns `.deferred` instead of writing a
+/// permanent `.failed` marker, which `iterPending` would skip forever.
+public struct RetryableDependencyError: Error, Equatable, LocalizedError {
+    public let message: String
+    public init(_ message: String) { self.message = message }
+    public var errorDescription: String? { message }
 }
 
 /// Coarse progress reported at each pipeline stage boundary. Works for both
@@ -238,6 +253,9 @@ public enum Pipeline {
             state.markDone(base)
             return ProcessResult(status: .done, base: base, message: "note written",
                                  notePath: notePath, transcriptPath: transcriptPath)
+        } catch let retry as RetryableDependencyError {
+            state.clearProcessing(base)
+            return ProcessResult(status: .deferred, base: base, message: retry.message)
         } catch {
             let message = cleanMessage(error)
             state.markFailed(base, message)

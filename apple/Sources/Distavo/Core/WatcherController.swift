@@ -331,6 +331,9 @@ final class WatcherController: ObservableObject {
                 notifier.notify(title: "Server Ollama offline",
                                 body: "Enable ‘Use local Ollama’ to process \(result.base).")
             }
+        case .deferred:
+            status = "Waiting to retry: \(result.base)"
+            log("Deferred — \(result.message): \(result.base)")
         case .failed:
             status = "Failed: \(result.base)"
             lastError = "\(result.base): \(result.message)"

@@ -23,9 +23,31 @@ extension PipelineDeps {
             // automatic (even with a fixed language, so the user still sees
             // which engine the router picked). Retryable conditions surface
             // as RetryableDependencyError and defer.
+            // I4: the detector is not the router — losing it must not fail the
+            // whole recording. A RetryableDependencyError (offline detector
+            // download, busy folder) still propagates and defers like any
+            // other dependency failure; anything else (a corrupt detector
+            // model, an unreadable WAV) is reported and swallowed so routing
+            // falls through with no detections (rule 6: turbo/small), rather
+            // than the recording ending up permanently failed over a detector
+            // that was never load-bearing for correctness. No unit test here —
+            // this closure only exists in the app target, which has no
+            // DistavoEmbedded-free seam to fake the detector through; the
+            // behaviour is exercised by EngineRouterTests (empty detections ->
+            // rule 6) and EmbeddedTranscriberErrorTests (offline -> retryable).
             let needsDetection = EngineRouter.needsDetection(transcribeConfig)
-            let detections = needsDetection
-                ? try await LanguageDetector.shared.detect(wavURL: wavURL) : []
+            var detections: [LanguageDetection] = []
+            if needsDetection {
+                do {
+                    detections = try await LanguageDetector.shared.detect(wavURL: wavURL)
+                } catch let retry as RetryableDependencyError {
+                    throw retry
+                } catch {
+                    let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                    await ModelCoordinator.shared.report(
+                        "Language detection failed (\(message)) — using the default engine")
+                }
+            }
             let decision = EngineRouter.choose(
                 detections: detections, config: transcribeConfig,
                 memoryBytes: HardwareProbe.physicalMemoryBytes)

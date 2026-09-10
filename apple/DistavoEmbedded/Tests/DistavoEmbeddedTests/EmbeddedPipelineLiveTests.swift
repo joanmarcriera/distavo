@@ -13,9 +13,19 @@ import DistavoCore
 ///   DISTAVO_PIPELINE_LIVE=1 \
 ///   DISTAVO_PIPELINE_AUDIO=/abs/meeting.wav \
 ///   DISTAVO_PIPELINE_OUT=/abs/outdir \
+///   DISTAVO_PIPELINE_MODEL=bsc-los \
+///   DISTAVO_PIPELINE_LANGUAGE=ca \
 ///   DISTAVO_PIPELINE_OLLAMA=http://127.0.0.1:11434 \
 ///   DISTAVO_PIPELINE_OLLAMA_MODEL=llama3.1:8b \
 ///   swift test --filter EmbeddedPipelineLiveTests
+///
+/// `DISTAVO_PIPELINE_MODEL` is an `EmbeddedModelCatalog` id (default
+/// `large-v3-turbo`); `DISTAVO_PIPELINE_LANGUAGE` is a Whisper language code or
+/// `auto` (default `en`) — `auto` passes a nil language hint. Together they
+/// exercise the same `EmbeddedTranscriber.shared.transcribe(wavURL:model:
+/// languageHint:config:)` entry point the router uses, so this is also the
+/// harness for proving a custom-repo catalog entry (e.g. `bsc-los`) loads and
+/// transcribes end to end.
 ///
 /// **Privacy:** outputs are written to `DISTAVO_PIPELINE_OUT`; the test prints
 /// only metrics, never transcript or note content. Point it at a scratch dir,
@@ -36,31 +46,82 @@ final class EmbeddedPipelineLiveTests: XCTestCase {
         let noteOwner = env["DISTAVO_PIPELINE_OWNER"] ?? "Marc"
         let userSpeaker = env["DISTAVO_PIPELINE_SPEAKER"] ?? "unknown"
 
+        // Catalog model + language hint for the transcribe call. Defaults match
+        // the file's previous behaviour (large-v3-turbo, English) so an
+        // unmodified invocation is unchanged; DISTAVO_PIPELINE_LANG is kept as
+        // an alias of DISTAVO_PIPELINE_LANGUAGE for back-compat.
+        let modelID = env["DISTAVO_PIPELINE_MODEL"] ?? EmbeddedModelCatalog.defaultModelID
+        let languageCode = env["DISTAVO_PIPELINE_LANGUAGE"] ?? env["DISTAVO_PIPELINE_LANG"] ?? "en"
+        let model = EmbeddedModelCatalog.model(id: modelID)
+        let languageHint = EmbeddedModelCatalog.isAutomatic(languageCode) ? nil : languageCode
+
         // ── 1. Transcribe (cached: delete transcript.txt to force a re-run) ──
         let transcriptURL = outDir.appendingPathComponent("transcript.txt")
         let transcript: String
         if let cached = try? String(contentsOf: transcriptURL, encoding: .utf8), !cached.isEmpty {
             transcript = cached
-            print("METRIC transcribe_seconds=cached")
+            print("METRIC transcribe_seconds=cached timestamps_present=cached")
         } else {
             var cfg = TranscribeConfig()
             cfg.backend = "embedded"
+            cfg.embeddedModel = modelID
             cfg.diarize = env["DISTAVO_PIPELINE_DIARIZE"] != "0"
             cfg.numSpeakers = Int(env["DISTAVO_PIPELINE_SPEAKERS"] ?? "") ?? 2
-            cfg.language = env["DISTAVO_PIPELINE_LANG"] ?? "en"
+            cfg.language = languageCode
+
+            let modelFolder = EmbeddedModelStore.whisperKitDirectory(
+                repo: model.whisperKitRepo, variant: model.whisperKitName)
+            let alreadyOnDisk = EmbeddedModelStore.isDownloaded(model)
+            print("METRIC model_id=\(model.id) model_folder=\(modelFolder.path) "
+                  + "model_on_disk_before_run=\(alreadyOnDisk)")
+
+            // The actor's own status-line messages ("Transcribing on this
+            // Mac…" once the model is loaded, "Identifying speakers…" once
+            // transcription hands off to diarization) are the only seam that
+            // exposes a load/transcribe/diarize split — the actor's public
+            // return type carries no timing breakdown of its own.
+            let stageTimer = StageTimer()
+            await EmbeddedTranscriber.shared.setProgressHandler { message in
+                Task { await stageTimer.record(message) }
+            }
 
             let t0 = Date()
             let raw = try await EmbeddedTranscriber.shared.transcribe(
-                wavURL: URL(fileURLWithPath: audioPath), config: cfg)
+                wavURL: URL(fileURLWithPath: audioPath), model: model,
+                languageHint: languageHint, config: cfg)
+            let t1 = Date()
+            let elapsed = Int(t1.timeIntervalSince(t0))
             let cleaned = TranscriptCleaner.clean(TranscriptCleaner.segments(from: raw))
-            print("METRIC transcribe_seconds=\(Int(Date().timeIntervalSince(t0)))")
+
+            let stages = await stageTimer.events
+            let loadedAt = stages.first(where: { $0.label.contains("Transcribing on this Mac") })?.at
+            let diarizeStartAt = stages.first(where: { $0.label.contains("Identifying speakers") })?.at
+            let modelLoadSeconds = loadedAt.map { Int($0.timeIntervalSince(t0)) }
+            let transcribeOnlySeconds = loadedAt.map { Int((diarizeStartAt ?? t1).timeIntervalSince($0)) }
+            let diarizeSeconds = diarizeStartAt.map { Int(t1.timeIntervalSince($0)) } ?? 0
+            print("METRIC model_load_seconds=\(modelLoadSeconds.map(String.init) ?? "unknown") "
+                  + "transcribe_only_seconds=\(transcribeOnlySeconds.map(String.init) ?? "unknown") "
+                  + "diarize_seconds=\(diarizeSeconds)")
+
+            // Segment-level start/end are what the actor's public (WhisperX-shaped)
+            // return value exposes; per-word timings are requested internally
+            // (DecodingOptions.wordTimestamps = true) but not surfaced past
+            // EmbeddedResultMapper, so this checks that timing survived the trip.
+            let segments = (raw["segments"] as? [[String: Any]]) ?? []
+            let timestampsPresent = !segments.isEmpty && segments.allSatisfy {
+                ($0["start"] as? Double) != nil && ($0["end"] as? Double) != nil
+            }
+            print("METRIC transcribe_seconds=\(elapsed) segment_count=\(segments.count) "
+                  + "timestamps_present=\(timestampsPresent)")
+
             try cleaned.write(to: transcriptURL, atomically: true, encoding: .utf8)
             transcript = cleaned
         }
 
         let estTokens = EmbeddedSummaryTokens.estimate(transcript)
-        print("METRIC transcript_chars=\(transcript.count) est_tokens=\(estTokens) "
-              + "lines=\(transcript.split(separator: "\n").count)")
+        let wordCount = transcript.split(whereSeparator: { $0.isWhitespace }).count
+        print("METRIC transcript_chars=\(transcript.count) word_count=\(wordCount) "
+              + "est_tokens=\(estTokens) lines=\(transcript.split(separator: "\n").count)")
         XCTAssertFalse(transcript.isEmpty, "empty transcript")
 
         let plan = EmbeddedSummaryPlanner.plan(
@@ -145,4 +206,13 @@ final class EmbeddedPipelineLiveTests: XCTestCase {
             print("METRIC \(label)_missing_sections=\(required.filter { !present.contains($0) }.joined(separator: ","))")
         }
     }
+}
+
+/// Timestamps `EmbeddedTranscriber`'s status-line messages so the live test can
+/// derive a model-load / transcribe / diarize breakdown from wall-clock alone
+/// (the actor's own return value carries no timing). Actor-isolated because the
+/// `@Sendable` progress handler fires from the transcriber's task.
+private actor StageTimer {
+    private(set) var events: [(label: String, at: Date)] = []
+    func record(_ message: String) { events.append((message, Date())) }
 }

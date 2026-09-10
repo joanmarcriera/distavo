@@ -146,60 +146,91 @@ public actor EmbeddedTranscriber {
     private func report(_ message: String) { progressHandler?(message) }
 
     public func transcribe(wavURL: URL, config: TranscribeConfig) async throws -> [String: Any] {
+        let model = EmbeddedModelCatalog.model(id: config.embeddedModel)
+        let hint = (config.language.isEmpty || EmbeddedModelCatalog.isAutomatic(config.language)) ? nil : config.language
+        return try await transcribe(wavURL: wavURL, model: model, languageHint: hint, config: config)
+    }
+
+    /// Transcribe with an explicit catalog model (the router's choice) and a
+    /// real language code or nil — never "auto".
+    public func transcribe(wavURL: URL, model: EmbeddedModel, languageHint: String?,
+                           config: TranscribeConfig) async throws -> [String: Any] {
         guard HardwareProbe.supportsEmbeddedTranscription else {
             throw EmbeddedTranscriberError.unsupportedHardware
         }
-        let model = EmbeddedModelCatalog.model(id: config.embeddedModel)
-        let firstRun = !EmbeddedModelStore.hasDownloadedModels()
-        if firstRun {
-            report("Downloading \(model.displayName) — \(model.downloadLabel), one-time…")
-        } else {
-            report("Loading \(model.displayName)…")
+        precondition(model.engine == .whisperKit, "EmbeddedTranscriber only runs WhisperKit models")
+        let coordinator = ModelCoordinator.shared
+        return try await coordinator.withExclusiveAccess {
+            let firstRun = !EmbeddedModelStore.isDownloaded(model)
+            if firstRun {
+                try coordinator.ensureFreeSpace(forMB: model.downloadMB)
+                await coordinator.noteDownload(id: model.id, fraction: 0)
+                await self.report("Downloading \(model.displayName) — \(model.downloadLabel), one-time…")
+            } else {
+                await self.report("Loading \(model.displayName)…")
+            }
+            defer { Task { await coordinator.noteDownload(id: model.id, fraction: nil) } }
+
+            let whisperConfig = WhisperKitConfig(
+                model: model.whisperKitName,
+                downloadBase: EmbeddedModelStore.modelsDirectory,
+                modelRepo: model.whisperKitRepo,
+                verbose: false,
+                load: true,
+                download: true)
+            let results: [TranscriptionResult]
+            do {
+                let whisper = try await WhisperKit(whisperConfig)
+                await self.report("Transcribing on this Mac…")
+                var options = DecodingOptions()
+                options.language = languageHint
+                options.wordTimestamps = true
+                options.chunkingStrategy = .vad
+                results = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
+                // `whisper` goes out of scope here: the 1–4 GB model is released
+                // before SpeakerKit loads (spec §6 peak-memory rule).
+            } catch {
+                throw Self.pipelineError(error, model: model.displayName)
+            }
+
+            guard config.diarize else {
+                return EmbeddedResultMapper.whisperXDictionary(segments: results.flatMap(\.segments))
+            }
+            await self.report("Identifying speakers…")
+            let groups = try await Self.diarize(wavURL: wavURL, results: results, numSpeakers: config.numSpeakers)
+            return EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups)
         }
+    }
 
-        let whisperConfig = WhisperKitConfig(
-            model: model.whisperKitName,
-            downloadBase: EmbeddedModelStore.modelsDirectory,
-            verbose: false,
-            load: true,
-            download: true)
-        let whisper: WhisperKit
-        do {
-            whisper = try await WhisperKit(whisperConfig)
-        } catch {
-            throw Self.pipelineError(error, model: model.displayName)
-        }
-
-        report("Transcribing on this Mac…")
-        var options = DecodingOptions()
-        options.language = config.language.isEmpty ? nil : config.language
-        // Word timings are what SpeakerKit aligns speaker labels to.
-        options.wordTimestamps = true
-        options.chunkingStrategy = .vad
-        let results = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
-
-        guard config.diarize else {
-            return EmbeddedResultMapper.whisperXDictionary(segments: results.flatMap(\.segments))
-        }
-
-        report("Identifying speakers…")
+    /// SpeakerKit diarisation of a WhisperKit result (shared with the detector-free path).
+    static func diarize(wavURL: URL, results: [TranscriptionResult], numSpeakers: Int) async throws -> [[SpeakerSegment]] {
         let speakerConfig = PyannoteConfig(
             downloadBase: EmbeddedModelStore.modelsDirectory.path,
-            download: true,
-            load: true,
-            verbose: false)
+            download: true, load: true, verbose: false)
         let speakerKit: SpeakerKit
-        do {
-            speakerKit = try await SpeakerKit(speakerConfig)
-        } catch {
-            throw Self.pipelineError(error, model: "speaker identification")
-        }
+        do { speakerKit = try await SpeakerKit(speakerConfig) }
+        catch { throw pipelineError(error, model: "speaker identification") }
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
         let diarization = try await speakerKit.diarize(
-            audioArray: audio,
-            options: PyannoteDiarizationOptions(numberOfSpeakers: config.numSpeakers))
-        let groups = diarization.addSpeakerInfo(to: results, strategy: .subsegment)
-        return EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups)
+            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
+        return diarization.addSpeakerInfo(to: results, strategy: .subsegment)
+    }
+
+    /// SpeakerKit turns for an engine that brings its own words (Parakeet).
+    static func speakerTurns(wavURL: URL, numSpeakers: Int) async throws -> [SpeakerTurn] {
+        let speakerConfig = PyannoteConfig(
+            downloadBase: EmbeddedModelStore.modelsDirectory.path,
+            download: true, load: true, verbose: false)
+        let speakerKit: SpeakerKit
+        do { speakerKit = try await SpeakerKit(speakerConfig) }
+        catch { throw pipelineError(error, model: "speaker identification") }
+        let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
+        let diarization = try await speakerKit.diarize(
+            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
+        return diarization.segments.compactMap { seg in
+            guard let id = seg.speaker.speakerId else { return nil }
+            return SpeakerTurn(speaker: id, start: Double(seg.startTime), end: Double(seg.endTime))
+        }
     }
 
     /// Classify a model load/download failure so the surfaced message names the

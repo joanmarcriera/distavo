@@ -1,6 +1,7 @@
 import Foundation
 import WhisperKit
 import SpeakerKit
+import FluidAudio
 import DistavoCore
 
 public enum EmbeddedTranscriberError: LocalizedError {
@@ -63,6 +64,52 @@ public enum EmbeddedModelStore {
         if FileManager.default.fileExists(atPath: dir.path) {
             try FileManager.default.removeItem(at: dir)
         }
+    }
+
+    /// FluidAudio's Parakeet model folder, inside the same root as everything
+    /// else. FluidAudio's `download(to:)` / `downloadAndLoad(to:)` take the MODEL
+    /// directory itself (its default is `…/FluidAudio/Models/parakeet-tdt-0.6b-v3`),
+    /// so this path ends in the model name.
+    public static var parakeetDirectory: URL {
+        modelsDirectory.appendingPathComponent("parakeet", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+    }
+
+    /// Where WhisperKit stores `variant` when `downloadBase` is `modelsDirectory`
+    /// (verified on disk 2026-09-10): `<base>/models/<org>/<repo>/<variant>`,
+    /// e.g. `models/argmaxinc/whisperkit-coreml/openai_whisper-small`.
+    public static func whisperKitDirectory(repo: String?, variant: String) -> URL {
+        var url = modelsDirectory.appendingPathComponent("models", isDirectory: true)
+        for part in (repo ?? "argmaxinc/whisperkit-coreml").split(separator: "/") {
+            url.appendPathComponent(String(part), isDirectory: true)
+        }
+        return url.appendingPathComponent(variant, isDirectory: true)
+    }
+
+    public static func isDownloaded(_ model: EmbeddedModel) -> Bool {
+        switch model.engine {
+        case .parakeet:
+            // Same check FluidAudio runs before deciding to download (public API).
+            return AsrModels.modelsExist(at: parakeetDirectory)
+        case .whisperKit:
+            // A complete variant folder holds config.json plus the compiled models
+            // (AudioEncoder.mlmodelc, TextDecoder.mlmodelc, MelSpectrogram.mlmodelc).
+            let dir = whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
+            return ["config.json", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy {
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+            }
+        }
+    }
+
+    public static func isDetectorDownloaded() -> Bool {
+        let dir = whisperKitDirectory(repo: nil, variant: EmbeddedModelCatalog.languageDetectorName)
+        return FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path)
+    }
+
+    public static func freeSpaceBytes() -> Int64 {
+        let values = try? modelsDirectory.deletingLastPathComponent()
+            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+        return values?.volumeAvailableCapacityForImportantUsage ?? 0
     }
 }
 

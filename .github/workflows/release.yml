@@ -72,8 +72,10 @@ jobs:
       - name: Archive (Direct, Developer ID)
         run: |
           cd apple
+          # No -xcconfig here: the Distavo target already maps Release to configs/Direct.xcconfig,
+          # and a command-line xcconfig applies CODE_SIGN_ENTITLEMENTS to every target in the
+          # build, including SwiftPM resource bundles (FluidAudio's) that cannot take it.
           xcodebuild -project Distavo.xcodeproj -scheme Distavo -configuration Release \
-            -xcconfig configs/Direct.xcconfig \
             -archivePath build/Distavo-Direct.xcarchive \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Manual \

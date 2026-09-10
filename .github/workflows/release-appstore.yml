@@ -215,8 +215,12 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Manual \
             CODE_SIGN_IDENTITY="$DISTAVO_APP_SIGNING_IDENTITY" \
-            PROVISIONING_PROFILE_SPECIFIER="$DISTAVO_APPSTORE_PROFILE_NAME" \
+            DISTAVO_APPSTORE_PROFILE_NAME="$DISTAVO_APPSTORE_PROFILE_NAME" \
             archive
+          # The profile is applied by configs/AppStore.xcconfig (target-scoped) from the
+          # DISTAVO_APPSTORE_PROFILE_NAME user setting above. Passing
+          # PROVISIONING_PROFILE_SPECIFIER on the command line would apply it to every
+          # target, and SwiftPM resource bundles (FluidAudio's) refuse provisioning profiles.
 
           embedded_profile="build/Distavo-AppStore.xcarchive/Products/Applications/Distavo.app/Contents/embedded.provisionprofile"
           if [[ ! -f "$embedded_profile" ]]; then

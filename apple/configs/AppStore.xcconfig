@@ -9,3 +9,8 @@ CODE_SIGN_ENTITLEMENTS = Distavo-AppStore.entitlements
 ENABLE_HARDENED_RUNTIME = YES
 // Absolute — must not inherit Direct's EDITION_DIRECT / DONATE_ENABLED.
 SWIFT_ACTIVE_COMPILATION_CONDITIONS = EDITION_APPSTORE
+
+// Mac App Store provisioning profile, target-scoped. CI passes the profile name as the
+// DISTAVO_APPSTORE_PROFILE_NAME user setting; locally it is undefined, so this stays empty
+// and unsigned Debug builds (CODE_SIGNING_ALLOWED=NO) are unaffected.
+PROVISIONING_PROFILE_SPECIFIER = $(DISTAVO_APPSTORE_PROFILE_NAME)

@@ -106,10 +106,28 @@ public enum EmbeddedModelStore {
             // A complete variant folder holds config.json plus the compiled models
             // (AudioEncoder.mlmodelc, TextDecoder.mlmodelc, MelSpectrogram.mlmodelc).
             let dir = whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
-            return ["config.json", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy {
+            let filesPresent = ["config.json", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy {
                 FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
             }
+            // I3: for a custom (BSC) repo, the four expected files existing is
+            // not enough — an interrupted download can leave exactly that
+            // shape without ever having been checked against its manifest.
+            // Require the `.distavo-verified` sentinel too, so a partial
+            // folder counts as not downloaded and `firstRun`/verification run
+            // again. Argmax's own repo has no manifest to verify, so it never
+            // needs a sentinel.
+            guard filesPresent, model.whisperKitRepo != nil else { return filesPresent }
+            return ModelManifestCheck.hasSentinel(folder: dir)
         }
+    }
+
+    /// Whether a custom-repo model's `.distavo-verified` sentinel is present
+    /// (I3). Argmax's own repo (`whisperKitRepo == nil`) has no manifest to
+    /// verify, so it is always considered verified.
+    static func hasVerifiedSentinel(_ model: EmbeddedModel) -> Bool {
+        guard model.whisperKitRepo != nil else { return true }
+        let dir = whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
+        return ModelManifestCheck.hasSentinel(folder: dir)
     }
 
     public static func isDetectorDownloaded() -> Bool {
@@ -193,11 +211,15 @@ public actor EmbeddedTranscriber {
             let results: [TranscriptionResult]
             do {
                 let whisper = try await WhisperKit(whisperConfig)
-                if firstRun, model.whisperKitRepo != nil {
-                    // Verified once, right after the download; a later
-                    // on-disk corruption is caught by WhisperKit's own load
-                    // failure.
-                    try Self.verifyManifest(model: model)
+                // I3: verify whenever this is a custom-repo model that has
+                // never been verified — not only on `firstRun`. A download
+                // interrupted right after the model files land (but before
+                // the sentinel is written) would otherwise look "downloaded"
+                // forever and never get checked. Once verified, a later
+                // on-disk corruption is caught by WhisperKit's own load
+                // failure — the cost stays one hash pass per download.
+                if model.whisperKitRepo != nil, !EmbeddedModelStore.hasVerifiedSentinel(model) {
+                    try await Self.verifyManifest(model: model)
                 }
                 await self.report("Transcribing on this Mac…")
                 var options = DecodingOptions()
@@ -214,6 +236,15 @@ public actor EmbeddedTranscriber {
                 // reclassify it as a permanent failure below.
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw retry
+            } catch let manifestPermanent as EmbeddedTranscriberError {
+                // A second consecutive manifest failure (I2, spec §7) is
+                // already the typed, permanent error the pipeline should see
+                // — passing it through `pipelineError` would re-wrap its own
+                // `errorDescription` inside a fresh `.modelUnavailable`,
+                // doubling the message and (worse) re-deriving `offline` from
+                // text that was never a network error in the first place.
+                await coordinator.noteDownload(id: model.id, fraction: nil)
+                throw manifestPermanent
             } catch {
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw Self.pipelineError(error, model: model.displayName)
@@ -260,14 +291,26 @@ public actor EmbeddedTranscriber {
     /// Verifies a just-loaded custom-repo model's folder against its
     /// `manifest.json` (spec §5.6, §7). Called only when `model.whisperKitRepo
     /// != nil` — Argmax's own repo has no manifest, so this never runs for the
-    /// built-in Whisper models. On any mismatch, removes the *one* variant
-    /// folder (never anything above it) so the next attempt re-downloads from
-    /// scratch, and reports it as a retryable, not permanent, failure.
-    static func verifyManifest(model: EmbeddedModel) throws {
+    /// built-in Whisper models.
+    ///
+    /// On success, writes the `.distavo-verified` sentinel (I3) and resets the
+    /// model's manifest-failure count. On a mismatch, removes the *one*
+    /// variant folder (never anything above it) so the next attempt
+    /// re-downloads from scratch. The first consecutive failure is retryable
+    /// — a genuinely interrupted download usually succeeds on a retry — but a
+    /// *second* consecutive failure for the same model id (I2, spec §7) is
+    /// permanent: a download that fails its manifest twice in a row is
+    /// corrupt at the source, not merely unlucky, and must stop re-downloading
+    /// the same ~3 GB forever.
+    static func verifyManifest(model: EmbeddedModel) async throws {
         let dir = EmbeddedModelStore.whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
+        let coordinator = ModelCoordinator.shared
         do {
-            try ModelManifestCheck.verify(folder: dir)
+            try ModelManifestCheck.verify(folder: dir, expectManifest: true)
+            try ModelManifestCheck.writeSentinel(folder: dir)
+            await coordinator.resetManifestFailures(id: model.id)
         } catch {
+            let failureCount = await coordinator.recordManifestFailure(id: model.id)
             do {
                 try FileManager.default.removeItem(at: dir)
             } catch let removeError {
@@ -278,6 +321,11 @@ public actor EmbeddedTranscriber {
                     "The \(model.displayName) download was incomplete and Distavo could not "
                         + "remove it (\(removeError.localizedDescription)) — remove downloaded "
                         + "models in Settings and it will download again.")
+            }
+            if failureCount >= 2 {
+                throw EmbeddedTranscriberError.modelUnavailable(
+                    model: model.displayName, offline: false,
+                    underlying: "download did not match its manifest twice")
             }
             throw RetryableDependencyError(
                 "The \(model.displayName) download was incomplete — Distavo will download it again.")

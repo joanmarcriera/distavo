@@ -19,6 +19,11 @@ public actor ModelCoordinator {
     private var progressHandler: (@Sendable (String) -> Void)?
     private var downloading: [String: Double] = [:]
     private var cancelRequested = false
+    /// Consecutive manifest-verification failures per model id (I2, spec §7).
+    /// First failure discards the folder and is retryable; a second
+    /// consecutive failure is permanent — a download that fails its manifest
+    /// twice in a row is treated as corrupt at the source, not transient.
+    private var manifestFailures: [String: Int] = [:]
 
     public init() {}
 
@@ -76,6 +81,21 @@ public actor ModelCoordinator {
             throw RetryableDependencyError("Not enough free disk space to download \(mb) MB of models — free some space and Distavo will retry.")
         }
     }
+
+    /// Record one manifest-verification failure for `id` and return the new
+    /// consecutive count. `EmbeddedTranscriber.verifyManifest` uses this to
+    /// decide retryable (count 1) vs. permanent (count ≥ 2).
+    public func recordManifestFailure(id: String) -> Int {
+        let n = (manifestFailures[id] ?? 0) + 1
+        manifestFailures[id] = n
+        return n
+    }
+
+    /// A successful verification resets the count, so a model that fails once
+    /// and then downloads cleanly gets the full two-strike allowance again.
+    public func resetManifestFailures(id: String) { manifestFailures[id] = nil }
+
+    public func manifestFailureCount(id: String) -> Int { manifestFailures[id] ?? 0 }
 
     /// Delete every downloaded model once nothing is using them.
     public func removeAllModels() async throws {

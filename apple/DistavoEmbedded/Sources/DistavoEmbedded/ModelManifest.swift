@@ -34,13 +34,30 @@ enum ModelManifestError: Error, LocalizedError {
 /// `manifest.json`, so a download interrupted mid-transfer (or tampered with)
 /// is caught before it can produce silently-garbled transcripts.
 enum ModelManifestCheck {
+    /// Written into a variant folder immediately after a successful `verify`
+    /// (I3): its presence means "this download was verified against its
+    /// manifest", distinct from "the four expected files exist" — a download
+    /// interrupted right after the model files land but before verification
+    /// runs would otherwise look complete forever. Contents are the SHA-256 of
+    /// `manifest.json` at the time of verification, kept for diagnostics.
+    static let sentinelName = ".distavo-verified"
+
     /// Checks every file the manifest lists exists at `folder` with the
-    /// recorded size and SHA-256. A no-op (returns immediately) when
-    /// `folder` has no `manifest.json` — Argmax's repo, and any model folder
-    /// downloaded before manifests existed.
-    static func verify(folder: URL) throws {
+    /// recorded size and SHA-256.
+    ///
+    /// `expectManifest` distinguishes the two repos this is ever called
+    /// against: Argmax's own repo (and any model folder downloaded before
+    /// manifests existed) ships no `manifest.json` at all, so a missing
+    /// manifest there is a silent no-op (`false`). A custom (BSC) repo always
+    /// publishes one, so a missing manifest there (I3: a download that never
+    /// even completed the manifest fetch) is itself a verification failure,
+    /// not something to wave through (`true`).
+    static func verify(folder: URL, expectManifest: Bool) throws {
         let manifestURL = folder.appendingPathComponent("manifest.json")
-        guard let data = FileManager.default.contents(atPath: manifestURL.path) else { return }
+        guard let data = FileManager.default.contents(atPath: manifestURL.path) else {
+            if expectManifest { throw ModelManifestError.missing(file: "manifest.json") }
+            return
+        }
         let manifest = try JSONDecoder().decode(ModelManifest.self, from: data)
         for (relativePath, entry) in manifest.files {
             let fileURL = folder.appendingPathComponent(relativePath)
@@ -56,6 +73,18 @@ enum ModelManifestCheck {
                 throw ModelManifestError.mismatch(file: relativePath)
             }
         }
+    }
+
+    /// Marks `folder` as verified (I3) so `hasSentinel` can tell a completed,
+    /// checked download apart from a folder that merely has the right files
+    /// present — without re-hashing several GB of model weights on every load.
+    static func writeSentinel(folder: URL) throws {
+        let hash = try sha256Hex(of: folder.appendingPathComponent("manifest.json"))
+        try hash.write(to: folder.appendingPathComponent(sentinelName), atomically: true, encoding: .utf8)
+    }
+
+    static func hasSentinel(folder: URL) -> Bool {
+        FileManager.default.fileExists(atPath: folder.appendingPathComponent(sentinelName).path)
     }
 
     /// Streamed SHA-256 in 1 MiB chunks — files here run to ~1.5 GB, so

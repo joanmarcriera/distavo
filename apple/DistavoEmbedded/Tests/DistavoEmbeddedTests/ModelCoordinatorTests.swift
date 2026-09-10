@@ -86,6 +86,35 @@ final class ModelCoordinatorTests: XCTestCase {
         XCTAssertEqual(calls, 0)
     }
 
+    // MARK: Manifest failure counter (I2, spec §7)
+
+    func testManifestFailureCountIncrementsPerConsecutiveFailure() async {
+        let c = ModelCoordinator()
+        let first = await c.recordManifestFailure(id: "bsc-los")
+        XCTAssertEqual(first, 1)
+        let second = await c.recordManifestFailure(id: "bsc-los")
+        XCTAssertEqual(second, 2)
+        let count = await c.manifestFailureCount(id: "bsc-los")
+        XCTAssertEqual(count, 2)
+    }
+
+    func testManifestFailureCountIsPerModelID() async {
+        let c = ModelCoordinator()
+        _ = await c.recordManifestFailure(id: "bsc-los")
+        let other = await c.manifestFailureCount(id: "bsc-ca-3370h")
+        XCTAssertEqual(other, 0)
+    }
+
+    /// A successful verification resets the count, so a model that fails once
+    /// and then downloads cleanly gets the full two-strike allowance again.
+    func testResetManifestFailuresClearsTheCount() async {
+        let c = ModelCoordinator()
+        _ = await c.recordManifestFailure(id: "bsc-los")
+        await c.resetManifestFailures(id: "bsc-los")
+        let count = await c.manifestFailureCount(id: "bsc-los")
+        XCTAssertEqual(count, 0)
+    }
+
     func testStorePathsLiveUnderTheSingleModelsFolder() {
         let root = EmbeddedModelStore.modelsDirectory.path
         XCTAssertTrue(EmbeddedModelStore.parakeetDirectory.path.hasPrefix(root))

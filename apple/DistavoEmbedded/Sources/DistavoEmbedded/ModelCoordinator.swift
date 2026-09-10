@@ -47,6 +47,13 @@ public actor ModelCoordinator {
         if downloading[id] != nil { downloading[id] = f }
     }
 
+    /// Ask `prefetch` to stop before its next model. Neither WhisperKit's nor
+    /// FluidAudio's download call takes a cancellation token, so a model already
+    /// downloading when this is called still runs to completion — cancellation
+    /// only takes effect at the next check point (before the detector, and
+    /// before each subsequent model). Callers should tell the user their
+    /// request is queued ("Cancelling after the current model…"), not that it
+    /// already happened.
     public func cancelDownloads() { cancelRequested = true }
     public func consumeCancel() -> Bool { defer { cancelRequested = false }; return cancelRequested }
 
@@ -82,14 +89,18 @@ public actor ModelCoordinator {
     /// actor's isolation — every actor-isolated call inside it (all but the
     /// `nonisolated` `ensureFreeSpace`) needs an explicit `await`.
     public func prefetch(ids: [String], includeDetector: Bool,
-                         download: @Sendable (EmbeddedModel?) async throws -> Void) async throws {
+                         download: @Sendable (EmbeddedModel?) async throws -> Void) async throws -> PrefetchOutcome {
         try await withExclusiveAccess {
+            // Checked before the detector too — a cancel requested while queued
+            // behind another operation must stop the whole prefetch, not just
+            // the catalog-model loop.
+            if await self.consumeCancel() { return .cancelled }
             if includeDetector, !EmbeddedModelStore.isDetectorDownloaded() { try await download(nil) }
             for id in ids {
                 let model = EmbeddedModelCatalog.model(id: id)
                 guard !EmbeddedModelStore.isDownloaded(model) else { continue }
                 try self.ensureFreeSpace(forMB: model.downloadMB)
-                if await self.consumeCancel() { return }
+                if await self.consumeCancel() { return .cancelled }
                 // Prime tracking (Task 11 ruling: fractions for untracked ids are ignored),
                 // report, download, and always reset — on throw too.
                 await self.beginDownload(id: model.id)
@@ -97,6 +108,16 @@ public actor ModelCoordinator {
                 do { try await download(model) } catch { await self.noteDownload(id: model.id, fraction: nil); throw error }
                 await self.noteDownload(id: model.id, fraction: nil)
             }
+            return .completed
         }
     }
+}
+
+/// Whether a `prefetch` call ran to completion or stopped early because
+/// `cancelDownloads()` was called — distinct outcomes so the caller can tell
+/// "Ready" (everything requested is on disk) from "stopped partway, but what
+/// downloaded before the cancel is kept".
+public enum PrefetchOutcome: Equatable, Sendable {
+    case completed
+    case cancelled
 }

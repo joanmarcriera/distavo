@@ -41,11 +41,40 @@ struct SettingsView: View {
 
     /// Models this Mac's memory can actually run (spec §6 gate).
     private var selectableIDs: Set<String> { Set(EmbeddedModelCatalog.selectable().map(\.id)) }
+    /// Whether this Mac can run the BSC Catalan family — both `bsc-los` and
+    /// `bsc-ca-3370h` share the same 16 GB floor, so one check governs both the
+    /// "Preferred Catalan model" picker's visibility and what "Download now" fetches.
+    private var bscSelectable: Bool { selectableIDs.contains("bsc-los") }
+    /// The Model picker's rows: selectable catalog entries, plus a synthetic one
+    /// when the stored id is neither Automatic nor selectable — a low-memory Mac
+    /// may have an explicit `bsc-los` chosen before the memory floor existed, or
+    /// the id may be hand-edited/stale. Mirrors `languageChoices`: the existing
+    /// value stays selected and visible instead of the Picker landing on nothing.
+    private var modelChoices: [EmbeddedModel] {
+        let stored = draft.transcribe.embeddedModel
+        let selectable = EmbeddedModelCatalog.models.filter { selectableIDs.contains($0.id) }
+        guard !EmbeddedModelCatalog.isAutomatic(stored), !selectableIDs.contains(stored) else {
+            return selectable
+        }
+        if let known = EmbeddedModelCatalog.models.first(where: { $0.id == stored }) {
+            let synthetic = EmbeddedModel(
+                id: known.id, displayName: "\(known.displayName) — not available on this Mac",
+                engine: known.engine, whisperKitRepo: known.whisperKitRepo, whisperKitName: known.whisperKitName,
+                languages: known.languages, downloadMB: known.downloadMB, ramGB: known.ramGB,
+                minimumMemoryGB: known.minimumMemoryGB, detail: known.detail)
+            return [synthetic] + selectable
+        }
+        let unknown = EmbeddedModel(
+            id: stored, displayName: "\(stored) — not a known model", engine: .whisperKit,
+            whisperKitRepo: nil, whisperKitName: "", languages: .whisper,
+            downloadMB: 0, ramGB: 0, minimumMemoryGB: 0, detail: "")
+        return [unknown] + selectable
+    }
     /// What "Download now" fetches for the current choice (spec §5.10).
     private var downloadSet: [String] {
         if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
             var ids = ["parakeet-tdt-v3"]
-            if selectableIDs.contains("bsc-los") { ids.append(draft.transcribe.effectivePreferredCatalanModel) }
+            if bscSelectable { ids.append(draft.transcribe.effectivePreferredCatalanModel) }
             return ids
         }
         return [draft.transcribe.embeddedModel]
@@ -112,17 +141,21 @@ struct SettingsView: View {
                     // item on macOS, so unselectable entries (this Mac's memory is
                     // below the model's floor) are filtered out of the list instead
                     // and named in the caption below rather than shown as a dead row.
+                    // `modelChoices` still surfaces the current value even when it's
+                    // one of those unselectable/unknown ids, so the Picker's selection
+                    // always matches a real tag.
                     Picker("Model", selection: $draft.transcribe.embeddedModel) {
                         Text("Automatic (recommended)").tag(EmbeddedModelCatalog.automaticID)
                         Divider()
-                        ForEach(EmbeddedModelCatalog.models.filter { selectableIDs.contains($0.id) }) { m in
-                            Text("\(m.displayName) — \(m.downloadLabel)").tag(m.id)
+                        ForEach(modelChoices) { m in
+                            Text(selectableIDs.contains(m.id) ? "\(m.displayName) — \(m.downloadLabel)" : m.displayName)
+                                .tag(m.id)
                         }
                     }
                     if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
                         Text("Distavo listens to three short windows, picks the engine for the language it hears — Catalan, Spanish and their mix on the Barcelona models, 25 other European languages on the fast Parakeet engine, everything else on Whisper — and downloads what it needs once.")
                             .font(.caption).foregroundStyle(.secondary)
-                        if selectableIDs.contains("bsc-ca-3370h") {
+                        if bscSelectable {
                             Picker("Preferred Catalan model", selection: $draft.transcribe.preferredCatalanModel) {
                                 Text("Català · Castellà · Galego · Euskara (Languages of Spain)").tag("bsc-los")
                                 Text("Català only (3,370 hours)").tag("bsc-ca-3370h")
@@ -160,9 +193,14 @@ struct SettingsView: View {
                 }
 
                 Picker("Language", selection: $draft.transcribe.language) {
-                    Text("Automatic (detect)").tag(EmbeddedModelCatalog.automaticID)
+                    // Distinct from the catalog's own "Auto-detect" (tag "", below):
+                    // this one drives EngineRouter's per-meeting engine choice
+                    // (spec §5.2); "Auto-detect" is Whisper's single-pass guess
+                    // within whichever model ends up chosen.
+                    Text("Automatic — pick the engine by language (recommended)").tag(EmbeddedModelCatalog.automaticID)
                     ForEach(languageChoices) { lang in
-                        Text(lang.englishName).tag(lang.code)
+                        Text(lang.code.isEmpty ? "Auto-detect within the chosen model" : lang.englishName)
+                            .tag(lang.code)
                     }
                 }
                 HStack {

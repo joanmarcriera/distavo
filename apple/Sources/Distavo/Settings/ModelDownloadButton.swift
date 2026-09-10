@@ -17,9 +17,17 @@ struct ModelDownloadButton: View {
     let totalMB: Int
     @State private var running = false
     @State private var resultMessage: String?
+    /// Set the instant Cancel is tapped — the SDK downloads can't be interrupted
+    /// mid-file, so this overrides `controller.modelProgress` until the current
+    /// model finishes and `prefetch` actually stops, rather than leaving the
+    /// button looking unresponsive.
+    @State private var cancelRequested = false
 
     private var statusText: String? {
-        running ? (controller.modelProgress ?? "Starting…") : resultMessage
+        if running {
+            return cancelRequested ? "Cancelling after the current model…" : (controller.modelProgress ?? "Starting…")
+        }
+        return resultMessage
     }
 
     var body: some View {
@@ -27,7 +35,10 @@ struct ModelDownloadButton: View {
             Button(running ? "Downloading…" : "Download now (\(totalMB) MB)") { start() }
                 .disabled(running || modelIDs.isEmpty)
             if running {
-                Button("Cancel") { Task { await ModelCoordinator.shared.cancelDownloads() } }
+                Button("Cancel") {
+                    cancelRequested = true
+                    Task { await ModelCoordinator.shared.cancelDownloads() }
+                }
             }
             if let statusText {
                 Text(statusText).font(.caption).foregroundStyle(.secondary)
@@ -37,13 +48,18 @@ struct ModelDownloadButton: View {
 
     private func start() {
         running = true
+        cancelRequested = false
         resultMessage = nil
         Task {
             do {
-                try await ModelCoordinator.shared.prefetch(ids: modelIDs, includeDetector: true) { model in
+                let outcome = try await ModelCoordinator.shared.prefetch(ids: modelIDs, includeDetector: true) { model in
                     try await ModelPrefetcher.download(model)
                 }
-                await MainActor.run { resultMessage = "Ready"; running = false }
+                await MainActor.run {
+                    resultMessage = outcome == .cancelled
+                        ? "Cancelled — models downloaded so far are kept" : "Ready"
+                    running = false
+                }
             } catch {
                 await MainActor.run { resultMessage = error.localizedDescription; running = false }
             }

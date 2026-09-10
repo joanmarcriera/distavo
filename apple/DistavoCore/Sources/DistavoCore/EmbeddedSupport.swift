@@ -47,6 +47,18 @@ public struct EmbeddedModel: Equatable, Identifiable, Sendable {
     public let minimumMemoryGB: Int
     public let detail: String
 
+    /// The synthesized memberwise init is `internal`, so cross-module callers
+    /// (Settings, building a synthetic "not available on this Mac" / "not a
+    /// known model" row from an existing or ad-hoc entry) need this explicit one.
+    public init(id: String, displayName: String, engine: EmbeddedEngine, whisperKitRepo: String?,
+                whisperKitName: String, languages: LanguageCoverage, downloadMB: Int, ramGB: Double,
+                minimumMemoryGB: Int, detail: String) {
+        self.id = id; self.displayName = displayName; self.engine = engine
+        self.whisperKitRepo = whisperKitRepo; self.whisperKitName = whisperKitName
+        self.languages = languages; self.downloadMB = downloadMB; self.ramGB = ramGB
+        self.minimumMemoryGB = minimumMemoryGB; self.detail = detail
+    }
+
     public var downloadLabel: String { "\(downloadMB) MB download" }
     public var ramLabel: String {
         ramGB == ramGB.rounded() ? "~\(Int(ramGB)) GB memory while transcribing"

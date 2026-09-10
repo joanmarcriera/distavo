@@ -55,9 +55,33 @@ final class ModelCoordinatorTests: XCTestCase {
         let c = ModelCoordinator()
         actor Counter { var calls = 0; func increment() { calls += 1 } }
         let counter = Counter()
-        try await c.prefetch(ids: alreadyDownloaded.map(\.id), includeDetector: false) { _ in
+        let outcome = try await c.prefetch(ids: alreadyDownloaded.map(\.id), includeDetector: false) { _ in
             await counter.increment()
         }
+        XCTAssertEqual(outcome, .completed)
+        let calls = await counter.calls
+        XCTAssertEqual(calls, 0)
+    }
+
+    /// A cancel requested before `prefetch` even starts must stop it before any
+    /// model downloads — including the first one — and report `.cancelled`
+    /// rather than the silent `.completed` a plain early `return` used to give
+    /// (review finding: the button would otherwise show "Ready" for a run the
+    /// user cancelled).
+    func testPrefetchReturnsCancelledWithoutDownloading() async throws {
+        let ids = ["bsc-ca-3370h", "parakeet-tdt-v3"]
+        for id in ids {
+            try XCTSkipIf(EmbeddedModelStore.isDownloaded(EmbeddedModelCatalog.model(id: id)),
+                          "\(id) is already downloaded on this Mac; can't test the cancel-before-download path against it.")
+        }
+        let c = ModelCoordinator()
+        await c.cancelDownloads()
+        actor Counter { var calls = 0; func increment() { calls += 1 } }
+        let counter = Counter()
+        let outcome = try await c.prefetch(ids: ids, includeDetector: false) { _ in
+            await counter.increment()
+        }
+        XCTAssertEqual(outcome, .cancelled)
         let calls = await counter.calls
         XCTAssertEqual(calls, 0)
     }

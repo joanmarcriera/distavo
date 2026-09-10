@@ -1,8 +1,10 @@
 # Distavo 1.11 — Catalan models and Parakeet as built-in engines
 
-**Status:** approved design, 2026-09-10 (Vikunja #2086 evaluation outcome).
-**Scope:** slice 1 of the "better than the store competition" roadmap. Slices 2–4 (note
-quality, capture robustness, listing/Setapp) are separate specs.
+**Status:** v2, 2026-09-10 — revised after the Codex design review
+(`…design.review-codex.md`, verdict "rework"). Every blocker and high finding there is
+addressed below; the review file stays beside this spec as the record.
+**Scope:** slice 1 of the "better than the store competition" roadmap (Vikunja epic
+https://familia.riera.co.uk/tasks/2130). Slices 2–4 are separate specs.
 
 ## 1. Why
 
@@ -15,11 +17,11 @@ changed the competitive picture in September 2026:
   Whisper turbo, with identical text to Desert Ant's Voz (which is the same model).
 - **Nobody serves Catalan on-device, and Apple structurally cannot.** Verified on macOS 26.6:
   `SpeechTranscriber.supportedLocales` has 30 locales and no Catalan; `SystemLanguageModel`
-  lists 23 languages and no Catalan, and Apple Intelligence cannot be enabled on a Catalan-language
-  Mac. Parakeet and Voz have no Catalan either (a 64-minute mixed Catalan/Spanish/English
-  meeting came back with 40 % of the words, the Catalan as Spanish nonsense). Barcelona
-  Supercomputing Center publishes Apache-2.0 Whisper large-v3 fine-tunes that do:
-  `BSC-LT/whisper-large-v3-LoS` (Catalan, Spanish, Galician, Basque; 8,110 h) and
+  lists 23 languages and no Catalan, and Apple Intelligence cannot be enabled on a
+  Catalan-language Mac. Parakeet and Voz have no Catalan either (a 64-minute mixed
+  Catalan/Spanish/English meeting came back with 40 % of the words). Barcelona Supercomputing
+  Center publishes Apache-2.0 Whisper large-v3 fine-tunes that do: `BSC-LT/whisper-large-v3-LoS`
+  (Catalan, Spanish, Galician, Basque; 8,110 h) and
   `BSC-LT/whisper-large-v3-ca-punctuated-3370h` (Catalan; 3,370 h).
 
 Distavo's defensible claim after this release: **"Meeting notes in Catalan, Spanish and their
@@ -28,148 +30,207 @@ mix, entirely on your Mac"**, with Parakeet as the fast path for 25 other langua
 **Desert Ant Labs is not adopted.** Its bases are open (Voz = Parakeet, Clear = DeepFilterNet 3,
 Ear = whisper-tiny); the SDK requires macOS 15, writes a device ID and per-model usage counters
 to user defaults, forbids disabling that telemetry, requires a "Powered by" line, and Clear
-produced no measurable change on two real recordings. Everything it offered is available
-under MIT/Apache-2.0 without those strings.
+produced no measurable change on two real recordings.
 
 ## 2. What ships
 
-| Engine (catalog id) | Runtime | Languages | Download | Role |
+| Engine (catalog id) | Runtime | Languages | Download | Offered by default on |
 |---|---|---|---|---|
-| `large-v3-turbo` (exists) | WhisperKit | 99 | 632 MB | "Best" fallback |
-| `small` (exists) | WhisperKit | 99 | 463 MB | 8 GB Macs |
-| `parakeet-tdt-v3` (new) | FluidAudio | 25 European | ~460 MB | "Fast" |
-| `bsc-los` (new) | WhisperKit, custom repo | ca, es, gl, eu | ~1.6 GB fp16 | Languages of Spain |
-| `bsc-ca-3370h` (new) | WhisperKit, custom repo | ca | ~1.6 GB fp16 | Best Catalan |
+| `large-v3-turbo` (exists) | WhisperKit | 99 | 632 MB | ≥ 16 GB |
+| `small` (exists) | WhisperKit | 99 | 463 MB | all |
+| `parakeet-tdt-v3` (new) | FluidAudio | 25 European | ~460 MB (int8) | all Apple Silicon |
+| `bsc-los` (new) | WhisperKit, custom repo | ca, es, gl, eu | ~1.6 GB fp16 | ≥ 16 GB (see §6) |
+| `bsc-ca-3370h` (new) | WhisperKit, custom repo | ca | ~1.6 GB fp16 | ≥ 16 GB (see §6) |
 | `whisper-tiny` (internal) | WhisperKit | — | 77 MB | language detector only |
 
-Plus two "Automatic" settings (model and language) and a "Download now" button in Settings.
+Plus "Automatic" for model and language, a download coordinator, and "Download now" in Settings.
 
-## 3. Architecture
+## 3. Pinned dependencies
 
-### 3.1 Engine catalog (`DistavoCore/EmbeddedSupport.swift`)
+- **FluidAudio:** pinned by revision to `41540ea237350afe5117a082b5c28eda642d0612` (main,
+  2026-09-10), the first revision whose `Package@swift-6.2.swift` declares the
+  `NemoTextProcessing` package trait (commit 6b90a08, 2026-09-09; not in any tag as of today).
+  Consumed with `traits: []` so the prebuilt `NemoTextProcessing.xcframework` is not linked.
+  Move to the first tag that contains it when released. Verification: `swift package
+  show-traits`, clean resolve, and an archive scan (§9).
+- **argmax-oss-swift:** the existing 1.0.0 pin. `WhisperKitConfig.modelRepo` exists there.
+- **DistavoEmbedded manifest:** tools-version 6.2 with `swiftLanguageModes: [.v5]`. This keeps
+  DistavoEmbedded's own targets in Swift 5 mode; dependency packages keep their own modes.
+- FluidAudio API at the pin (used verbatim, no pseudocode): `AsrModels.downloadAndLoad(to:…)`,
+  `AsrManager.transcribe(_ url: URL, decoderState: inout TdtDecoderState, language: Language?)`,
+  `ASRResult.tokenTimings` → `buildWordTimings(from:)` → `[WordTiming]`.
 
-`EmbeddedModel` gains:
+## 4. Deferral contract (replaces "Pipeline unchanged")
 
-- `engine: EmbeddedEngine` — `.whisperKit` or `.parakeet`.
-- `whisperKitRepo: String?` — `nil` means Argmax's `argmaxinc/whisperkit-coreml`; the BSC entries
-  point at `Joanmarcriera/distavo-whisperkit-coreml` (Marc's Hugging Face account).
-- `languages: LanguageCoverage` — `.whisper` (all 99), `.parakeet` (the 25), or `.only(Set<String>)`.
-- `downloadMB`, `ramGB`, `displayName`, `detail` as today.
+Today every transcription error becomes a persistent `.failed` marker: `processOne` writes
+`.processing`, and its catch-all calls `markFailed` (Pipeline.swift 206–245). The offline
+download error text promises an automatic retry that never happens — a pre-existing bug
+(https://familia.riera.co.uk/tasks/2149) that this release fixes for all engines.
 
-`EmbeddedModelCatalog.models` lists the five user-selectable entries above; `whisper-tiny` is a
-separate constant used only by the detector. `model(id:)` keeps its unknown-id fallback.
-`transcribe.embedded_model` accepts the new value `"auto"`; `transcribe.language` accepts `"auto"`.
-Both remain plain strings in JSON, so old configs decode unchanged (migration rule preserved:
-existing users keep their explicit model and language).
+- DistavoCore gains `public struct RetryableDependencyError: Error { let message: String }`.
+  Any `PipelineDeps.transcribe` implementation throws it for conditions that can resolve on
+  their own: offline model or tokenizer download, download interrupted, model directory busy.
+- `Pipeline.processOne`: `catch let e as RetryableDependencyError` → `state.clearProcessing(base)`,
+  return `ProcessResult(status: .deferred, …)` (new `ProcessStatus.deferred = "deferred"`), no
+  `.failed`. All other errors keep today's path. `Scanner`/`WatcherController` treat `.deferred`
+  like `.deferredNeedLocal` for status text.
+- `EmbeddedTranscriber` maps `modelUnavailable(offline: true)` to the retryable error; the
+  detector and `ParakeetTranscriber` do the same for their download/offline failures.
+- Test: two scans through the seam — first `transcribe` throws retryable, second succeeds — no
+  `.failed` marker after scan 1, note written after scan 2, no manual "Process now".
 
-A new `transcribe.preferred_catalan_model` (`"bsc-los"` default, or `"bsc-ca-3370h"`) is read only
-when the model is `"auto"`.
+## 5. Architecture
 
-### 3.2 Routing (`DistavoCore/EngineRouter.swift`, pure)
+### 5.1 Engine catalog (`DistavoCore/EmbeddedSupport.swift`)
 
-```
-EngineRouter.choose(detectedLanguage: String?, config: TranscribeConfig) -> EmbeddedModel
-```
+`EmbeddedModel` gains `engine: EmbeddedEngine` (`.whisperKit` | `.parakeet`),
+`whisperKitRepo: String?` (`nil` = Argmax's repo; BSC entries =
+`Joanmarcriera/distavo-whisperkit-coreml`), `languages: LanguageCoverage` (`.whisper`,
+`.parakeet`, `.only(Set<String>)`), `minimumMemoryGB: Int` (16 for BSC, 0 otherwise).
+`whisper-tiny` is a separate constant. `model(id:)` keeps its unknown-id fallback.
 
-Rules, in order:
+Config: `transcribe.embedded_model` and `transcribe.language` accept the literal `"auto"`;
+`transcribe.preferred_catalan_model` (`"bsc-los"` default; invalid value → `"bsc-los"`).
+**Only** `Config.recommendedForThisMac()` (no config file present) produces `"auto"`. An existing
+file with a missing new key gets the historical default; empty or unknown language/model
+strings keep today's behaviour (unknown model → `large-v3-turbo`, unknown language shown as-is).
 
-1. Model not `"auto"` → the chosen model, regardless of language.
-2. Detected `ca`, `gl`, `eu` → `preferred_catalan_model`; `es` → `bsc-los`.
-3. Detected language in Parakeet's 25 → `parakeet-tdt-v3`.
-4. Anything else, or no detection → `large-v3-turbo` (or `small` on < 16 GB, as today).
+### 5.2 Routing (`DistavoCore/EngineRouter.swift`, pure)
 
-When language is fixed (not `"auto"`) but model is `"auto"`, the fixed language is used as the
-"detected" value and no detector runs.
+Input: `LanguageEvidence` = up to three detections `(code, probability)` from separate speech
+windows, plus `TranscribeConfig` and `HardwareProbe.physicalMemoryBytes`. Output:
+`RoutingDecision { model: EmbeddedModel, languageHint: String? }` — the hint is a real Whisper
+code or `nil`, never `"auto"`; the Parakeet adapter maps it to FluidAudio's typed `Language?`.
 
-### 3.3 Language detector (`DistavoEmbedded/LanguageDetector.swift`)
+1. Model not `"auto"` → that model; hint = fixed language, or the top detection if `"auto"`.
+2. Confident set C = codes with probability ≥ 0.5 across windows (fixed language ⇒ C = {it}).
+3. C ∩ {ca, gl, eu} ≠ ∅ and C ⊆ {ca, es, gl, eu} → `bsc-los`, unless C = {ca} → preferred Catalan.
+4. C ∩ {ca, gl, eu} ≠ ∅ and C has other languages (e.g. ca + en) → `bsc-los` (hint = ca);
+   never Parakeet when any Catalan/Galician/Basque is confident. The bake-off measures LoS on
+   Catalan+English mixtures; if it is worse than turbo, this rule switches to turbo.
+5. C = {es} → `bsc-los`; C ⊆ Parakeet's 25 → `parakeet-tdt-v3` (hint = dominant).
+6. Otherwise, or C empty → `large-v3-turbo` (or `small` below 16 GB), hint = top detection or nil.
+7. Memory gate: a BSC model chosen by rules 3–5 on a Mac below `minimumMemoryGB` falls to
+   `large-v3-turbo`/`small` with a status message naming the limitation.
 
-WhisperKit `openai_whisper-tiny` from Argmax's repo, downloaded into the same models folder.
-Runs `detectLanguage` on the first 30 s of the converted WAV; returns the code and probability.
-Below a 0.5 probability the router treats the result as "no detection" (rule 4).
+### 5.3 Language detector (`DistavoEmbedded/LanguageDetector.swift`)
 
-### 3.4 Parakeet transcriber (`DistavoEmbedded/ParakeetTranscriber.swift`)
+WhisperKit `openai_whisper-tiny`, downloaded into the models folder. Picks three 30-second
+windows at roughly 10 %, 50 % and 90 % of the file, each shifted forward to the next region
+whose RMS energy exceeds a silence floor (skips leading silence/music), and calls
+`detectLangauge(audioArray:)` per window. Returns the three `(code, probability)` pairs.
+Cost: three sub-second passes on a 77 MB model.
 
-- FluidAudio `AsrModels.downloadAndLoad(to: EmbeddedModelStore.modelsDirectory/"parakeet")`,
-  `AsrManager.transcribe(url, language:)` with token timings → `[TimedWord]`.
-- Per-call lifetime, like `EmbeddedTranscriber` (menu-bar app must not hold model RAM).
-- Diarisation: SpeakerKit, exactly as the Whisper path, producing `[SpeakerTurn]`.
-- `WordSpeakerAligner` (DistavoCore, pure) assigns each word to the turn containing its
-  midpoint (nearest turn if none), groups consecutive same-speaker words into segments, splits on
-  sentence-final punctuation, and emits the WhisperX `["segments": [...]]` dictionary. The
-  existing `TranscriptCleaner` and everything downstream stay untouched.
-- FluidAudio is added with `traits: []` so the NemoTextProcessing prebuilt xcframework is not
-  linked. This requires `DistavoEmbedded/Package.swift` at tools-version 6.2 with
-  `swiftLanguageModes: [.v5]` to keep today's concurrency checking level.
+### 5.4 Parakeet transcriber (`DistavoEmbedded/ParakeetTranscriber.swift`)
 
-### 3.5 Custom WhisperKit models
+FluidAudio per §3; models under `EmbeddedModelStore.modelsDirectory/parakeet`; per-call
+lifetime; word timings via `buildWordTimings(from:)`. Diarisation: SpeakerKit as today. The
+model is released before SpeakerKit loads (same order for the WhisperKit path, §6).
+
+### 5.5 Word–speaker alignment (`DistavoCore/WordSpeakerAligner.swift`, pure)
+
+Adapter in DistavoEmbedded converts `DiarizationResult.segments` and `[WordTiming]` into core
+structs `SpeakerTurn(speaker: Int, start, end)` and `TimedWord(text, start, end)`. The aligner
+ports SpeakerKit's `.subsegment` behaviour so both engines label identically:
+
+- a word takes the turn with the **largest time intersection**; ties → the earlier-starting turn;
+- a word with no intersection **carries the previous word's speaker** if its gap to the previous
+  word is ≤ 1.0 s, otherwise it is `unknown` (rendered `SPEAKER_UNKNOWN` by the cleaner);
+- consecutive same-speaker words form a segment; segments split at sentence-final punctuation
+  (`.?!…` and their Unicode variants) and at speaker change; text joins with single spaces;
+- empty, nil or out-of-order timings are sorted/skipped deterministically.
+
+### 5.6 Custom WhisperKit models
 
 `EmbeddedTranscriber` passes `modelRepo` from the catalog to `WhisperKitConfig`. WhisperKit
-resolves the tokenizer from the variant folder name (must contain `large-v3`), so the published
-folders are named `BSC-LT_whisper-large-v3-LoS` and `BSC-LT_whisper-large-v3-ca-punctuated-3370h`.
+chooses the tokenizer from the loaded model's tensor signature (vocabulary size and encoder
+dimensions → `.largev3` → `openai/whisper-large-v3`), so a correct large-v3 conversion resolves
+the right tokenizer regardless of folder name; folder names only need to be unique for the
+download glob: `BSC-LT_whisper-large-v3-LoS`, `BSC-LT_whisper-large-v3-ca-punctuated-3370h`.
+The tokenizer download is a third Hugging Face repo, as it already is for turbo today.
 
-### 3.6 Conversion tool (`tools/whisperkit-models/`)
+Immutability: each published folder carries `manifest.json` (source model revision,
+whisperkittools commit, per-file sizes and SHA-256). The app verifies the manifest after
+download, never replaces files in place (stage → verify → atomic rename), and a new conversion
+gets a new folder name (`…-r2`) plus a catalog bump rather than overwriting.
 
-- `convert.sh <hf-model-id>`: `uv` venv on Python 3.11, `whisperkittools` (torch 2.5,
-  coremltools), runs `generate_model.py --model-version <id> --upload-results` with
-  `MODEL_REPO_ID=Joanmarcriera/distavo-whisperkit-coreml`. Token from `~/.tokens` (`HF_TOKEN`),
-  never printed.
-- Output: fp16 encoder/decoder, the default Argmax recipe. Quantised variants are a follow-up
-  only if measurements demand it.
-- A `README.md` records the exact commit of whisperkittools and the source model revision used,
-  so the published model is reproducible.
+### 5.7 Conversion tool (`tools/whisperkit-models/`)
 
-### 3.7 Pipeline wiring (`Sources/Distavo/Core/AppPipelineDeps.swift`)
+`convert.sh <hf-model-id>`: `uv` venv on Python 3.11, whisperkittools at a recorded commit
+(torch 2.5, coremltools), `generate_model.py --model-version <id> --upload-results`,
+`MODEL_REPO_ID=Joanmarcriera/distavo-whisperkit-coreml`, `HF_TOKEN` from `~/.tokens`, never
+printed. fp16 (the Argmax recipe). Writes `manifest.json`. **Spike first (task 2141):** convert
+LoS, then prove from a clean models folder: download from the custom repo, tokenizer
+resolution, cold load, offline warm reload, transcription with word timestamps, relaunch.
 
-`deps.transcribe` for `backend == "embedded"` becomes: detect (if needed) → route → dispatch to
-`EmbeddedTranscriber` (WhisperKit, with repo) or `ParakeetTranscriber`. Progress messages
-("Detecting language…", "Downloading Parakeet — 460 MB, one-time…") flow through the existing
-progress handler. `Pipeline.swift` and `PipelineDeps` are unchanged.
+### 5.8 Model download coordinator (`DistavoEmbedded/ModelCoordinator.swift`, actor)
 
-### 3.8 Settings (`Sources/Distavo/Settings/SettingsView.swift`)
+One actor owns every model on disk: per-model readiness (`ready`/`downloading(progress)`/
+`absent`), sizes, staging directory + atomic promotion, cancellation, free-space check (need
+2× download size), and mutual exclusion between downloads, transcription and "Remove downloaded
+models" (removal waits for or cancels in-flight work). Settings and the pipeline both go through
+it, so "Download now" and a timer scan cannot run the same download twice. Progress is a
+structured stream; the existing single transcriber callback is fed from it.
 
-- Model picker, grouped: **Automatic (recommended)** · Fast — Parakeet (25 languages, 460 MB) ·
-  Best — Whisper large-v3 turbo (99 languages, 632 MB) · Compact — Whisper small (463 MB) ·
-  Català · Castellà · Galego · Euskara — BSC Languages of Spain (1.6 GB) · Català — BSC 3,370 h (1.6 GB).
-- "Preferred Catalan model" picker, visible only for Automatic.
-- Language picker gains **Automatic (detect)** at the top.
-- **Download now** button for the selected model (or, for Automatic, the detector + Parakeet +
-  preferred Catalan model) with a progress bar; "Models on disk" and "Remove downloaded models"
-  keep covering the single folder.
-- `Config.recommendedForThisMac()` sets `embedded_model = "auto"`, `language = "auto"` for fresh
-  installs only.
+### 5.9 Pipeline wiring (`Sources/Distavo/Core/AppPipelineDeps.swift`)
 
-### 3.9 Credits and compliance
+`deps.transcribe` for `backend == "embedded"`: coordinator ensures the detector → detect (if
+either setting is `"auto"`) → `EngineRouter` → coordinator ensures the chosen model → dispatch to
+`EmbeddedTranscriber` (with repo) or `ParakeetTranscriber`. Retryable conditions throw
+`RetryableDependencyError` (§4). `PipelineDeps` signature unchanged.
 
-- `NOTICES.md` and the About screen: FluidAudio (Apache-2.0), NVIDIA Parakeet TDT 0.6B v3
-  (CC-BY-4.0, attribution required), BSC Language Technologies Unit / Projecte AINA (Apache-2.0),
-  Argmax (MIT, existing).
-- No telemetry, no network beyond the two Hugging Face repos on download. Identical in all three
-  editions; App Store build gains no binary framework.
+### 5.10 Settings
 
-## 4. Error handling
+Grouped model picker with human labels and sizes; **Automatic (recommended)** first; entries
+whose `minimumMemoryGB` exceeds this Mac are shown disabled with the reason. "Preferred Catalan
+model" only under Automatic. Language picker gains **Automatic (detect)**. **Download now**
+shows the total before starting (Automatic = detector + Parakeet + preferred Catalan model,
+≈ 2.1 GB on a 16 GB Mac, ≈ 0.55 GB below), with progress and Cancel. "Models on disk" lists per
+model. Copy distinguishes Distavo's folder from macOS's own Core ML caches.
 
-- Detector or model download offline → existing `modelUnavailable(offline:)` path: the recording
-  is retried automatically on the next scan, never failed.
-- Parakeet load failure on a supported Mac → surfaced with the same wording pattern; the recording
-  stays pending. Intel Macs keep the server backend as today (`HardwareProbe`).
-- Router never returns a model the Mac cannot run: on < 16 GB the 1.6 GB BSC models are still
-  offered (they fit) but the "Best" fallback is `small`.
+### 5.11 Credits and compliance
 
-## 5. Testing
+`NOTICES.md` and About: FluidAudio (Apache-2.0), NVIDIA Parakeet TDT 0.6B v3 (CC-BY-4.0),
+BSC Language Technologies Unit / Projecte AINA (Apache-2.0), Argmax (MIT). No telemetry.
+Network: Hugging Face only (model repos, tokenizer repo, and its CDN redirects). Identical in
+all three editions; App Store archive scanned for unexpected frameworks/binaries.
 
-- **DistavoCore unit tests:** catalog decode/fallback including `"auto"`; `EngineRouter` table
-  (every rule, low-probability detection, fixed language + auto model); `WordSpeakerAligner`
-  with fixture words/turns (overlaps, gaps, punctuation splits, single speaker, no turns).
-- **DistavoEmbedded live test** (`DISTAVO_LIVE=1`): Parakeet on the bundled 10-second fixture
-  WAV produces non-empty text and word timings; detector on the same file returns `en`.
-- **Bake-off before tagging:** the 2026-07-23 Catalan/Spanish/English meeting and the
-  2026-09-09 English call through the full app pipeline; compare against today's transcripts and
-  note wall-clock. Summary quality on the Catalan meeting is the go/no-go for the release.
-- **CI:** existing `swift test` + unsigned Direct build; compliance gates via
-  `distavo-native-verify`.
+## 6. Memory gate
 
-## 6. Out of scope (later slices)
+1.6 GB is on-disk size, not peak RSS. BSC models are offered and auto-routed only on ≥ 16 GB
+until measured. Release task: measure peak RSS, memory pressure, swap, cold specialisation and
+warm load on a physical 8 GB and a 16 GB Apple Silicon Mac, short file and the 64-minute
+meeting, diarisation on/off, with `prewarm` evaluated and the transcription model released
+before SpeakerKit loads. `minimumMemoryGB` and catalog `ramGB` are set from those numbers.
 
-Catalan/Spanish note templates and summariser language (slice 2), capture robustness and
-storage (slice 3), store copy in three languages and the Setapp submission (slice 4), quantised
-BSC variants, Parakeet streaming, FluidAudio's Sortformer diariser.
+## 7. Error handling
+
+- Retryable (offline, interrupted download, busy directory) → §4, recording stays pending.
+- Manifest/hash mismatch or corrupt cache → the folder is discarded and re-downloaded once;
+  a second failure is retryable with a message naming the model.
+- Parakeet or WhisperKit load failure on a supported Mac → permanent, message names the model
+  and points at "Compact" or the server backend. Intel Macs keep the server backend.
+
+## 8. Testing
+
+- **Core:** catalog decode incl. `"auto"` and invalid `preferred_catalan_model`; router table for
+  rules 1–7 with permutations (en→ca, ca→en, ca+es, es only, low probability, empty, 8 GB);
+  aligner fixtures (crosstalk, equal overlap, word straddling a boundary, leading/trailing/long
+  gaps, nil/empty/out-of-order timings, Unicode punctuation); deferral two-scan test;
+  golden config fixtures (pre-embedded, server, 8 GB embedded, 16 GB embedded, empty language,
+  unknown values) asserting decoded values **and** dispatch, before and after save/reload.
+- **Embedded live (`DISTAVO_LIVE=1`):** Parakeet on the fixture WAV (text + word timings);
+  detector returns `en`; converted BSC model cold download, warm offline reload, manifest
+  rejection on a tampered file.
+- **Signed App Store build, manual checklist:** download each engine, relaunch offline, remove,
+  re-download, cancel mid-download, quit during download, scan vs "Download now" overlap;
+  archive scan; network destinations captured.
+- **Bake-off before tagging:** the 2026-07-23 mixed meeting and the 2026-09-09 English call
+  through the full app; chosen engine recorded per run; Catalan summary quality is the go/no-go.
+- **CI:** `swift test`, `swift package show-traits`, and all three edition schemes
+  (fixed in commit 0d6bcd8).
+
+## 9. Out of scope (later slices)
+
+Catalan/Spanish note templates (slice 2), capture robustness and storage (slice 3), store copy
+and Setapp (slice 4), quantised BSC variants, Parakeet streaming, FluidAudio's Sortformer.

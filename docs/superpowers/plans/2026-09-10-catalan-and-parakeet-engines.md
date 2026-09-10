@@ -1675,7 +1675,12 @@ git commit -m "feat(app): detect, route and dispatch between WhisperKit, the BSC
                 guard !EmbeddedModelStore.isDownloaded(model) else { continue }
                 try self.ensureFreeSpace(forMB: model.downloadMB)
                 if self.consumeCancel() { return }
-                try await download(model)
+                // Prime tracking (Task 11 ruling: fractions for untracked ids are ignored),
+                // report, download, and always reset — on throw too.
+                self.beginDownload(id: model.id)
+                self.report("Downloading \(model.displayName) — \(model.downloadLabel)…")
+                do { try await download(model) } catch { self.noteDownload(id: model.id, fraction: nil); throw error }
+                self.noteDownload(id: model.id, fraction: nil)
             }
         }
     }

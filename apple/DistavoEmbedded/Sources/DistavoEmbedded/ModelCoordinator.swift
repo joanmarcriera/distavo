@@ -74,4 +74,29 @@ public actor ModelCoordinator {
     public func removeAllModels() async throws {
         try await withExclusiveAccess { try EmbeddedModelStore.removeAll() }
     }
+
+    /// Download (without loading) the detector and the given catalog models.
+    /// Used by Settings' "Download now" so the first meeting never waits.
+    ///
+    /// `withExclusiveAccess`'s `body` is `@Sendable`, so it does not inherit this
+    /// actor's isolation — every actor-isolated call inside it (all but the
+    /// `nonisolated` `ensureFreeSpace`) needs an explicit `await`.
+    public func prefetch(ids: [String], includeDetector: Bool,
+                         download: @Sendable (EmbeddedModel?) async throws -> Void) async throws {
+        try await withExclusiveAccess {
+            if includeDetector, !EmbeddedModelStore.isDetectorDownloaded() { try await download(nil) }
+            for id in ids {
+                let model = EmbeddedModelCatalog.model(id: id)
+                guard !EmbeddedModelStore.isDownloaded(model) else { continue }
+                try self.ensureFreeSpace(forMB: model.downloadMB)
+                if await self.consumeCancel() { return }
+                // Prime tracking (Task 11 ruling: fractions for untracked ids are ignored),
+                // report, download, and always reset — on throw too.
+                await self.beginDownload(id: model.id)
+                await self.report("Downloading \(model.displayName) — \(model.downloadLabel)…")
+                do { try await download(model) } catch { await self.noteDownload(id: model.id, fraction: nil); throw error }
+                await self.noteDownload(id: model.id, fraction: nil)
+            }
+        }
+    }
 }

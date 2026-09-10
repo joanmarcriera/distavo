@@ -23,18 +23,36 @@ struct SettingsView: View {
 
     private static let models = ["tiny", "base", "small", "medium", "large-v2", "large-v3"]
     private let embeddedSupported = HardwareProbe.supportsEmbeddedTranscription
-    private let recommendedModel = EmbeddedModelCatalog.recommended()
 
     /// The catalog, plus a synthetic entry if the saved code isn't recognised
     /// (e.g. a past typo like "esp"), so the existing value stays selected and
     /// visible rather than silently changing — the user can then pick a real one.
+    /// `"auto"` (Distavo's own detect-per-meeting choice) is recognised too, so
+    /// it doesn't get flagged as a stray code.
     private var languageChoices: [WhisperLanguage] {
         let code = draft.transcribe.language
-        if code.isEmpty || WhisperLanguageCatalog.language(forCode: code) != nil {
+        if code.isEmpty || code == EmbeddedModelCatalog.automaticID
+            || WhisperLanguageCatalog.language(forCode: code) != nil {
             return WhisperLanguageCatalog.all
         }
         return [WhisperLanguage(code: code, englishName: "\(code) — not a standard code")]
             + WhisperLanguageCatalog.all
+    }
+
+    /// Models this Mac's memory can actually run (spec §6 gate).
+    private var selectableIDs: Set<String> { Set(EmbeddedModelCatalog.selectable().map(\.id)) }
+    /// What "Download now" fetches for the current choice (spec §5.10).
+    private var downloadSet: [String] {
+        if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
+            var ids = ["parakeet-tdt-v3"]
+            if selectableIDs.contains("bsc-los") { ids.append(draft.transcribe.effectivePreferredCatalanModel) }
+            return ids
+        }
+        return [draft.transcribe.embeddedModel]
+    }
+    private var downloadTotalMB: Int {
+        downloadSet.map { EmbeddedModelCatalog.model(id: $0).downloadMB }.reduce(0, +)
+            + (EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) ? 77 : 0)
     }
 
     init(controller: WatcherController) {
@@ -90,22 +108,44 @@ struct SettingsView: View {
                 }
 
                 if draft.transcribe.backend == "embedded" && embeddedSupported {
+                    // `.disabled(...)` on a Picker's Text does not disable the menu
+                    // item on macOS, so unselectable entries (this Mac's memory is
+                    // below the model's floor) are filtered out of the list instead
+                    // and named in the caption below rather than shown as a dead row.
                     Picker("Model", selection: $draft.transcribe.embeddedModel) {
-                        ForEach(EmbeddedModelCatalog.models) { m in
+                        Text("Automatic (recommended)").tag(EmbeddedModelCatalog.automaticID)
+                        Divider()
+                        ForEach(EmbeddedModelCatalog.models.filter { selectableIDs.contains($0.id) }) { m in
                             Text("\(m.displayName) — \(m.downloadLabel)").tag(m.id)
                         }
                     }
-                    Text("Recommended for this Mac (\(Int(Double(HardwareProbe.physicalMemoryBytes) / 1_073_741_824)) GB memory): \(recommendedModel.displayName). \(EmbeddedModelCatalog.model(id: draft.transcribe.embeddedModel).ramLabel).")
-                        .font(.caption).foregroundStyle(.secondary)
+                    if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
+                        Text("Distavo listens to three short windows, picks the engine for the language it hears — Catalan, Spanish and their mix on the Barcelona models, 25 other European languages on the fast Parakeet engine, everything else on Whisper — and downloads what it needs once.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        if selectableIDs.contains("bsc-ca-3370h") {
+                            Picker("Preferred Catalan model", selection: $draft.transcribe.preferredCatalanModel) {
+                                Text("Català · Castellà · Galego · Euskara (Languages of Spain)").tag("bsc-los")
+                                Text("Català only (3,370 hours)").tag("bsc-ca-3370h")
+                            }
+                        }
+                    } else {
+                        let m = EmbeddedModelCatalog.model(id: draft.transcribe.embeddedModel)
+                        Text("\(m.detail) \(m.ramLabel).").font(.caption).foregroundStyle(.secondary)
+                    }
+                    let unselectable = EmbeddedModelCatalog.models.filter { !selectableIDs.contains($0.id) }
+                    if !unselectable.isEmpty {
+                        Text("Not offered on this Mac (needs more memory): \(unselectable.map(\.displayName).joined(separator: ", ")).")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    ModelDownloadButton(controller: controller, modelIDs: downloadSet, totalMB: downloadTotalMB)
                     HStack {
                         if let usage = modelsOnDisk {
                             Text("Models on disk: \(usage)").font(.callout)
                             Button("Remove downloaded models") {
-                                try? EmbeddedModelStore.removeAll()
-                                modelsOnDisk = nil
+                                Task { try? await ModelCoordinator.shared.removeAllModels(); modelsOnDisk = nil }
                             }
                         } else {
-                            Text("No models downloaded yet — the first transcription downloads the model into Application Support/Distavo/models. That folder is all Distavo ever installs; removing it removes everything.")
+                            Text("No models downloaded yet. Distavo keeps every model it downloads in Application Support/Distavo/models; removing that folder removes all of them (macOS keeps its own small Core ML caches separately).")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -120,6 +160,7 @@ struct SettingsView: View {
                 }
 
                 Picker("Language", selection: $draft.transcribe.language) {
+                    Text("Automatic (detect)").tag(EmbeddedModelCatalog.automaticID)
                     ForEach(languageChoices) { lang in
                         Text(lang.englishName).tag(lang.code)
                     }

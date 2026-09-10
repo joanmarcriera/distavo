@@ -31,6 +31,12 @@ final class WatcherController: ObservableObject {
     /// reflects the current run and resets on relaunch), this is read from disk,
     /// so a recording that failed weeks ago stays visible until it is retried.
     @Published private(set) var failedRecordings: [(base: String, error: String)] = []
+    /// The `ModelCoordinator`'s latest progress message, published unconditionally
+    /// (unlike `status`, which only moves while `processingActive`) so Settings'
+    /// "Download now" can show it. This controller owns the coordinator's one
+    /// `setProgressHandler` registration at runtime — Settings reads this
+    /// property instead of registering its own handler.
+    @Published private(set) var modelProgress: String?
 
     private(set) var config: Config
     private var deps: PipelineDeps
@@ -129,9 +135,17 @@ final class WatcherController: ObservableObject {
         // EmbeddedTranscriber's own, not a duplicate of it.
         Task {
             await ModelCoordinator.shared.setProgressHandler { [weak self] message in
-                self?.reportEmbeddedProgress(message)
+                self?.reportModelProgress(message)
             }
         }
+    }
+
+    /// The coordinator's handler: always publishes `modelProgress` (Settings'
+    /// "Download now" reads it even when nothing is processing), then folds into
+    /// the normal status/activity path only while a scan is actually running.
+    private nonisolated func reportModelProgress(_ message: String) {
+        Task { @MainActor [weak self] in self?.modelProgress = message }
+        reportEmbeddedProgress(message)
     }
 
     private nonisolated func reportEmbeddedProgress(_ message: String) {

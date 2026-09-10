@@ -45,6 +45,23 @@ final class ModelCoordinatorTests: XCTestCase {
         XCTAssertNotEqual(after, .downloading(fraction: 0.9))  // must not resurrect
     }
 
+    /// `prefetch` must not re-download a model already on disk. Runs against the
+    /// real (unisolated — see the distavo-shared-config-no-isolation memory)
+    /// Application Support store, so it only exercises models this dev Mac
+    /// already has; if none are downloaded there is nothing to assert against.
+    func testPrefetchSkipsAlreadyDownloadedModels() async throws {
+        let alreadyDownloaded = EmbeddedModelCatalog.models.filter { EmbeddedModelStore.isDownloaded($0) }
+        try XCTSkipIf(alreadyDownloaded.isEmpty, "No embedded models are downloaded on this Mac to test the skip path against.")
+        let c = ModelCoordinator()
+        actor Counter { var calls = 0; func increment() { calls += 1 } }
+        let counter = Counter()
+        try await c.prefetch(ids: alreadyDownloaded.map(\.id), includeDetector: false) { _ in
+            await counter.increment()
+        }
+        let calls = await counter.calls
+        XCTAssertEqual(calls, 0)
+    }
+
     func testStorePathsLiveUnderTheSingleModelsFolder() {
         let root = EmbeddedModelStore.modelsDirectory.path
         XCTAssertTrue(EmbeddedModelStore.parakeetDirectory.path.hasPrefix(root))

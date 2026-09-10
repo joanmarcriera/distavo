@@ -30,11 +30,19 @@ jobs:
         run: |
           cd apple
           fail=0
+          # One scheme per edition: the scheme selects the target (and so the
+          # linked packages and compilation conditions); passing -xcconfig to
+          # the Direct scheme only relabels a Direct build, it does not test
+          # the App Store or Setapp targets.
           for edition in Direct Setapp AppStore; do
-            echo "::group::Build $edition edition"
-            if xcodebuild -project Distavo.xcodeproj -scheme Distavo \
+            case "$edition" in
+              Direct)   scheme=Distavo ;;
+              Setapp)   scheme=Distavo-Setapp ;;
+              AppStore) scheme=Distavo-AppStore ;;
+            esac
+            echo "::group::Build $edition edition ($scheme)"
+            if xcodebuild -project Distavo.xcodeproj -scheme "$scheme" \
                  -configuration Debug -derivedDataPath "build/$edition" \
-                 -xcconfig "configs/$edition.xcconfig" \
                  CODE_SIGNING_ALLOWED=NO build; then
               echo "$edition: OK"
             else

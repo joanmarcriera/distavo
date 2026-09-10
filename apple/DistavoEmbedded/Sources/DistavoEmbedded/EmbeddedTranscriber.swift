@@ -193,6 +193,9 @@ public actor EmbeddedTranscriber {
             let results: [TranscriptionResult]
             do {
                 let whisper = try await WhisperKit(whisperConfig)
+                if model.whisperKitRepo != nil {
+                    try Self.verifyManifest(model: model)
+                }
                 await self.report("Transcribing on this Mac…")
                 var options = DecodingOptions()
                 options.language = languageHint
@@ -202,6 +205,12 @@ public actor EmbeddedTranscriber {
                 // `whisper` goes out of scope here: the 1–4 GB model is released
                 // before SpeakerKit loads (spec §6 peak-memory rule).
                 await coordinator.noteDownload(id: model.id, fraction: nil)
+            } catch let retry as RetryableDependencyError {
+                // A manifest mismatch (see `verifyManifest` above) is already
+                // the right shape for the pipeline — don't let `pipelineError`
+                // reclassify it as a permanent failure below.
+                await coordinator.noteDownload(id: model.id, fraction: nil)
+                throw retry
             } catch {
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw Self.pipelineError(error, model: model.displayName)
@@ -242,6 +251,23 @@ public actor EmbeddedTranscriber {
         return diarization.segments.compactMap { seg in
             guard let id = seg.speaker.speakerId else { return nil }
             return SpeakerTurn(speaker: id, start: Double(seg.startTime), end: Double(seg.endTime))
+        }
+    }
+
+    /// Verifies a just-loaded custom-repo model's folder against its
+    /// `manifest.json` (spec §5.6, §7). Called only when `model.whisperKitRepo
+    /// != nil` — Argmax's own repo has no manifest, so this never runs for the
+    /// built-in Whisper models. On any mismatch, removes the *one* variant
+    /// folder (never anything above it) so the next attempt re-downloads from
+    /// scratch, and reports it as a retryable, not permanent, failure.
+    static func verifyManifest(model: EmbeddedModel) throws {
+        let dir = EmbeddedModelStore.whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
+        do {
+            try ModelManifestCheck.verify(folder: dir)
+        } catch {
+            try? FileManager.default.removeItem(at: dir)
+            throw RetryableDependencyError(
+                "The \(model.displayName) download was incomplete — Distavo will download it again.")
         }
     }
 

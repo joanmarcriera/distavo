@@ -21,10 +21,16 @@ final class ModelCoordinatorTests: XCTestCase {
 
     func testFreeSpaceCheckIsRetryable() {
         let c = ModelCoordinator()
-        XCTAssertThrowsError(try c.ensureFreeSpace(forMB: 100_000_000)) { error in   // 100 TB
+        XCTAssertThrowsError(try c.ensureFreeSpace(forMB: 100_000_000)) { error in   // ≈ 95 TiB (100 million MiB)
             XCTAssertTrue(error is RetryableDependencyError)
         }
         XCTAssertNoThrow(try c.ensureFreeSpace(forMB: 1))
+    }
+
+    func testFreeSpaceBytesWalksUpToNearestExistingAncestor() {
+        let missing = FileManager.default.temporaryDirectory
+            .appendingPathComponent("distavo-nonexistent-\(UUID().uuidString)/models")
+        XCTAssertGreaterThan(EmbeddedModelStore.freeSpaceBytes(at: missing), 0)
     }
 
     func testStorePathsLiveUnderTheSingleModelsFolder() {

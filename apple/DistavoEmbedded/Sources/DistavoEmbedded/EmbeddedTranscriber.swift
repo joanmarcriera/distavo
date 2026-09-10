@@ -106,9 +106,19 @@ public enum EmbeddedModelStore {
         return FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path)
     }
 
-    public static func freeSpaceBytes() -> Int64 {
-        let values = try? modelsDirectory.deletingLastPathComponent()
-            .resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+    public static func freeSpaceBytes() -> Int64 { freeSpaceBytes(at: modelsDirectory) }
+
+    /// Free space on the volume holding `url`, walking up to the nearest
+    /// existing ancestor first — `resourceValues` throws (Cocoa error 260) on a
+    /// path that doesn't exist yet, e.g. before Distavo has ever downloaded a
+    /// model, which would otherwise collapse "not created yet" into "0 bytes
+    /// free" and make `ensureFreeSpace` reject downloads on a fresh install.
+    public static func freeSpaceBytes(at url: URL) -> Int64 {
+        var probe = url
+        while !FileManager.default.fileExists(atPath: probe.path) && probe.path != "/" {
+            probe.deleteLastPathComponent()
+        }
+        let values = try? probe.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
         return values?.volumeAvailableCapacityForImportantUsage ?? 0
     }
 }

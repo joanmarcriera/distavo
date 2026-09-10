@@ -134,9 +134,10 @@ structs `SpeakerTurn(speaker: Int, start, end)` and `TimedWord(text, start, end)
 ports SpeakerKit's `.subsegment` behaviour so both engines label identically:
 
 - a word takes the turn with the **largest time intersection**; ties → the earlier-starting turn;
-- words within 1.0 s of each other share a subsegment, so a word in silence next to a labelled
-  word inherits its speaker; a subsegment that overlaps no turn is `unknown` (rendered
-  `SPEAKER_UNKNOWN` by the cleaner) rather than inheriting a neighbour's speaker;
+- words within 0.15 s of each other share a subsegment (SpeakerKit's default threshold, kept
+  for parity); a subsegment that overlaps no turn inherits the previous subsegment's speaker
+  when the silence before it is ≤ 1.0 s, otherwise it is `unknown` (rendered `SPEAKER_UNKNOWN`
+  by the cleaner) — SpeakerKit carries unconditionally, the spec bounds it;
 - consecutive same-speaker words form a segment; segments split at sentence-final punctuation
   (`.?!…` and their Unicode variants) and at speaker change; text joins with single spaces;
 - empty, nil or out-of-order timings are sorted/skipped deterministically.

@@ -742,10 +742,10 @@ git commit -m "feat(router): pure engine routing with Catalan-first mixture rule
 - Produces:
   - `public struct TimedWord: Equatable, Sendable { public let text: String; public let start: Double; public let end: Double }`
   - `public struct SpeakerTurn: Equatable, Sendable { public let speaker: Int; public let start: Double; public let end: Double }`
-  - `public enum WordSpeakerAligner { public static let betweenWordGap = 1.0; public static func whisperXDictionary(words: [TimedWord], turns: [SpeakerTurn]) -> [String: Any] }`
+  - `public enum WordSpeakerAligner { public static let betweenWordGap = 0.15; public static let carryGap = 1.0; public static func whisperXDictionary(words: [TimedWord], turns: [SpeakerTurn]) -> [String: Any] }`
   - Output shape identical to `EmbeddedResultMapper`: `["segments": [["text": …, "start": …, "end": …, "speaker": "SPEAKER_00"?]]]`.
 
-Semantics (spec §5.5): words are first grouped into subsegments split where the gap to the previous word exceeds `betweenWordGap` (SpeakerKit's `betweenWordThreshold`); each subsegment takes the turn with the **largest intersection** (ties → earlier-starting turn); a subsegment with zero intersection has **no speaker** (`SPEAKER_UNKNOWN` downstream) — the spec's "unknown beyond a gap" rule, since every subsegment boundary is such a gap. Consecutive same-speaker subsegments merge; merged text is split into segments at sentence-final punctuation.
+Semantics (spec §5.5): words are first grouped into subsegments split where the gap to the previous word exceeds `betweenWordGap` = 0.15 s (SpeakerKit's default `betweenWordThreshold`); each subsegment takes the turn with the **largest intersection** (ties → earlier-starting turn); a subsegment with zero intersection **inherits the previous subsegment's speaker** when the silence before it is ≤ `carryGap` = 1.0 s, otherwise it has **no speaker** (`SPEAKER_UNKNOWN` downstream). Consecutive same-speaker subsegments merge; merged text is split into segments at sentence-final punctuation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -847,9 +847,13 @@ public struct SpeakerTurn: Equatable, Sendable {
 /// speaker when nothing overlaps) so the Parakeet path labels exactly like the
 /// WhisperKit path does today. Pure; unit-tested with fixtures.
 public enum WordSpeakerAligner {
-    /// Silence between two words above which they start a new subsegment
-    /// (SpeakerKit's `betweenWordThreshold`).
-    public static let betweenWordGap = 1.0
+    /// Silence between two words above which they start a new subsegment —
+    /// SpeakerKit's default `betweenWordThreshold` (0.15 s), kept for parity.
+    public static let betweenWordGap = 0.15
+    /// A subsegment that overlaps no diarisation turn inherits the previous
+    /// subsegment's speaker when the silence before it is at most this long;
+    /// beyond it the speaker is unknown (spec §5.5).
+    public static let carryGap = 1.0
 
     public static func whisperXDictionary(words rawWords: [TimedWord], turns rawTurns: [SpeakerTurn]) -> [String: Any] {
         let words = rawWords
@@ -866,10 +870,11 @@ public enum WordSpeakerAligner {
         }
 
         // 2. Speaker per subsegment: largest intersection. A subsegment that
-        // overlaps no turn is `unknown` (spec §5.5). SpeakerKit would carry the
-        // previous speaker here; the spec replaces that with "unknown beyond a
-        // gap", and every subsegment boundary IS such a gap by construction.
+        // overlaps no turn inherits the previous subsegment's speaker if the
+        // silence before it is ≤ carryGap (SpeakerKit carries unconditionally;
+        // spec §5.5 bounds it), otherwise it is `unknown`.
         var labelled: [(speaker: Int?, words: [TimedWord])] = []
+        var previous: (speaker: Int?, end: Double)? = nil
         for group in groups {
             let start = group.first!.start, end = group.last!.end
             var best: (speaker: Int, score: Double)? = nil
@@ -878,7 +883,10 @@ public enum WordSpeakerAligner {
                 guard overlap > 0 else { continue }
                 if best == nil || overlap > best!.score { best = (t.speaker, overlap) }
             }
-            labelled.append((best?.speaker, group))
+            var speaker = best?.speaker
+            if speaker == nil, let prev = previous, start - prev.end <= carryGap { speaker = prev.speaker }
+            labelled.append((speaker, group))
+            previous = (speaker, end)
         }
 
         // 3. Merge consecutive same-speaker groups, then split at sentence ends.

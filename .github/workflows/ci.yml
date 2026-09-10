@@ -29,9 +29,10 @@ jobs:
       # on before it ships in an archive. `swift package show-traits` on our
       # own manifest lists only OUR package's traits (DistavoEmbedded declares
       # none), so the meaningful check is the resolved traits we pass TO
-      # FluidAudio (`dump-package`'s `traits` array on that dependency) —
-      # `show-traits --package-id fluidaudio` is run alongside purely so the
-      # log shows what trait exists and would otherwise default on.
+      # FluidAudio (`dump-package`'s `traits` array on that dependency, read
+      # with jq — preinstalled on macos-latest) — `show-traits --package-id
+      # fluidaudio` is run alongside purely so the log shows what trait exists
+      # and would otherwise default on.
       - name: Verify NemoTextProcessing trait stays disabled
         run: |
           cd apple/DistavoEmbedded
@@ -39,18 +40,12 @@ jobs:
           swift package show-traits --package-id fluidaudio
           echo
           echo "Traits DistavoEmbedded's manifest enables for FluidAudio:"
-          traits=$(swift package dump-package | python3 -c '
-import json, sys
-d = json.load(sys.stdin)
-for group in d.get("dependencies", []):
-    for dep in group.get("sourceControl", []):
-        if dep.get("identity") == "fluidaudio":
-            print(json.dumps(dep.get("traits", [])))
-            sys.exit(0)
-print("MISSING", file=sys.stderr)
-sys.exit(1)
-')
+          traits=$(swift package dump-package | jq -c '[.dependencies[]?.sourceControl[]? | select(.identity=="fluidaudio") | .traits] | first // "MISSING"')
           echo "$traits"
+          if [ "$traits" = '"MISSING"' ]; then
+            echo "::error::could not find the FluidAudio dependency in DistavoEmbedded's manifest"
+            exit 1
+          fi
           if echo "$traits" | grep -qi "NemoTextProcessing"; then
             echo "::error::FluidAudio's traits now include NemoTextProcessing — Package.swift must keep traits: [] on that dependency (spec §3), or the archive scan gate breaks"
             exit 1

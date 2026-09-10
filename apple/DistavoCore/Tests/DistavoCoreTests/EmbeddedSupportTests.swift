@@ -18,6 +18,39 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertEqual(EmbeddedModelCatalog.recommended(memoryBytes: 64 * gb).id, "large-v3-turbo")
     }
 
+    func testNewCatalogEntriesExist() {
+        XCTAssertEqual(EmbeddedModelCatalog.model(id: "parakeet-tdt-v3").engine, .parakeet)
+        XCTAssertEqual(EmbeddedModelCatalog.model(id: "bsc-los").whisperKitRepo,
+                       "Joanmarcriera/distavo-whisperkit-coreml")
+        XCTAssertEqual(EmbeddedModelCatalog.model(id: "bsc-los").whisperKitName,
+                       "BSC-LT_whisper-large-v3-LoS")
+        XCTAssertEqual(EmbeddedModelCatalog.model(id: "bsc-ca-3370h").whisperKitName,
+                       "BSC-LT_whisper-large-v3-ca-punctuated-3370h")
+        XCTAssertNil(EmbeddedModelCatalog.model(id: "large-v3-turbo").whisperKitRepo)
+    }
+
+    func testLanguageCoverage() {
+        XCTAssertTrue(EmbeddedModelCatalog.model(id: "bsc-los").languages.covers("gl"))
+        XCTAssertFalse(EmbeddedModelCatalog.model(id: "bsc-los").languages.covers("en"))
+        XCTAssertTrue(EmbeddedModelCatalog.model(id: "parakeet-tdt-v3").languages.covers("de"))
+        XCTAssertFalse(EmbeddedModelCatalog.model(id: "parakeet-tdt-v3").languages.covers("ca"))
+        XCTAssertTrue(EmbeddedModelCatalog.model(id: "large-v3-turbo").languages.covers("ca"))
+    }
+
+    func testMemoryFloorGatesBSCModels() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        let on8 = EmbeddedModelCatalog.selectable(memoryBytes: 8 * gb).map(\.id)
+        XCTAssertFalse(on8.contains("bsc-los"))
+        XCTAssertTrue(on8.contains("parakeet-tdt-v3"))
+        let on16 = EmbeddedModelCatalog.selectable(memoryBytes: 16 * gb).map(\.id)
+        XCTAssertTrue(on16.contains("bsc-los") && on16.contains("bsc-ca-3370h"))
+    }
+
+    func testAutomaticIsNotACatalogModel() {
+        XCTAssertTrue(EmbeddedModelCatalog.isAutomatic("auto"))
+        XCTAssertEqual(EmbeddedModelCatalog.model(id: "auto").id, EmbeddedModelCatalog.defaultModelID)
+    }
+
     // MARK: Config migration
 
     /// A config written before the embedded backend existed must keep behaving

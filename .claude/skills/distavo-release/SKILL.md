@@ -95,3 +95,17 @@ upload step is manual.
   skill only covers Distavo's CI wiring around it.
 - Full secrets list + one-time Apple/Setapp setup: `docs/release-automation.md` and
   `docs/distribution-checklist.md`.
+
+## Gotcha learned 2026-09-10 (v1.11.0 first tag failed twice in 90 s)
+
+Global `xcodebuild` overrides reach **every** target in the build, including SwiftPM
+**resource-bundle targets** (`FluidAudio_FluidAudio` since 1.11). Two of them break the archive:
+`-xcconfig configs/Direct.xcconfig` on the command line leaks `CODE_SIGN_ENTITLEMENTS` (the
+bundle looks for `Distavo.entitlements` inside the package checkout), and
+`PROVISIONING_PROFILE_SPECIFIER=…` on the command line makes Xcode refuse ("does not support
+provisioning profiles"). Rules: select the edition by **scheme + configuration only** (each target
+maps its configs to its xcconfig in `project.yml`), and pass the profile as the user setting
+`DISTAVO_APPSTORE_PROFILE_NAME=…`, which `configs/AppStore.xcconfig` turns into a target-scoped
+`PROVISIONING_PROFILE_SPECIFIER`. `DEVELOPMENT_TEAM`, `CODE_SIGN_STYLE` and `CODE_SIGN_IDENTITY`
+are fine globally. Reproduce locally with an ad-hoc archive (`CODE_SIGN_IDENTITY=-`) — it fails
+the same way. A tag whose runs failed before `gh release create` can be deleted and re-pushed.

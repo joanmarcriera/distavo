@@ -123,6 +123,15 @@ final class WatcherController: ObservableObject {
         EmbeddedSummariser.setProgressHandler { [weak self] message in
             self?.reportEmbeddedProgress(message)
         }
+        // The coordinator carries language-detection and routing-decision
+        // messages (LanguageDetector, ParakeetTranscriber, and the router's
+        // note/"Using …" lines in AppPipelineDeps) — a separate handler from
+        // EmbeddedTranscriber's own, not a duplicate of it.
+        Task {
+            await ModelCoordinator.shared.setProgressHandler { [weak self] message in
+                self?.reportEmbeddedProgress(message)
+            }
+        }
     }
 
     private nonisolated func reportEmbeddedProgress(_ message: String) {
@@ -132,7 +141,8 @@ final class WatcherController: ObservableObject {
             self.log(message)
             // Refine the icon: the embedded engine loads/downloads the
             // model before it transcribes — the server path can't.
-            if message.contains("Download") || message.contains("Loading") {
+            if message.contains("Download") || message.contains("Loading")
+                        || message.contains("Detecting") || message.hasPrefix("Using ") {
                 self.processingPhase = .loading
             } else if message.contains("Transcribing") || message.contains("Identifying")
                         || message.contains("Summarising") || message.contains("Condensing") {

@@ -1032,7 +1032,7 @@ git commit -m "build(embedded): add FluidAudio (Parakeet) pinned by revision wit
   - `EmbeddedModelStore.parakeetDirectory: URL` (= `modelsDirectory/parakeet`), `EmbeddedModelStore.whisperKitDirectory(repo: String?, variant: String) -> URL` (= `modelsDirectory/models/<repo with "/" → "_">/<variant>`, which is where WhisperKit's `downloadBase` puts them), `EmbeddedModelStore.isDownloaded(_ model: EmbeddedModel) -> Bool`, `EmbeddedModelStore.isDetectorDownloaded() -> Bool`, `EmbeddedModelStore.freeSpaceBytes() -> Int64`.
   - `public enum ModelReadiness: Equatable, Sendable { case absent, downloading(fraction: Double), ready }`
   - `public actor ModelCoordinator { public static let shared; public func readiness(of id: String) async -> ModelReadiness; public func setProgressHandler(_:); public func withExclusiveAccess<T>(_ body: () async throws -> T) async throws -> T; public func cancelDownloads(); public func removeAllModels() async throws; public func ensureFreeSpace(forMB mb: Int) throws }`
-  - `public struct InsufficientDiskSpace: Error { public let neededMB: Int }` — the coordinator throws `RetryableDependencyError` for it (free space can change).
+  - `ensureFreeSpace(forMB:)` throws `RetryableDependencyError` directly (free space can change, so the recording defers).
 
 The coordinator does **not** download by itself; the engines download via their SDKs while holding `withExclusiveAccess`. It serialises: one engine operation at a time (transcription or download), and removal waits for the current operation.
 

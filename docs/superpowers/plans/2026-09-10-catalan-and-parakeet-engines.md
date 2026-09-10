@@ -745,7 +745,7 @@ git commit -m "feat(router): pure engine routing with Catalan-first mixture rule
   - `public enum WordSpeakerAligner { public static let betweenWordGap = 1.0; public static func whisperXDictionary(words: [TimedWord], turns: [SpeakerTurn]) -> [String: Any] }`
   - Output shape identical to `EmbeddedResultMapper`: `["segments": [["text": …, "start": …, "end": …, "speaker": "SPEAKER_00"?]]]`.
 
-Semantics (spec §5.5): words are first grouped into subsegments split where the gap to the previous word exceeds `betweenWordGap` (SpeakerKit's `betweenWordThreshold`); each subsegment takes the turn with the **largest intersection** (ties → earlier-starting turn); a subsegment with zero intersection **carries the previous subsegment's speaker**, or has no speaker if none yet (`SPEAKER_UNKNOWN` downstream). Consecutive same-speaker subsegments merge; merged text is split into segments at sentence-final punctuation.
+Semantics (spec §5.5): words are first grouped into subsegments split where the gap to the previous word exceeds `betweenWordGap` (SpeakerKit's `betweenWordThreshold`); each subsegment takes the turn with the **largest intersection** (ties → earlier-starting turn); a subsegment with zero intersection has **no speaker** (`SPEAKER_UNKNOWN` downstream) — the spec's "unknown beyond a gap" rule, since every subsegment boundary is such a gap. Consecutive same-speaker subsegments merge; merged text is split into segments at sentence-final punctuation.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -865,9 +865,11 @@ public enum WordSpeakerAligner {
             else { groups[groups.count - 1].append(words[i]) }
         }
 
-        // 2. Speaker per subsegment: largest intersection, else carry previous.
+        // 2. Speaker per subsegment: largest intersection. A subsegment that
+        // overlaps no turn is `unknown` (spec §5.5). SpeakerKit would carry the
+        // previous speaker here; the spec replaces that with "unknown beyond a
+        // gap", and every subsegment boundary IS such a gap by construction.
         var labelled: [(speaker: Int?, words: [TimedWord])] = []
-        var previous: Int? = nil
         for group in groups {
             let start = group.first!.start, end = group.last!.end
             var best: (speaker: Int, score: Double)? = nil
@@ -876,9 +878,7 @@ public enum WordSpeakerAligner {
                 guard overlap > 0 else { continue }
                 if best == nil || overlap > best!.score { best = (t.speaker, overlap) }
             }
-            let speaker = best?.speaker ?? previous
-            labelled.append((speaker, group))
-            previous = speaker
+            labelled.append((best?.speaker, group))
         }
 
         // 3. Merge consecutive same-speaker groups, then split at sentence ends.
@@ -1054,7 +1054,7 @@ final class ModelCoordinatorTests: XCTestCase {
 
     func testFreeSpaceCheckIsRetryable() {
         let c = ModelCoordinator()
-        XCTAssertThrowsError(try c.ensureFreeSpace(forMB: Int.max / 1_000_000)) { error in
+        XCTAssertThrowsError(try c.ensureFreeSpace(forMB: 100_000_000)) { error in   // 100 TB
             XCTAssertTrue(error is RetryableDependencyError)
         }
         XCTAssertNoThrow(try c.ensureFreeSpace(forMB: 1))
@@ -1065,7 +1065,7 @@ final class ModelCoordinatorTests: XCTestCase {
         XCTAssertTrue(EmbeddedModelStore.parakeetDirectory.path.hasPrefix(root))
         let custom = EmbeddedModelStore.whisperKitDirectory(repo: "Joanmarcriera/distavo-whisperkit-coreml", variant: "BSC-LT_whisper-large-v3-LoS")
         XCTAssertTrue(custom.path.hasPrefix(root))
-        XCTAssertTrue(custom.path.hasSuffix("models/Joanmarcriera_distavo-whisperkit-coreml/BSC-LT_whisper-large-v3-LoS"))
+        XCTAssertTrue(custom.path.hasSuffix("models/Joanmarcriera/distavo-whisperkit-coreml/BSC-LT_whisper-large-v3-LoS"))
     }
 }
 ```
@@ -1075,25 +1075,38 @@ final class ModelCoordinatorTests: XCTestCase {
 - [ ] **Step 3: Implement.** Add to `EmbeddedModelStore` in `EmbeddedTranscriber.swift`:
 
 ```swift
-    /// FluidAudio's Parakeet models, inside the same folder as everything else.
-    public static var parakeetDirectory: URL { modelsDirectory.appendingPathComponent("parakeet", isDirectory: true) }
+    /// FluidAudio's Parakeet model folder, inside the same root as everything
+    /// else. FluidAudio's `download(to:)` / `downloadAndLoad(to:)` take the MODEL
+    /// directory itself (its default is `…/FluidAudio/Models/parakeet-tdt-0.6b-v3`),
+    /// so this path ends in the model name.
+    public static var parakeetDirectory: URL {
+        modelsDirectory.appendingPathComponent("parakeet", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v3", isDirectory: true)
+    }
 
-    /// Where WhisperKit stores `variant` when `downloadBase` is `modelsDirectory`:
-    /// `<base>/models/<repo with "/" replaced by "_">/<variant>`.
+    /// Where WhisperKit stores `variant` when `downloadBase` is `modelsDirectory`
+    /// (verified on disk 2026-09-10): `<base>/models/<org>/<repo>/<variant>`,
+    /// e.g. `models/argmaxinc/whisperkit-coreml/openai_whisper-small`.
     public static func whisperKitDirectory(repo: String?, variant: String) -> URL {
-        let repoFolder = (repo ?? "argmaxinc/whisperkit-coreml").replacingOccurrences(of: "/", with: "_")
-        return modelsDirectory.appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent(repoFolder, isDirectory: true)
-            .appendingPathComponent(variant, isDirectory: true)
+        var url = modelsDirectory.appendingPathComponent("models", isDirectory: true)
+        for part in (repo ?? "argmaxinc/whisperkit-coreml").split(separator: "/") {
+            url.appendPathComponent(String(part), isDirectory: true)
+        }
+        return url.appendingPathComponent(variant, isDirectory: true)
     }
 
     public static func isDownloaded(_ model: EmbeddedModel) -> Bool {
         switch model.engine {
         case .parakeet:
-            return FileManager.default.fileExists(atPath: parakeetDirectory.appendingPathComponent("parakeet-tdt-0.6b-v3").path)
+            // Same check FluidAudio runs before deciding to download (public API).
+            return AsrModels.modelsExist(at: parakeetDirectory)
         case .whisperKit:
+            // A complete variant folder holds config.json plus the compiled models
+            // (AudioEncoder.mlmodelc, TextDecoder.mlmodelc, MelSpectrogram.mlmodelc).
             let dir = whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName)
-            return FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path)
+            return ["config.json", "AudioEncoder.mlmodelc", "TextDecoder.mlmodelc"].allSatisfy {
+                FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+            }
         }
     }
 
@@ -1109,7 +1122,7 @@ final class ModelCoordinatorTests: XCTestCase {
     }
 ```
 
-Verify the WhisperKit folder layout empirically before relying on `config.json`: `ls "$HOME/Library/Application Support/Distavo/models/models/argmaxinc_whisperkit-coreml/"*/` on this Mac and adjust the sentinel file name if the variant folder uses a different marker.
+`EmbeddedTranscriber.swift` must now `import FluidAudio` for `AsrModels.modelsExist(at:)` (public, `AsrModels.swift:613`). Layout verified on this Mac: `~/Library/Application Support/Distavo/models/models/argmaxinc/whisperkit-coreml/openai_whisper-small/{config.json,AudioEncoder.mlmodelc,TextDecoder.mlmodelc,MelSpectrogram.mlmodelc,…}`.
 
 Create `ModelCoordinator.swift`:
 
@@ -1155,7 +1168,7 @@ public actor ModelCoordinator {
     public func consumeCancel() -> Bool { defer { cancelRequested = false }; return cancelRequested }
 
     /// Run `body` as the only model operation in flight.
-    public func withExclusiveAccess<T: Sendable>(_ body: @Sendable () async throws -> T) async throws -> T {
+    public func withExclusiveAccess<T>(_ body: @Sendable () async throws -> T) async throws -> T {
         while busy { await withCheckedContinuation { waiters.append($0) } }
         busy = true
         defer {
@@ -1293,7 +1306,7 @@ git commit -m "feat(embedded): model coordinator actor — per-model readiness, 
     }
 ```
 
-If `WhisperKitConfig`'s initializer has no `modelRepo` label at that position, set it after construction: `var whisperConfig = WhisperKitConfig(...); whisperConfig.modelRepo = model.whisperKitRepo` (the property is `public var`, `Configurations.swift:13`). Confirm `TranscriptionResult` is the element type of `whisper.transcribe(audioPath:decodeOptions:)` (it is; `EmbeddedResultMapperTests` imports it).
+`WhisperKitConfig.init(model:downloadBase:modelRepo:…)` has exactly these leading labels at the 1.0.0 pin (`Configurations.swift:82-84`), so the call above compiles as written. `withExclusiveAccess` runs its closure outside this actor, so calls to `self.report(…)` inside it need `await`. `TranscriptionResult` is the element type of `whisper.transcribe(audioPath:decodeOptions:)`.
 
 - [ ] **Step 2: Build** `cd apple/DistavoEmbedded && swift build 2>&1 | grep -E "error|warning: unused" ; echo exit=$?` → no errors. `git checkout Package.resolved` if touched.
 
@@ -1324,24 +1337,26 @@ import XCTest
 @testable import DistavoEmbedded
 
 final class LanguageDetectorWindowTests: XCTestCase {
-    /// 200 s of "audio": silence except 40–80 s and 150–200 s.
+    /// 200 s of "audio": silence except 60–80 s and 150–200 s.
     private func samples() -> [Float] {
         let rate = 100  // coarse fake rate keeps the array small
         var s = [Float](repeating: 0, count: 200 * rate)
-        for i in (40 * rate)..<(80 * rate) { s[i] = 0.5 }
+        for i in (60 * rate)..<(80 * rate) { s[i] = 0.5 }
         for i in (150 * rate)..<(200 * rate) { s[i] = 0.5 }
         return s
     }
 
+    /// A window "has speech" when the RMS over its 30 s exceeds the floor, so
+    /// the probe stops at the first 5 s step whose window touches speech.
     func testWindowsSkipSilenceAndStayInside() {
         let starts = LanguageDetector.windowStarts(totalSeconds: 200, samples: samples(), sampleRate: 100)
         XCTAssertEqual(starts.count, 3)
-        // 10 % (20 s) is silent → moves forward to speech at 40 s
-        XCTAssertEqual(starts[0], 40, accuracy: 1)
-        // 50 % (100 s) is silent → next speech is 150 s
-        XCTAssertEqual(starts[1], 150, accuracy: 1)
-        // 90 % (180 s) is speech but a 30 s window must end ≤ 200 → clamped to 170
-        XCTAssertEqual(starts[2], 170, accuracy: 1)
+        // 10 % = 20 s: windows 20–50, 25–55, 30–60 are silent; 35–65 touches speech at 60 → 35
+        XCTAssertEqual(starts[0], 35, accuracy: 0.01)
+        // 50 % = 100 s: silent until 125–155 touches speech at 150 → 125
+        XCTAssertEqual(starts[1], 125, accuracy: 0.01)
+        // 90 % = 180 s, but a 30 s window must end ≤ 200 → clamped to 170 (speech there)
+        XCTAssertEqual(starts[2], 170, accuracy: 0.01)
     }
 
     func testShortFileYieldsOneWindowAtZero() {
@@ -1442,7 +1457,7 @@ git commit -m "feat(embedded): whisper-tiny language detector over three speech 
 - Test: `apple/DistavoEmbedded/Tests/DistavoEmbeddedTests/ParakeetAdapterTests.swift`
 
 **Interfaces:**
-- Consumes: `AsrModels.downloadAndLoad(to:…progressHandler:)`, `AsrManager(config:)`, `asrManager.initialize(models:)`, `asrManager.transcribe(_ url: URL, decoderState: inout TdtDecoderState, language: Language?)`, `buildWordTimings(from:)`, `EmbeddedTranscriber.speakerTurns(wavURL:numSpeakers:)`, `WordSpeakerAligner`.
+- Consumes: `AsrModels.downloadAndLoad(to:…progressHandler:)`, `AsrManager(config:models:)`, `asrManager.transcribe(_ url: URL, decoderState: inout TdtDecoderState, language: Language?)`, `TdtDecoderState.make()`, `buildWordTimings(from:)`, `EmbeddedTranscriber.speakerTurns(wavURL:numSpeakers:)`, `WordSpeakerAligner`.
 - Produces: `public actor ParakeetTranscriber { public static let shared; public func transcribe(wavURL: URL, languageHint: String?, config: TranscribeConfig) async throws -> [String: Any] }` and pure `static func timedWords(_ words: [WordTiming]) -> [TimedWord]`.
 
 - [ ] **Step 1: Failing test for the adapter**
@@ -1521,10 +1536,9 @@ public actor ParakeetTranscriber {
                     progressHandler: { progress in
                         Task { await coordinator.noteDownload(id: model.id, fraction: progress.fractionCompleted) }
                     })
-                let asr = AsrManager(config: .default)
-                try await asr.initialize(models: models)
+                let asr = AsrManager(config: .default, models: models)   // AsrManager.swift:74
                 await coordinator.report("Transcribing on this Mac…")
-                var state = TdtDecoderState()
+                var state = TdtDecoderState.make()                        // TdtDecoderState.swift:52
                 let result = try await asr.transcribe(wavURL, decoderState: &state,
                                                       language: Self.fluidLanguage(languageHint))
                 asr.cleanup()
@@ -1546,7 +1560,7 @@ public actor ParakeetTranscriber {
 }
 ```
 
-Check at the pin: `TdtDecoderState()` public init (else use `TdtDecoderState.fresh()`/the documented factory in `TdtDecoderState.swift`), `asr.initialize(models:)` exact name (`AsrManager.swift:74` area), whether `cleanup()` is `async`. Fix labels to match; do not invent.
+Verified at the pin: `AsrManager(config:models:)` takes the models directly (no separate initialise call); `TdtDecoderState.make()` is the non-throwing factory; `cleanup()` is synchronous; `AsrModels.downloadAndLoad(to:…)` takes the model directory itself, which is why `parakeetDirectory` ends in `parakeet-tdt-0.6b-v3`.
 
 - [ ] **Step 4: Run** `swift test --filter ParakeetAdapterTests` → PASS; `swift build` clean; `git checkout Package.resolved` if touched.
 

@@ -36,6 +36,7 @@
         <span class="eyebrow">macOS 14+ menu bar app</span>
         <h1>Distavo</h1>
         <p class="lede">Private meeting notes on your Mac. Record a meeting from the menu bar — or drop a recording into a folder — and get a clean Markdown note back. Transcription runs on your Mac by default; summaries use the Ollama server you choose.</p>
+        <p class="hero-native" id="hero-native" hidden></p>
         <div class="hero-actions">
           <a class="appstore-badge" href="https://apps.apple.com/us/app/distavo/id6785437932" aria-label="Download Distavo on the Mac App Store">
             <svg class="appstore-badge-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -53,6 +54,34 @@
           <span>On-device transcription</span>
           <span>No telemetry</span>
         </div>
+      </div>
+    </section>
+
+    <section class="lang-band" id="lang-band" aria-labelledby="lang-band-heading">
+      <div class="lang-band-inner">
+        <h2 class="visually-hidden" id="lang-band-heading">Languages Distavo transcribes on your Mac</h2>
+        <ul class="lang-list" id="lang-list">
+          <li data-lang="ca">
+            <span class="lang-name" lang="ca">Català</span>
+            <span class="lang-line" lang="ca">Les teves reunions en català, transcrites al teu Mac.</span>
+          </li>
+          <li data-lang="es">
+            <span class="lang-name" lang="es">Español</span>
+            <span class="lang-line" lang="es">Tus reuniones en español, transcritas en tu Mac.</span>
+          </li>
+          <li data-lang="eu">
+            <span class="lang-name" lang="eu">Euskara</span>
+            <span class="lang-line" lang="eu">Zure bilerak euskaraz, zure Macen transkribatuta.</span>
+          </li>
+          <li data-lang="gl">
+            <span class="lang-name" lang="gl">Galego</span>
+            <span class="lang-line" lang="gl">As túas reunións en galego, transcritas no teu Mac.</span>
+          </li>
+        </ul>
+        <p class="lang-fast" id="lang-fast">
+          <span class="lang-fast-label">Fast engine, 25 European languages</span> <span class="lang-fast-names" id="lang-fast-names"><span data-fast="bg" lang="bg">Български</span> <span data-fast="hr" lang="hr">Hrvatski</span> <span data-fast="cs" lang="cs">Čeština</span> <span data-fast="da" lang="da">Dansk</span> <span data-fast="nl" lang="nl">Nederlands</span> <span data-fast="en" lang="en">English</span> <span data-fast="et" lang="et">Eesti</span> <span data-fast="fi" lang="fi">Suomi</span> <span data-fast="fr" lang="fr">Français</span> <span data-fast="de" lang="de">Deutsch</span> <span data-fast="el" lang="el">Ελληνικά</span> <span data-fast="hu" lang="hu">Magyar</span> <span data-fast="it" lang="it">Italiano</span> <span data-fast="lv" lang="lv">Latviešu</span> <span data-fast="lt" lang="lt">Lietuvių</span> <span data-fast="mt" lang="mt">Malti</span> <span data-fast="pl" lang="pl">Polski</span> <span data-fast="pt" lang="pt">Português</span> <span data-fast="ro" lang="ro">Română</span> <span data-fast="ru" lang="ru">Русский</span> <span data-fast="sk" lang="sk">Slovenčina</span> <span data-fast="sl" lang="sl">Slovenščina</span> <span data-fast="es" lang="es">Español</span> <span data-fast="sv" lang="sv">Svenska</span> <span data-fast="uk" lang="uk">Українська</span></span>
+        </p>
+        <p class="lang-note">The four languages above use two Barcelona Supercomputing Center models (Projecte AINA) and need a Mac with 16 GB memory or more. Apple's built-in dictation and Apple Intelligence do not support Catalan; Distavo does, entirely on your Mac. Anything else goes to Whisper, which covers 99 languages.</p>
       </div>
     </section>
 
@@ -200,5 +229,88 @@
       </div>
     </div>
   </footer>
+
+  <script>
+    /* Native-language greeting.
+       Reads navigator.languages and nothing else: no network request, no
+       cookie, no localStorage. Without JavaScript the band above still
+       renders in full, in its default order — this only re-orders the four
+       cards, highlights one name, and adds one line to the hero. */
+    (function () {
+      "use strict";
+
+      var lines = {
+        ca: "Distavo transcriu les teves reunions en català al teu Mac, sense enviar res al núvol.",
+        es: "Distavo transcribe tus reuniones en español en tu Mac, sin enviar nada a la nube.",
+        eu: "Distavok zure bilerak euskaraz transkribatzen ditu zure Macen, ezer hodeira bidali gabe.",
+        gl: "Distavo transcribe as túas reunións en galego no teu Mac, sen enviar nada á nube.",
+        bg: "Distavo транскрибира срещите ви на български на вашия Mac.",
+        hr: "Distavo transkribira vaše sastanke na hrvatskom, na vašem Macu.",
+        cs: "Distavo přepisuje vaše schůzky v češtině přímo ve vašem Macu.",
+        da: "Distavo transskriberer dine møder på dansk på din Mac.",
+        nl: "Distavo transcribeert je vergaderingen in het Nederlands op je Mac.",
+        et: "Distavo transkribeerib teie koosolekud eesti keeles teie Macis.",
+        fi: "Distavo litteroi kokouksesi suomeksi Macillasi.",
+        fr: "Distavo transcrit vos réunions en français, sur votre Mac.",
+        de: "Distavo transkribiert Ihre Besprechungen auf Deutsch, auf Ihrem Mac.",
+        el: "Το Distavo απομαγνητοφωνεί τις συσκέψεις σας στα ελληνικά, στο Mac σας.",
+        hu: "A Distavo magyarul írja le a megbeszéléseidet, a saját Mac gépeden.",
+        it: "Distavo trascrive le tue riunioni in italiano, sul tuo Mac.",
+        lv: "Distavo transkribē jūsu sanāksmes latviešu valodā jūsu Mac datorā.",
+        lt: "Distavo transkribuoja jūsų susitikimus lietuvių kalba jūsų Mac kompiuteryje.",
+        mt: "Distavo jittraskrivi l-laqgħat tiegħek bil-Malti, fuq il-Mac tiegħek.",
+        pl: "Distavo transkrybuje twoje spotkania po polsku, na twoim Macu.",
+        pt: "O Distavo transcreve as suas reuniões em português, no seu Mac.",
+        ro: "Distavo transcrie ședințele tale în română, pe Mac-ul tău.",
+        ru: "Distavo расшифровывает ваши встречи на русском языке на вашем Mac.",
+        sk: "Distavo prepisuje vaše stretnutia v slovenčine priamo vo vašom Macu.",
+        sl: "Distavo prepisuje vaše sestanke v slovenščini na vašem Macu.",
+        sv: "Distavo transkriberar dina möten på svenska, på din Mac.",
+        uk: "Distavo розшифровує ваші зустрічі українською на вашому Mac."
+      };
+
+      var list = document.getElementById("lang-list");
+      var fast = document.getElementById("lang-fast-names");
+      var callout = document.getElementById("hero-native");
+      if (!list || !fast || !callout) { return; }
+
+      var prefs = (navigator.languages && navigator.languages.length)
+        ? navigator.languages
+        : [navigator.language || ""];
+
+      var code = "";
+      var card = null;
+      var chip = null;
+      for (var i = 0; i < prefs.length; i++) {
+        var base = String(prefs[i]).toLowerCase().split("-")[0];
+        if (!/^[a-z]{2,3}$/.test(base)) { continue; }
+        card = list.querySelector('li[data-lang="' + base + '"]');
+        chip = card ? null : fast.querySelector('span[data-fast="' + base + '"]');
+        if (card || chip) { code = base; break; }
+      }
+
+      /* The page is already in English, so an English visitor needs nothing. */
+      if (!code || code === "en") { return; }
+
+      if (card) {
+        card.classList.add("is-match");
+        list.insertBefore(card, list.firstElementChild);
+      } else {
+        chip.classList.add("is-match");
+        var gap = chip.nextSibling;
+        if (gap && gap.nodeType === 3 && !gap.nodeValue.replace(/\s/g, "")) {
+          gap.parentNode.removeChild(gap);
+        }
+        fast.insertBefore(document.createTextNode(" "), fast.firstChild);
+        fast.insertBefore(chip, fast.firstChild);
+      }
+
+      if (lines[code]) {
+        callout.textContent = lines[code];
+        callout.setAttribute("lang", code);
+        callout.hidden = false;
+      }
+    })();
+  </script>
 </body>
 </html>

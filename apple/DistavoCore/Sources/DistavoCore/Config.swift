@@ -69,18 +69,24 @@ public struct TranscribeConfig: Codable, Equatable {
     public var language: String
     public var diarize: Bool
     public var numSpeakers: Int
+    /// Which BSC catalog id automatic Catalan routing should prefer.
+    /// See `effectivePreferredCatalanModel` for the validated accessor.
+    public var preferredCatalanModel: String
 
     enum CodingKeys: String, CodingKey {
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
+        case preferredCatalanModel = "preferred_catalan_model"
     }
 
     public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
-                language: String = "en", diarize: Bool = true, numSpeakers: Int = 2) {
+                language: String = "en", diarize: Bool = true, numSpeakers: Int = 2,
+                preferredCatalanModel: String = "bsc-los") {
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
+        self.preferredCatalanModel = preferredCatalanModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -93,6 +99,13 @@ public struct TranscribeConfig: Codable, Equatable {
         language = try c.decodeIfPresent(String.self, forKey: .language) ?? d.language
         diarize = try c.decodeIfPresent(Bool.self, forKey: .diarize) ?? d.diarize
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
+        preferredCatalanModel = try c.decodeIfPresent(String.self, forKey: .preferredCatalanModel) ?? d.preferredCatalanModel
+    }
+
+    /// Which BSC model automatic routing uses for Catalan; an unknown value
+    /// falls back to Languages of Spain rather than failing the pipeline.
+    public var effectivePreferredCatalanModel: String {
+        ["bsc-los", "bsc-ca-3370h"].contains(preferredCatalanModel) ? preferredCatalanModel : "bsc-los"
     }
 }
 
@@ -212,10 +225,12 @@ public struct Config: Codable, Equatable {
     // MARK: Load / save
 
     /// Defaults for a Mac with no config yet: transcription runs on-device when
-    /// the hardware supports it (with the model that fits its RAM), otherwise
-    /// the classic WhisperX-server setup. Existing config files never pass
-    /// through here — their missing keys decode to the "server" default, so an
-    /// upgrade can't silently switch a working WhisperX user to embedded.
+    /// the hardware supports it, picking the engine and language automatically
+    /// per meeting (spec §5.2), otherwise the classic WhisperX-server setup.
+    /// Existing config files never pass through here — their missing keys
+    /// decode to the "server" default, so an upgrade can't silently switch a
+    /// working WhisperX user to embedded. `memoryBytes` is kept for callers
+    /// that still route through `EmbeddedModelCatalog.recommended(memoryBytes:)`.
     public static func recommendedForThisMac(
         embeddedSupported: Bool = HardwareProbe.supportsEmbeddedTranscription,
         memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes
@@ -223,7 +238,10 @@ public struct Config: Codable, Equatable {
         var cfg = Config()
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
-            cfg.transcribe.embeddedModel = EmbeddedModelCatalog.recommended(memoryBytes: memoryBytes).id
+            // Fresh installs let Distavo pick the engine per meeting (spec §5.2).
+            // Existing files never pass through here, so nobody is switched.
+            cfg.transcribe.embeddedModel = EmbeddedModelCatalog.automaticID
+            cfg.transcribe.language = EmbeddedModelCatalog.automaticID
         }
         return cfg
     }

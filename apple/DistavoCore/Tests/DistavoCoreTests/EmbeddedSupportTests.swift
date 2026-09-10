@@ -79,10 +79,11 @@ final class EmbeddedSupportTests: XCTestCase {
         let gb: UInt64 = 1024 * 1024 * 1024
         let silicon16 = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 16 * gb)
         XCTAssertEqual(silicon16.transcribe.backend, "embedded")
-        XCTAssertEqual(silicon16.transcribe.embeddedModel, "large-v3-turbo")
+        XCTAssertEqual(silicon16.transcribe.embeddedModel, EmbeddedModelCatalog.automaticID)
 
+        // Fresh installs pick the engine automatically regardless of RAM tier.
         let silicon8 = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 8 * gb)
-        XCTAssertEqual(silicon8.transcribe.embeddedModel, "small")
+        XCTAssertEqual(silicon8.transcribe.embeddedModel, EmbeddedModelCatalog.automaticID)
 
         let intel = Config.recommendedForThisMac(embeddedSupported: false, memoryBytes: 32 * gb)
         XCTAssertEqual(intel.transcribe.backend, "server")

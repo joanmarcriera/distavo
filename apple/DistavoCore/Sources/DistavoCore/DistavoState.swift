@@ -94,7 +94,13 @@ public enum DistavoState {
             sleep: { Thread.sleep(forTimeInterval: $0) })
     }
 
-    /// Marker/durability model: `<base>.processing|done|failed` under `stateDir`.
+    private static let deferredFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    /// Marker/durability model: `<base>.processing|done|failed|deferred` under `stateDir`.
     public final class Store {
         public let stateDir: URL
         public let notesDir: URL
@@ -130,12 +136,52 @@ public enum DistavoState {
             write("done\n", marker(base, "done"))
             clearProcessing(base)
             clearFailed(base)
+            clearDeferred(base)
         }
 
         public func markFailed(_ base: String, _ error: String) {
             write(error + "\n", marker(base, "failed"))
             clearProcessing(base)
+            clearDeferred(base)
         }
+
+        // MARK: Deferral backoff (I2)
+        //
+        // A `.deferred` marker holds "<RFC3339 not-before time> <attempt count>"
+        // (e.g. "2026-09-10T12:00:00Z 3"). `iterPending` skips a base whose
+        // not-before time is still in the future, so a dependency that keeps
+        // failing (offline, a busy model folder) doesn't get hammered on every
+        // scan; `Pipeline.processOne` grows the wait with the attempt count.
+
+        /// The attempt count recorded in the current `.deferred` marker, or 0
+        /// when there isn't one — the caller uses this *before* calling
+        /// `markDeferred` to size the next backoff.
+        public func deferredAttempt(_ base: String) -> Int {
+            guard let content = try? String(contentsOf: marker(base, "deferred"), encoding: .utf8) else { return 0 }
+            let parts = content.trimmingCharacters(in: .whitespacesAndNewlines).split(separator: " ")
+            guard parts.count == 2, let n = Int(parts[1]) else { return 0 }
+            return n
+        }
+
+        /// Record that `base` must not be retried before `now() + retryAfter`,
+        /// bumping the stored attempt count by one (read via `deferredAttempt`
+        /// beforehand to size `retryAfter` itself).
+        public func markDeferred(_ base: String, retryAfter: TimeInterval, now: () -> Date = Date.init) {
+            let attempt = deferredAttempt(base) + 1
+            let notBefore = now().addingTimeInterval(retryAfter)
+            write("\(DistavoState.deferredFormatter.string(from: notBefore)) \(attempt)\n", marker(base, "deferred"))
+        }
+
+        /// The time `base` becomes eligible for retry again, or nil when it
+        /// isn't deferred (or the marker is unreadable/corrupt).
+        public func deferredUntil(_ base: String) -> Date? {
+            guard let content = try? String(contentsOf: marker(base, "deferred"), encoding: .utf8) else { return nil }
+            guard let first = content.trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: " ").first else { return nil }
+            return DistavoState.deferredFormatter.date(from: String(first))
+        }
+
+        public func clearDeferred(_ base: String) { remove(marker(base, "deferred")) }
 
         /// Every recording currently sitting on a `.failed` marker, with the
         /// error that was recorded, sorted by base name.
@@ -167,11 +213,13 @@ public enum DistavoState {
         /// they indicate a prior crash mid-process).
         public func clearStaleProcessing() { removeMarkers(suffix: "processing") }
 
-        /// Clear all `.failed` (and stale `.processing`) markers so every
-        /// recording gets retried (the "Process now" path).
+        /// Clear all `.failed` (and stale `.processing`, and `.deferred`)
+        /// markers so every recording gets retried right away (the "Process
+        /// now" path) rather than waiting out its backoff window.
         public func retryFailed() {
             removeMarkers(suffix: "failed")
             removeMarkers(suffix: "processing")
+            removeMarkers(suffix: "deferred")
         }
     }
 
@@ -199,7 +247,8 @@ public enum DistavoState {
     }
 
     public static func iterPending(
-        recordingsDir: URL, state: Store, extensions: Set<String> = supportedExtensions
+        recordingsDir: URL, state: Store, extensions: Set<String> = supportedExtensions,
+        now: () -> Date = Date.init
     ) -> [URL] {
         let fm = FileManager.default
         guard let en = fm.enumerator(
@@ -218,6 +267,7 @@ public enum DistavoState {
             if !extensions.contains(ext) { continue }
             let base = baseFor(recordingsDir: recordingsDir, path: url)
             if state.isDone(base) || state.isProcessing(base) || state.isFailed(base) { continue }
+            if let until = state.deferredUntil(base), until > now() { continue }
             pending.append(url)
         }
         return pending

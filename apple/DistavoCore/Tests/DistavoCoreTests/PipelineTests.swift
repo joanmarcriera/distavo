@@ -333,6 +333,106 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(second.status, .done)
     }
 
+    // MARK: WAV reuse (I2)
+
+    private final class CallCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        func increment() { lock.lock(); n += 1; lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+    }
+
+    /// A prior attempt may already have produced a good WAV for this exact
+    /// source (e.g. the run that later hit a RetryableDependencyError at the
+    /// transcribe stage) — re-running AVFoundation's slow conversion on every
+    /// retry would be wasted work.
+    func testSkipsReconversionWhenWavIsFreshFromAPriorAttempt() async throws {
+        let (cfg, input) = try makeEnv()
+        let workDir = Config.resolvePath(cfg.workDir)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        try Data([1, 2, 3]).write(to: workDir.appendingPathComponent("demo.wav"))
+
+        let calls = CallCounter()
+        var d = deps()
+        d.convertToWav = { _, _ in calls.increment() }
+
+        let result = await Pipeline.processOne(
+            path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 0, "a fresh existing WAV must not be reconverted")
+    }
+
+    func testConvertsWhenNoWavExistsYet() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        var d = deps()
+        let original = d.convertToWav
+        d.convertToWav = { src, dest in calls.increment(); try await original(src, dest) }
+
+        let result = await Pipeline.processOne(
+            path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 1)
+    }
+
+    /// A WAV that predates the source recording (a stale leftover, or a
+    /// re-recorded file reusing a base name) must still be reconverted.
+    func testReconvertsWhenWavIsStaleRelativeToSource() async throws {
+        let (cfg, input) = try makeEnv()
+        let workDir = Config.resolvePath(cfg.workDir)
+        try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+        let wavPath = workDir.appendingPathComponent("demo.wav")
+        try Data([1, 2, 3]).write(to: wavPath)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -3600)], ofItemAtPath: wavPath.path)
+
+        let calls = CallCounter()
+        var d = deps()
+        let original = d.convertToWav
+        d.convertToWav = { src, dest in calls.increment(); try await original(src, dest) }
+
+        let result = await Pipeline.processOne(
+            path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 1, "a WAV older than the source must be reconverted")
+    }
+
+    // MARK: Deferral backoff (I2)
+
+    /// The backoff must not strand a recording forever: "Process now"
+    /// (`retryFailed`) clears the `.deferred` marker so the very next scan
+    /// picks it up regardless of how far into the window it is.
+    func testProcessNowClearsBackoffSoNextScanRetriesImmediately() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let d = deps(transcribe: { _, _ in
+            calls.increment()
+            if calls.count == 1 { throw RetryableDependencyError("offline") }
+            return ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
+        })
+
+        let first = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(first.status, .deferred)
+
+        let recordingsDir = Config.resolvePath(cfg.recordingsDir)
+        let workDir = Config.resolvePath(cfg.workDir)
+        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: input)
+        let store = try DistavoState.Store(
+            stateDir: workDir.appendingPathComponent(".state"),
+            notesDir: Config.resolvePath(cfg.notesDir))
+        XCTAssertNotNil(store.deferredUntil(base))
+
+        // Immediately after deferring, the base must be excluded from a scan...
+        let scanWhileBackedOff = DistavoState.iterPending(recordingsDir: recordingsDir, state: store)
+        XCTAssertTrue(scanWhileBackedOff.isEmpty)
+
+        // ...but "Process now" clears the backoff, and the next scan retries.
+        store.retryFailed()
+        XCTAssertNil(store.deferredUntil(base))
+        let scanAfterProcessNow = DistavoState.iterPending(recordingsDir: recordingsDir, state: store)
+        XCTAssertEqual(scanAfterProcessNow.map(\.lastPathComponent), ["demo.opus"])
+    }
+
     func testScanOnceProcessesPending() async throws {
         let (cfg, _) = try makeEnv()
         let results = await Scanner.scanOnce(

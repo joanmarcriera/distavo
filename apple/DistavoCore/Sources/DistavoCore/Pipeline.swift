@@ -225,7 +225,15 @@ public enum Pipeline {
         do {
             let wavPath = workDir.appendingPathComponent("\(base).wav")
             deps.onPhase?(.converting)
-            try await deps.convertToWav(path, wavPath)
+            // A prior attempt (e.g. one that later hit a RetryableDependencyError
+            // at the transcribe stage) may have already produced a good WAV for
+            // this exact source file — re-converting it is wasted work on every
+            // retry of a slow AVFoundation pass. Only trust it when it is newer
+            // than the source recording, so an edited/re-recorded file still
+            // gets a fresh conversion.
+            if !wavIsFresh(wavPath: wavPath, sourcePath: path) {
+                try await deps.convertToWav(path, wavPath)
+            }
 
             deps.onPhase?(.transcribing)
             let result = try await deps.transcribe(wavPath, config.transcribe)
@@ -254,7 +262,17 @@ public enum Pipeline {
             return ProcessResult(status: .done, base: base, message: "note written",
                                  notePath: notePath, transcriptPath: transcriptPath)
         } catch let retry as RetryableDependencyError {
+            // I2: grow the wait with each consecutive deferral (60 s, 120 s,
+            // 240 s, … capped at 1800 s) instead of retrying on every scan —
+            // a dependency that stays offline for a while (or a model folder
+            // that keeps failing its manifest check) would otherwise be
+            // hammered every watch-interval tick. `deferredAttempt` reads the
+            // count from *before* this deferral, so the first one always backs
+            // off 60 s regardless of how the caller sequences retries.
+            let attempt = state.deferredAttempt(base)
+            let backoff = min(1800.0, 60.0 * pow(2.0, Double(attempt)))
             state.clearProcessing(base)
+            state.markDeferred(base, retryAfter: backoff)
             return ProcessResult(status: .deferred, base: base, message: retry.message)
         } catch {
             let message = cleanMessage(error)
@@ -267,6 +285,18 @@ public enum Pipeline {
     /// Prefer a typed error's human message over the default struct description.
     static func cleanMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "\(error)"
+    }
+
+    /// True when `wavPath` already exists and was written at or after
+    /// `sourcePath`'s modification date — i.e. it is a previous, complete
+    /// conversion of this exact recording, not a stale leftover from an older
+    /// file that happened to share a base name.
+    static func wavIsFresh(wavPath: URL, sourcePath: URL) -> Bool {
+        let fm = FileManager.default
+        guard let wavDate = (try? fm.attributesOfItem(atPath: wavPath.path))?[.modificationDate] as? Date,
+              let sourceDate = (try? fm.attributesOfItem(atPath: sourcePath.path))?[.modificationDate] as? Date
+        else { return false }
+        return wavDate >= sourceDate
     }
 }
 

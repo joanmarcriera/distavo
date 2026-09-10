@@ -238,4 +238,80 @@ final class StateTests: XCTestCase {
         store.markDone("a")
         XCTAssertTrue(store.failedBases().isEmpty)
     }
+
+    // MARK: Deferral backoff (I2)
+
+    func testMarkDeferredSetsAttemptOneAndNotBeforeTime() throws {
+        let store = try freshStore()
+        XCTAssertEqual(store.deferredAttempt("a"), 0)
+        let fixedNow = Date(timeIntervalSince1970: 1_000_000)
+        store.markDeferred("a", retryAfter: 60, now: { fixedNow })
+        XCTAssertEqual(store.deferredAttempt("a"), 1)
+        let until = try XCTUnwrap(store.deferredUntil("a"))
+        XCTAssertEqual(until.timeIntervalSince1970, fixedNow.timeIntervalSince1970 + 60, accuracy: 1)
+    }
+
+    func testDeferredAttemptIncrementsOnEachDefer() throws {
+        let store = try freshStore()
+        store.markDeferred("a", retryAfter: 60)
+        XCTAssertEqual(store.deferredAttempt("a"), 1)
+        store.markDeferred("a", retryAfter: 120)
+        XCTAssertEqual(store.deferredAttempt("a"), 2)
+        store.markDeferred("a", retryAfter: 240)
+        XCTAssertEqual(store.deferredAttempt("a"), 3)
+    }
+
+    func testClearDeferredRemovesTheMarker() throws {
+        let store = try freshStore()
+        store.markDeferred("a", retryAfter: 60)
+        XCTAssertNotNil(store.deferredUntil("a"))
+        store.clearDeferred("a")
+        XCTAssertNil(store.deferredUntil("a"))
+        XCTAssertEqual(store.deferredAttempt("a"), 0)
+    }
+
+    func testMarkDoneClearsADeferral() throws {
+        let store = try freshStore()
+        store.markDeferred("a", retryAfter: 60)
+        store.markDone("a")
+        XCTAssertNil(store.deferredUntil("a"))
+    }
+
+    func testMarkFailedClearsADeferral() throws {
+        let store = try freshStore()
+        store.markDeferred("a", retryAfter: 60)
+        store.markFailed("a", "boom")
+        XCTAssertNil(store.deferredUntil("a"))
+    }
+
+    /// "Process now" must not make the user wait out a backoff window.
+    func testRetryFailedClearsDeferredMarkers() throws {
+        let store = try freshStore()
+        store.markDeferred("a", retryAfter: 1800)
+        store.retryFailed()
+        XCTAssertNil(store.deferredUntil("a"))
+    }
+
+    /// The whole point of I2: a base deferred into the future must not be
+    /// handed back out by iterPending, but becomes pending again once the
+    /// not-before time has passed.
+    func testIterPendingSkipsDeferredUntilWindowPassesThenReturns() throws {
+        let dir = tempDir()
+        let rec = dir.appendingPathComponent("recordings")
+        try write("a", to: rec.appendingPathComponent("demo.opus"))
+        let state = try DistavoState.Store(
+            stateDir: dir.appendingPathComponent(".state"),
+            notesDir: dir.appendingPathComponent("notes"))
+
+        let fixedNow = Date(timeIntervalSince1970: 1_000_000)
+        state.markDeferred("demo", retryAfter: 60, now: { fixedNow })
+
+        let stillWaiting = DistavoState.iterPending(
+            recordingsDir: rec, state: state, now: { fixedNow.addingTimeInterval(30) })
+        XCTAssertTrue(stillWaiting.isEmpty, "must be skipped while inside the backoff window")
+
+        let afterWindow = DistavoState.iterPending(
+            recordingsDir: rec, state: state, now: { fixedNow.addingTimeInterval(61) })
+        XCTAssertEqual(afterWindow.map(\.lastPathComponent), ["demo.opus"])
+    }
 }

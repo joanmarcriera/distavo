@@ -193,7 +193,10 @@ public actor EmbeddedTranscriber {
             let results: [TranscriptionResult]
             do {
                 let whisper = try await WhisperKit(whisperConfig)
-                if model.whisperKitRepo != nil {
+                if firstRun, model.whisperKitRepo != nil {
+                    // Verified once, right after the download; a later
+                    // on-disk corruption is caught by WhisperKit's own load
+                    // failure.
                     try Self.verifyManifest(model: model)
                 }
                 await self.report("Transcribing on this Mac…")
@@ -265,7 +268,17 @@ public actor EmbeddedTranscriber {
         do {
             try ModelManifestCheck.verify(folder: dir)
         } catch {
-            try? FileManager.default.removeItem(at: dir)
+            do {
+                try FileManager.default.removeItem(at: dir)
+            } catch let removeError {
+                // Swallowing this would leave the same corrupt folder in
+                // place to be re-verified (and fail again) on every future
+                // load — surface it instead so the user can clear it by hand.
+                throw RetryableDependencyError(
+                    "The \(model.displayName) download was incomplete and Distavo could not "
+                        + "remove it (\(removeError.localizedDescription)) — remove downloaded "
+                        + "models in Settings and it will download again.")
+            }
             throw RetryableDependencyError(
                 "The \(model.displayName) download was incomplete — Distavo will download it again.")
         }

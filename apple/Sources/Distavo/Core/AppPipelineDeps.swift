@@ -17,16 +17,20 @@ extension PipelineDeps {
             guard transcribeConfig.backend == "embedded" else {
                 return try await serverTranscribe(wavURL, transcribeConfig)
             }
-            // Spec §5.9: detect only when both model and language are automatic,
-            // route in DistavoCore, then dispatch on the engine. Retryable
-            // conditions surface as RetryableDependencyError and defer.
-            let detections = EngineRouter.needsDetection(transcribeConfig)
+            // Spec §5.2/§5.9: detect only when both model and language are
+            // automatic, route in DistavoCore, then dispatch on the engine.
+            // The "Using …" engine line is shown whenever the MODEL is
+            // automatic (even with a fixed language, so the user still sees
+            // which engine the router picked). Retryable conditions surface
+            // as RetryableDependencyError and defer.
+            let needsDetection = EngineRouter.needsDetection(transcribeConfig)
+            let detections = needsDetection
                 ? try await LanguageDetector.shared.detect(wavURL: wavURL) : []
             let decision = EngineRouter.choose(
                 detections: detections, config: transcribeConfig,
                 memoryBytes: HardwareProbe.physicalMemoryBytes)
             if let note = decision.note { await ModelCoordinator.shared.report(note) }
-            if EngineRouter.needsDetection(transcribeConfig) {
+            if EmbeddedModelCatalog.isAutomatic(transcribeConfig.embeddedModel) {
                 await ModelCoordinator.shared.report(
                     "Using \(decision.model.displayName)" + (decision.languageHint.map { " (\($0))" } ?? ""))
             }

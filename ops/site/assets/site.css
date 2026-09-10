@@ -623,3 +623,19 @@ h1 {
     padding: 22px 0;
   }
 }
+
+@media (max-width: 640px) {
+  .nav-links {
+    gap: 10px;
+    font-size: 0.82rem;
+  }
+
+  .nav-links a {
+    white-space: nowrap;
+  }
+
+  .nav-links a[href="#recording-tools"],
+  .nav-links a[href="/feedback/"] {
+    display: none;
+  }
+}

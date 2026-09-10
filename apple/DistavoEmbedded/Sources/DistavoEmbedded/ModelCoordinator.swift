@@ -31,8 +31,20 @@ public actor ModelCoordinator {
         return EmbeddedModelStore.isDownloaded(EmbeddedModelCatalog.model(id: id)) ? .ready : .absent
     }
 
+    /// Start tracking a download. Progress fractions are only recorded for ids
+    /// that were begun and not yet finished, so a callback that lands after the
+    /// terminal reset cannot resurrect a "downloading" state (Task 11 review).
+    public func beginDownload(id: String) { downloading[id] = 0 }
+
+    /// Record progress (`fraction` non-nil) or clear it (`nil`, the terminal
+    /// reset on both the success and failure path). A non-nil fraction is only
+    /// applied while `id` is already being tracked (via `beginDownload`) — a
+    /// progress callback that races past the terminal reset is silently
+    /// ignored instead of re-inserting a stale "downloading" entry that
+    /// nothing would ever clear again.
     public func noteDownload(id: String, fraction: Double?) {
-        if let f = fraction { downloading[id] = f } else { downloading[id] = nil }
+        guard let f = fraction else { downloading[id] = nil; return }
+        if downloading[id] != nil { downloading[id] = f }
     }
 
     public func cancelDownloads() { cancelRequested = true }

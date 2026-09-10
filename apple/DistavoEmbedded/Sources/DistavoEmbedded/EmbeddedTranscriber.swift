@@ -177,7 +177,7 @@ public actor EmbeddedTranscriber {
             let firstRun = !EmbeddedModelStore.isDownloaded(model)
             if firstRun {
                 try coordinator.ensureFreeSpace(forMB: model.downloadMB)
-                await coordinator.noteDownload(id: model.id, fraction: 0)
+                await coordinator.beginDownload(id: model.id)
                 await self.report("Downloading \(model.displayName) — \(model.downloadLabel), one-time…")
             } else {
                 await self.report("Loading \(model.displayName)…")

@@ -34,6 +34,7 @@ public actor ParakeetTranscriber {
             let firstRun = !EmbeddedModelStore.isDownloaded(model)
             if firstRun {
                 try coordinator.ensureFreeSpace(forMB: model.downloadMB)
+                await coordinator.beginDownload(id: model.id)
                 await coordinator.report("Downloading \(model.displayName) — \(model.downloadLabel), one-time…")
             } else {
                 await coordinator.report("Loading \(model.displayName)…")

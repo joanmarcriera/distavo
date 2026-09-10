@@ -33,6 +33,18 @@ final class ModelCoordinatorTests: XCTestCase {
         XCTAssertGreaterThan(EmbeddedModelStore.freeSpaceBytes(at: missing), 0)
     }
 
+    func testLateProgressAfterResetIsIgnored() async {
+        let c = ModelCoordinator()
+        await c.beginDownload(id: "m")
+        await c.noteDownload(id: "m", fraction: 0.5)
+        let midway = await c.readiness(of: "m")
+        XCTAssertEqual(midway, .downloading(fraction: 0.5))
+        await c.noteDownload(id: "m", fraction: nil)           // terminal reset
+        await c.noteDownload(id: "m", fraction: 0.9)           // late callback
+        let after = await c.readiness(of: "m")
+        XCTAssertNotEqual(after, .downloading(fraction: 0.9))  // must not resurrect
+    }
+
     func testStorePathsLiveUnderTheSingleModelsFolder() {
         let root = EmbeddedModelStore.modelsDirectory.path
         XCTAssertTrue(EmbeddedModelStore.parakeetDirectory.path.hasPrefix(root))

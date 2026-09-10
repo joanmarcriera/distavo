@@ -16,6 +16,21 @@ final class NoticesCoverageTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
+    /// Converts a WhisperKit *folder* name (`org_name`, using `_` to join the
+    /// Hugging Face org and model name — e.g. "openai_whisper-tiny") into the
+    /// actual Hugging Face *repository* name ("openai/whisper-tiny"). NOTICES.md
+    /// is expected to credit the repository, not WhisperKit's on-disk naming
+    /// convention, so every required string here is checked in that form —
+    /// this test must never fail again just because a folder name and its
+    /// repo name look different. A name with no underscore (already a
+    /// repository string, or with nothing to split) passes through unchanged.
+    private func repositoryForm(_ name: String) -> String {
+        guard let underscore = name.firstIndex(of: "_") else { return name }
+        var repo = name
+        repo.replaceSubrange(underscore...underscore, with: "/")
+        return repo
+    }
+
     func testEveryDownloadableHuggingFaceRepoIsCredited() throws {
         let notices = try noticesText()
 
@@ -27,14 +42,18 @@ final class NoticesCoverageTests: XCTestCase {
             // Whisper tokenizer, fetched regardless of variant.
             "openai/whisper-large-v3",
             // The language-detector variant (whisper-tiny) downloaded on
-            // first "Automatic" use.
-            EmbeddedModelCatalog.languageDetectorName,
+            // first "Automatic" use — the catalog stores this as a WhisperKit
+            // folder name ("openai_whisper-tiny"), converted here to the
+            // repository NOTICES.md actually credits ("openai/whisper-tiny").
+            repositoryForm(EmbeddedModelCatalog.languageDetectorName),
             // NVIDIA Parakeet TDT 0.6B v3, Core ML conversion.
             "FluidInference/parakeet-tdt-0.6b-v3-coreml",
         ]
         // Every custom (non-Argmax) whisperKitRepo the catalog can route to
-        // (currently Distavo's own BSC Languages-of-Spain conversions).
-        let customRepos = Set(EmbeddedModelCatalog.models.compactMap(\.whisperKitRepo))
+        // (currently Distavo's own BSC Languages-of-Spain conversions). These
+        // are already stored in repository form, so repositoryForm() is a
+        // no-op on them (no underscore to split).
+        let customRepos = Set(EmbeddedModelCatalog.models.compactMap(\.whisperKitRepo)).map(repositoryForm)
         required.append(contentsOf: customRepos)
 
         let missing = required.filter { !notices.contains($0) }

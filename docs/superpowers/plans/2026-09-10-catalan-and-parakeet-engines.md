@@ -1828,8 +1828,18 @@ git commit -m "feat(settings): grouped engine picker with Automatic, preferred C
 
 ### Task 14: Convert and publish the BSC models (spike first, then both)
 
+**Status 2026-09-10 (controller, out of band):** Steps 1, 2, 3 and 5 are DONE — `convert.sh` and
+`manifest.py` exist (commits a57c791, d91823a, 4c9bb80: repo creation and a safetensors re-save
+step were needed, see the script's comments), and both models are published under
+`Joanmarcriera/distavo-whisperkit-coreml` with manifests: `BSC-LT_whisper-large-v3-LoS` (source
+revision e562381fff61707117dffb9de6d699905d78f8ef) and `BSC-LT_whisper-large-v3-ca-punctuated-3370h`
+(source 5a5fb60f977e349e9d8d1fac1ecbb945c1e81b0a), 3.10 GB / 21 files each, ~40 min per model on
+the M5 Pro. **What remains: Step 4 (prove the artefact through the app engine) and Step 6 (README).**
+
 **Files:**
-- Create: `tools/whisperkit-models/convert.sh`, `tools/whisperkit-models/manifest.py`, `tools/whisperkit-models/README.md`
+- Exists: `tools/whisperkit-models/convert.sh`, `tools/whisperkit-models/manifest.py`
+- Create: `tools/whisperkit-models/README.md`
+- Modify: `apple/DistavoEmbedded/Tests/DistavoEmbeddedTests/EmbeddedPipelineLiveTests.swift` (env vars for model and language)
 
 **Interfaces:**
 - Produces: Hugging Face repo `Joanmarcriera/distavo-whisperkit-coreml` with folders `BSC-LT_whisper-large-v3-LoS/` and `BSC-LT_whisper-large-v3-ca-punctuated-3370h/`, each containing the WhisperKit Core ML files plus `manifest.json`.
@@ -1886,17 +1896,17 @@ print(json.dumps({"source_model": source, "source_revision": source_rev,
                   "whisperkittools": tools_rev, "files": files}, indent=2))
 ```
 
-- [ ] **Step 3: Spike on LoS** — `chmod +x tools/whisperkit-models/convert.sh && tools/whisperkit-models/convert.sh BSC-LT/whisper-large-v3-LoS 2>&1 | tail -5`. Expect ~30–60 min on the M5 Pro. If `whisperkit-generate-model` fails on a fine-tune (it uses `openai/whisper-large-v3` defaults for config), pass through its `-h` options for the config source or vendor the two `.json` files from the source repo; record what was needed in the README.
+- [x] **Step 3: Spike on LoS** — done by the controller (see Status above; log in `tools/whisperkit-models/.work/convert-LoS.log`).
 
-- [ ] **Step 4: Prove the artefact** with the app's own engine, from a clean folder: temporarily set `transcribe.embedded_model = "bsc-los"`, `language = "ca"` in a **scratch config** and run the embedded live test on the 2026-07-23 recording:
+- [ ] **Step 4: Prove the artefact** with the app's own engine, from a clean folder. Extend `EmbeddedPipelineLiveTests` to honour `DISTAVO_PIPELINE_MODEL` (catalog id, default `large-v3-turbo`) and `DISTAVO_PIPELINE_LANGUAGE` (Whisper code or `auto`, default `en`) by building the `TranscribeConfig` it passes to `EmbeddedTranscriber.shared.transcribe(wavURL:model:languageHint:config:)` from them (model via `EmbeddedModelCatalog.model(id:)`, hint nil for `auto`), and print — metrics only, never transcript text — the model id, the folder it loaded from (`EmbeddedModelStore.whisperKitDirectory(repo:variant:)`), wall-clock, word count and whether word timestamps were present. Then run it on the 2026-07-23 recording:
 ```bash
 cd apple/DistavoEmbedded && DISTAVO_PIPELINE_LIVE=1 DISTAVO_PIPELINE_AUDIO="$HOME/Library/Application Support/Distavo/work/Meeting_2026-07-23_10.58.50.wav" DISTAVO_PIPELINE_OUT=/private/tmp/claude-501/bsc-spike swift test --filter EmbeddedPipelineLiveTests 2>&1 | tail -15
 ```
-(Extend that test to honour `DISTAVO_PIPELINE_MODEL` and `DISTAVO_PIPELINE_LANGUAGE` env vars if it does not already.) Expected: cold download from the custom repo, tokenizer resolved to `openai/whisper-large-v3`, transcript written, word timestamps present, second run offline (`networksetup -setairportpower en0 off` or unplug) loads from disk. Record wall-clock and the transcript word count in the README.
+with `DISTAVO_PIPELINE_MODEL=bsc-los DISTAVO_PIPELINE_LANGUAGE=ca` and `DISTAVO_PIPELINE_OLLAMA` unset (skip summarising if the test supports it; otherwise point it at `http://127.0.0.1:11434` with `gemma4:26b`, which is running on this Mac). Expected: cold download from the custom repo into `~/Library/Application Support/Distavo/models/models/Joanmarcriera/distavo-whisperkit-coreml/BSC-LT_whisper-large-v3-LoS`, tokenizer resolved to `openai/whisper-large-v3` (folder `models/openai/whisper-large-v3` appears), transcript written to `DISTAVO_PIPELINE_OUT`, word timestamps present, and a second run with Wi-Fi off (`networksetup -setairportpower en0 off`, then back on) loads from disk without any download. Record wall-clock, model load time and the transcript word count (today's WhisperKit-turbo transcript of the same file has 7,144 words) in the README. Never paste transcript text anywhere.
 
-- [ ] **Step 5: Convert the second model** — `tools/whisperkit-models/convert.sh BSC-LT/whisper-large-v3-ca-punctuated-3370h`.
+- [x] **Step 5: Convert the second model** — done by the controller (log in `tools/whisperkit-models/.work/convert-ca3370h.log`).
 
-- [ ] **Step 6: README** with the two source revisions, the whisperkittools commit, sizes, and the verification results from Step 4. Commit:
+- [ ] **Step 6: README** (`tools/whisperkit-models/README.md`): usage, the two source revisions and publish date, the whisperkittools commit actually installed (read it from `tools/whisperkit-models/.work/venv` — `pip show whisperkittools` or the git URL in `pip freeze`), sizes (3.10 GB / 21 files each), the two traps the script handles (repo must exist; `.bin` → safetensors because torch 2.5 refuses `.bin`), and the Step 4 verification numbers. Commit:
 
 ```bash
 git add tools/whisperkit-models

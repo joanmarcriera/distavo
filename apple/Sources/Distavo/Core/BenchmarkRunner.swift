@@ -39,30 +39,42 @@ enum BenchmarkRunner {
         var config = baseConfig
         config.diarize = false   // measure the engine, not the diariser
         for (i, model) in models.enumerated() {
-            await ModelCoordinator.shared.report("Benchmark \(i + 1) of \(models.count): \(model.displayName)…")
-            let sampler = MemorySampler()
-            sampler.start()
-            let started = Date()
-            var error: String?
-            do {
-                switch model.engine {
-                case .whisperKit:
-                    _ = try await EmbeddedTranscriber.shared.transcribe(
-                        wavURL: fixture, model: model, languageHint: "en", config: config)
-                case .parakeet:
-                    _ = try await ParakeetTranscriber.shared.transcribe(
-                        wavURL: fixture, languageHint: "en", config: config)
+            // Two passes, keep the faster: the first pass on a 30 s fixture is
+            // dominated by Core ML's one-time model specialisation, which a
+            // real recording never pays again on this Mac; the second pass is
+            // what every later meeting costs (the model is still loaded per
+            // call — that load is included, only the compile is not).
+            var best: BenchmarkResult?
+            for pass in 1...2 {
+                await ModelCoordinator.shared.report(
+                    "Benchmark \(i + 1) of \(models.count): \(model.displayName) (pass \(pass) of 2)…")
+                let sampler = MemorySampler()
+                sampler.start()
+                let started = Date()
+                var error: String?
+                do {
+                    switch model.engine {
+                    case .whisperKit:
+                        _ = try await EmbeddedTranscriber.shared.transcribe(
+                            wavURL: fixture, model: model, languageHint: "en", config: config)
+                    case .parakeet:
+                        _ = try await ParakeetTranscriber.shared.transcribe(
+                            wavURL: fixture, languageHint: "en", config: config)
+                    }
+                } catch let e {
+                    error = (e as? LocalizedError)?.errorDescription ?? "\(e)"
                 }
-            } catch let e {
-                error = (e as? LocalizedError)?.errorDescription ?? "\(e)"
+                let elapsed = Date().timeIntervalSince(started)
+                let peak = sampler.stop()
+                let result = BenchmarkResult(
+                    modelID: model.id,
+                    secondsPerAudioMinute: error == nil ? elapsed / (audioSeconds / 60) : 0,
+                    peakMemoryMB: peak > 0 ? Int(peak / (1024 * 1024)) : nil,
+                    error: error)
+                if error != nil { best = result; break }   // no point in a second pass
+                if best == nil || result.secondsPerAudioMinute < best!.secondsPerAudioMinute { best = result }
             }
-            let elapsed = Date().timeIntervalSince(started)
-            let peak = sampler.stop()
-            results.append(BenchmarkResult(
-                modelID: model.id,
-                secondsPerAudioMinute: error == nil ? elapsed / (audioSeconds / 60) : 0,
-                peakMemoryMB: peak > 0 ? Int(peak / (1024 * 1024)) : nil,
-                error: error))
+            if let best { results.append(best) }
         }
         return results
     }

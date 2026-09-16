@@ -196,6 +196,8 @@ public struct Config: Codable, Equatable {
     /// the owner's role, the other participants) and hand that to the
     /// summariser as authoritative context (Vikunja #2182).
     public var askSpeakersOnStop: Bool
+    /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
+    public var benchmark: [BenchmarkResult]
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -205,6 +207,7 @@ public struct Config: Codable, Equatable {
         case minRecordingSeconds = "min_recording_seconds"
         case compactRecordingsAfterNote = "compact_recordings_after_note"
         case askSpeakersOnStop = "ask_speakers_on_stop"
+        case benchmark
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -217,7 +220,8 @@ public struct Config: Codable, Equatable {
                 userSpeaker: String = "unknown",
                 minRecordingSeconds: Int = 15,
                 compactRecordingsAfterNote: Bool = false,
-                askSpeakersOnStop: Bool = true) {
+                askSpeakersOnStop: Bool = true,
+                benchmark: [BenchmarkResult] = []) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -225,6 +229,7 @@ public struct Config: Codable, Equatable {
         self.minRecordingSeconds = minRecordingSeconds
         self.compactRecordingsAfterNote = compactRecordingsAfterNote
         self.askSpeakersOnStop = askSpeakersOnStop
+        self.benchmark = benchmark
     }
 
     public init(from decoder: Decoder) throws {
@@ -241,6 +246,7 @@ public struct Config: Codable, Equatable {
         minRecordingSeconds = try c.decodeIfPresent(Int.self, forKey: .minRecordingSeconds) ?? d.minRecordingSeconds
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
+        benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
     }
 
     // MARK: Paths

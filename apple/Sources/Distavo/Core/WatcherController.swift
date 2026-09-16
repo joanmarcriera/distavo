@@ -569,6 +569,41 @@ final class WatcherController: ObservableObject {
         refreshActivity()
     }
 
+    /// "Benchmark this Mac" (Vikunja #2160): measure every downloaded engine
+    /// under the scanner's lock, store the results in the config and log them.
+    @Published private(set) var benchmarkRunning = false
+
+    func runBenchmark() {
+        guard !benchmarkRunning else { return }
+        benchmarkRunning = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.benchmarkRunning = false }
+            while self.isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+            self.isScanning = true
+            defer { self.isScanning = false }
+            let models = BenchmarkRunner.downloadedModels()
+            guard !models.isEmpty else {
+                self.modelProgress = "Nothing to benchmark — download a model first."
+                return
+            }
+            self.log("Benchmarking \(models.count) downloaded model(s) on this Mac")
+            let results = await BenchmarkRunner.run(
+                models: models, workDir: Config.resolvePath(self.config.workDir),
+                baseConfig: self.config.transcribe)
+            self.config.benchmark = results
+            self.persist()
+            for r in results {
+                let name = EmbeddedModelCatalog.model(id: r.modelID).displayName
+                self.log(r.error.map { "Benchmark \(name): failed — \($0)" }
+                    ?? "Benchmark \(name): \(String(format: "%.1f", r.secondsPerAudioMinute)) s per minute of audio"
+                       + (r.peakMemoryMB.map { ", peak \($0) MB" } ?? ""))
+            }
+            self.modelProgress = "Benchmark finished — recommended: "
+                + Benchmark.recommended(results: results, memoryBytes: HardwareProbe.physicalMemoryBytes).displayName
+        }
+    }
+
     /// "Process now" clears failed markers so every file gets retried, then scans.
     func processNow() {
         Task { [weak self] in

@@ -121,12 +121,16 @@ public enum EmbeddedModelCatalog {
         models.first { $0.id == id } ?? models.first { $0.id == defaultModelID }!
     }
 
-    /// Entries this Mac may run (spec §6 memory gate).
+    /// Entries this Mac may run (spec §6 memory gate). A model that has
+    /// actually been benchmarked successfully on this Mac (`measuredOK`,
+    /// Vikunja #2160) is offered regardless of the memory floor — the
+    /// measurement beats the assumption (#2157).
     public static func selectable(
-        memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes
+        memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes,
+        measuredOK: Set<String> = []
     ) -> [EmbeddedModel] {
         let gb = Int(memoryBytes / (1024 * 1024 * 1024))
-        return models.filter { $0.minimumMemoryGB <= gb }
+        return models.filter { $0.minimumMemoryGB <= gb || measuredOK.contains($0.id) }
     }
 
     /// Marc's rule: recommend a model the user's Mac can actually run.

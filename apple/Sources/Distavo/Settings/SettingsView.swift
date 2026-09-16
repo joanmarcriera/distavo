@@ -39,8 +39,11 @@ struct SettingsView: View {
             + WhisperLanguageCatalog.all
     }
 
-    /// Models this Mac's memory can actually run (spec §6 gate).
-    private var selectableIDs: Set<String> { Set(EmbeddedModelCatalog.selectable().map(\.id)) }
+    /// Models this Mac's memory can actually run (spec §6 gate), plus any the
+    /// benchmark has shown to run here (Vikunja #2160).
+    private var selectableIDs: Set<String> {
+        Set(EmbeddedModelCatalog.selectable(measuredOK: Benchmark.measuredOK(controller.config.benchmark)).map(\.id))
+    }
     /// Whether this Mac can run the BSC Catalan family — both `bsc-los` and
     /// `bsc-ca-3370h` share the same 16 GB floor, so one check governs both the
     /// "Preferred Catalan model" picker's visibility and what "Download now" fetches.
@@ -194,6 +197,7 @@ struct SettingsView: View {
                         let m = EmbeddedModelCatalog.model(id: draft.transcribe.embeddedModel)
                         Text("\(m.detail) \(m.ramLabel).").font(.caption).foregroundStyle(.secondary)
                     }
+                    BenchmarkButton(controller: controller)
                     let unselectable = EmbeddedModelCatalog.models.filter { !selectableIDs.contains($0.id) }
                     if !unselectable.isEmpty {
                         Text("Not offered on this Mac (needs more memory): \(unselectable.map(\.displayName).joined(separator: ", ")).")

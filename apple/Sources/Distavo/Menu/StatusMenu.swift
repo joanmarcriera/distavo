@@ -61,6 +61,7 @@ struct StatusMenu: View {
         }
 
         Button("Process now") { controller.processNow() }
+        Button("Process a recording with…") { controller.processRecordingWith() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)
         Button("Open last note") { controller.openLastNote() }

@@ -154,6 +154,34 @@ public struct PipelineDeps {
     }
 }
 
+/// A one-off run of a recording with a specific engine/model and language,
+/// chosen by the user in "Process a recording with…" (Vikunja #2159). The
+/// note lands beside the normal one under `<base>@<suffix>.md`, with its own
+/// markers, so it never collides with (or pre-empts) the automatic run of
+/// the same file; the source recording is never compacted on a variant run.
+public struct ProcessVariant: Equatable, Sendable {
+    /// Filename-safe tag, e.g. "bsc-los-ca" — see `suffix(model:language:)`.
+    public let suffix: String
+    /// The transcribe settings to use instead of the config's.
+    public let transcribe: TranscribeConfig
+
+    public init(suffix: String, transcribe: TranscribeConfig) {
+        self.suffix = DistavoState.sanitizeJoined(suffix)
+        self.transcribe = transcribe
+    }
+
+    /// "<model id>-<language code or auto>", sanitised for a filename.
+    public static func suffix(model: String, language: String) -> String {
+        let lang = language.isEmpty ? "auto" : language
+        return DistavoState.sanitizeJoined("\(model)-\(lang)")
+    }
+
+    /// The variant's base name for `base`: `@` never survives
+    /// `DistavoState.baseFor`'s sanitising, so a variant base can never be a
+    /// real recording's base.
+    public func base(for base: String) -> String { "\(base)@\(suffix)" }
+}
+
 /// Port of `meeting_pipeline/pipeline.py`.
 public enum Pipeline {
 
@@ -197,10 +225,12 @@ public enum Pipeline {
 
     public static func processOne(
         path: URL, config: Config, deps: PipelineDeps,
-        stableChecks: Int = 3, stableDelay: Double = 2.0
+        stableChecks: Int = 3, stableDelay: Double = 2.0,
+        variant: ProcessVariant? = nil
     ) async -> ProcessResult {
         let recordingsDir = Config.resolvePath(config.recordingsDir)
-        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: path)
+        let sourceBase = DistavoState.baseFor(recordingsDir: recordingsDir, path: path)
+        let base = variant?.base(for: sourceBase) ?? sourceBase
         let notesDir = Config.resolvePath(config.notesDir)
         let workDir = Config.resolvePath(config.workDir)
 
@@ -250,11 +280,12 @@ public enum Pipeline {
         try? FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
         let notePath = state.notePath(base)
 
-        // The owner's post-recording description of the meeting, if any:
-        // its speaker count is authoritative for diarisation, and the
-        // participants text goes into the prompt.
-        let hints = SpeakerHints.load(workDir: workDir, base: base)
-        var transcribeConfig = config.transcribe
+        // The owner's post-recording description of the meeting, if any
+        // (keyed by the recording, so a variant run gets it too): its speaker
+        // count is authoritative for diarisation, and the participants text
+        // goes into the prompt.
+        let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
+        var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -306,7 +337,7 @@ public enum Pipeline {
             }
             state.markDone(base)
             var message = "note written"
-            if config.compactRecordingsAfterNote,
+            if config.compactRecordingsAfterNote, variant == nil,
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }

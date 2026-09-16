@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import DistavoCore
 import DistavoEmbedded
 
@@ -449,6 +450,124 @@ final class WatcherController: ObservableObject {
     }
 
     // MARK: Manual actions (menu)
+
+    /// "Process a recording with…" (Vikunja #2159): pick a file, then an
+    /// engine/model and a language, and run the pipeline once with those
+    /// settings. The note is written beside the normal one as
+    /// `<base>@<model>-<language>.md`, with its own markers, so the automatic
+    /// run of the same file is neither pre-empted nor duplicated. The tool
+    /// for comparing models on a real meeting without a terminal.
+    func processRecordingWith() {
+        let panel = NSOpenPanel()
+        panel.title = "Process a recording with…"
+        panel.message = "Choose a recording; you will pick the engine and language next."
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = supportedExtensions.compactMap { UTType(filenameExtension: String($0.dropFirst())) }
+        panel.directoryURL = Config.resolvePath(config.recordingsDir)
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let variant = chooseVariant(for: url) else { return }
+        Task { [weak self] in await self?.runVariant(variant, on: url) }
+    }
+
+    /// The model + language sheet. Built-in engine: every catalog model plus
+    /// Automatic; WhisperX server: its model sizes. Language: Automatic (the
+    /// router picks) / Auto-detect within the model / a fixed language.
+    private func chooseVariant(for url: URL) -> ProcessVariant? {
+        var chosen = config.transcribe
+        let embedded = chosen.backend == "embedded" && HardwareProbe.supportsEmbeddedTranscription
+
+        let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        var modelIDs: [String] = []
+        if embedded {
+            modelPopup.addItem(withTitle: "Automatic (route by language)")
+            modelIDs.append(EmbeddedModelCatalog.automaticID)
+            for m in EmbeddedModelCatalog.models {
+                modelPopup.addItem(withTitle: "\(m.displayName) — \(m.downloadLabel), \(m.ramLabel)")
+                modelIDs.append(m.id)
+            }
+            modelPopup.selectItem(at: max(0, modelIDs.firstIndex(of: chosen.embeddedModel) ?? 0))
+        } else {
+            for size in ["tiny", "base", "small", "medium", "large-v2", "large-v3"] {
+                modelPopup.addItem(withTitle: size)
+                modelIDs.append(size)
+            }
+            modelPopup.selectItem(at: max(0, modelIDs.firstIndex(of: chosen.model) ?? 0))
+        }
+
+        let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        var languageCodes: [String] = []
+        if embedded {
+            languagePopup.addItem(withTitle: "Automatic — pick the engine by language")
+            languageCodes.append(EmbeddedModelCatalog.automaticID)
+        }
+        for lang in WhisperLanguageCatalog.all {
+            languagePopup.addItem(withTitle: lang.code.isEmpty ? "Auto-detect within the chosen model" : lang.englishName)
+            languageCodes.append(lang.code)
+        }
+        languagePopup.selectItem(at: max(0, languageCodes.firstIndex(of: chosen.language) ?? 0))
+
+        func row(_ label: String, _ control: NSView) -> NSView {
+            let text = NSTextField(labelWithString: label)
+            text.alignment = .right
+            text.widthAnchor.constraint(equalToConstant: 90).isActive = true
+            control.widthAnchor.constraint(equalToConstant: 340).isActive = true
+            let stack = NSStackView(views: [text, control])
+            stack.orientation = .horizontal
+            stack.alignment = .firstBaseline
+            return stack
+        }
+        let form = NSStackView(views: [row(embedded ? "Model:" : "WhisperX model:", modelPopup),
+                                       row("Language:", languagePopup)])
+        form.orientation = .vertical
+        form.alignment = .trailing
+        form.spacing = 8
+        form.frame = NSRect(x: 0, y: 0, width: 440, height: 64)
+
+        let alert = NSAlert()
+        alert.messageText = "Process “\(url.lastPathComponent)” with…"
+        alert.informativeText = "The note is written beside the normal one, named after the model and language, so you can compare them. The automatic run is not affected."
+        alert.accessoryView = form
+        alert.addButton(withTitle: "Process")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+        let modelID = modelIDs[max(0, modelPopup.indexOfSelectedItem)]
+        let language = languageCodes[max(0, languagePopup.indexOfSelectedItem)]
+        if embedded { chosen.embeddedModel = modelID } else { chosen.model = modelID }
+        chosen.language = language
+        return ProcessVariant(suffix: ProcessVariant.suffix(model: modelID, language: language),
+                              transcribe: chosen)
+    }
+
+    /// Run one variant under the same single-flight lock as the scanner, so
+    /// it never overlaps a timer tick (the built-in engines share memory and
+    /// the model folder).
+    private func runVariant(_ variant: ProcessVariant, on url: URL) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let cfg = config
+        processingActive = true
+        processingPhase = .loading
+        status = "Processing \(url.lastPathComponent) with \(variant.suffix)…"
+        log("Processing \(url.lastPathComponent) with \(variant.suffix)")
+        refreshActivity()
+        // A repeat of the same variant is a deliberate re-run: clear its markers.
+        store()?.clearFailed(variant.base(for: DistavoState.baseFor(
+            recordingsDir: Config.resolvePath(cfg.recordingsDir), path: url)))
+        let result = await Pipeline.processOne(path: url, config: cfg, deps: deps, variant: variant)
+        if result.status == .skipped {
+            notifier.notify(title: "Already processed with \(variant.suffix)",
+                            body: "\(result.base).md exists — open the notes folder to compare.")
+        }
+        handle(result)
+        processingActive = false
+        refreshFailedRecordings()
+        refreshActivity()
+    }
 
     /// "Process now" clears failed markers so every file gets retried, then scans.
     func processNow() {

@@ -228,6 +228,60 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: small).count, 2)
     }
 
+    // MARK: "Process a recording with…" variants (Vikunja #2159)
+
+    /// A variant run uses the chosen transcribe settings, writes its note as
+    /// `<base>@<suffix>.md` with its own markers, leaves the automatic run's
+    /// state alone, and never compacts the source.
+    func testVariantRunWritesSuffixedNoteWithOwnMarkers() async throws {
+        var (cfg, _) = try makeEnv()
+        cfg.compactRecordingsAfterNote = true
+        let wav = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("Meeting 2026-07-23 10.00.00.wav")
+        try Data(repeating: 3, count: 100_000).write(to: wav)
+        var chosen = cfg.transcribe
+        chosen.embeddedModel = "bsc-los"
+        chosen.language = "ca"
+        let variant = ProcessVariant(suffix: ProcessVariant.suffix(model: "bsc-los", language: "ca"),
+                                     transcribe: chosen)
+        XCTAssertEqual(variant.suffix, "bsc-los-ca")
+
+        let result = await Pipeline.processOne(
+            path: wav, config: cfg,
+            deps: deps(transcribe: { _, tc in
+                XCTAssertEqual(tc.embeddedModel, "bsc-los")
+                XCTAssertEqual(tc.language, "ca")
+                return ["segments": [["speaker": "SPEAKER_00", "text": "bon dia"]]]
+            }),
+            stableChecks: 1, stableDelay: 0, variant: variant)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.base, "Meeting_2026-07-23_10.00.00@bsc-los-ca")
+        XCTAssertEqual(result.message, "note written", "no compaction on a variant run")
+        XCTAssertEqual(result.notePath?.lastPathComponent, "Meeting_2026-07-23_10.00.00@bsc-los-ca.md")
+        XCTAssertEqual(try Data(contentsOf: wav).count, 100_000)
+
+        // The automatic run is still pending and runs independently.
+        let store = try DistavoState.Store(
+            stateDir: URL(fileURLWithPath: cfg.workDir).appendingPathComponent(".state"),
+            notesDir: URL(fileURLWithPath: cfg.notesDir))
+        XCTAssertTrue(store.isDone("Meeting_2026-07-23_10.00.00@bsc-los-ca"))
+        XCTAssertFalse(store.isDone("Meeting_2026-07-23_10.00.00"))
+        XCTAssertEqual(DistavoState.iterPending(
+            recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), state: store).map(\.lastPathComponent),
+            ["Meeting 2026-07-23 10.00.00.wav", "demo.opus"])
+        let auto = await Pipeline.processOne(path: wav, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(auto.status, .done)
+        XCTAssertEqual(auto.notePath?.lastPathComponent, "Meeting_2026-07-23_10.00.00.md")
+        // Same variant again is idempotent, like any other base.
+        let again = await Pipeline.processOne(path: wav, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0, variant: variant)
+        XCTAssertEqual(again.status, .skipped)
+    }
+
+    func testVariantSuffixIsFilenameSafe() {
+        XCTAssertEqual(ProcessVariant.suffix(model: "large-v3-turbo", language: ""), "large-v3-turbo-auto")
+        XCTAssertEqual(ProcessVariant.suffix(model: "medium", language: "en"), "medium-en")
+        XCTAssertEqual(ProcessVariant(suffix: "a/b c", transcribe: .init()).suffix, "a_b_c")
+    }
+
     // MARK: Detected languages on the result (Vikunja #2161)
 
     func testResultCarriesDetectedLanguagesWhenPresent() async throws {

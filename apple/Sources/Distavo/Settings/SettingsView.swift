@@ -131,6 +131,27 @@ struct SettingsView: View {
                     }
             }
 
+            Section("Recordings") {
+                if MeetingCaptureController.isSupported {
+                    HStack {
+                        Toggle("Ask who was in the meeting when a recording stops",
+                               isOn: $draft.askSpeakersOnStop)
+                        HelpButton(text: "After you stop the built-in recorder, Distavo asks how many people spoke, your role and who the others were, and hands that to the summariser so the notes name the speakers and the follow-up email is written from your side. Skip the question any time.")
+                    }
+                }
+                HStack {
+                    Stepper("Ignore recordings shorter than \(draft.minRecordingSeconds) s",
+                            value: $draft.minRecordingSeconds, in: 0...120, step: 5)
+                    HelpButton(text: "A recording under this length is set aside instead of producing an empty note — the menu offers to delete it. Set to 0 to transcribe everything.")
+                }
+                HStack {
+                    Toggle("Shrink recordings once the note is written",
+                           isOn: $draft.compactRecordingsAfterNote)
+                    HelpButton(text: "The built-in recorder keeps a 48 kHz stereo take (about 1.4 GB per hour). Once the note is written, Distavo replaces WAV recordings with the 16 kHz mono copy the transcriber used — about 20x smaller. Other formats are left alone.")
+                }
+            }
+
+
             Section("Transcription") {
                 if embeddedSupported {
                     HStack {
@@ -229,8 +250,13 @@ struct SettingsView: View {
                             .tag(lang.code)
                     }
                 }
+                if let detected = controller.lastDetectedLanguages {
+                    Text("Last recording: detected \(detected).")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 HStack {
                     Stepper("Number of speakers: \(draft.transcribe.numSpeakers)",
+
                             value: $draft.transcribe.numSpeakers, in: 1...10)
                     HelpButton(text: "Roughly how many people are speaking. Helps separate and label speakers.")
                 }

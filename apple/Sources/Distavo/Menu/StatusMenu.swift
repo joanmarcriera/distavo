@@ -30,6 +30,22 @@ struct StatusMenu: View {
             }
         }
 
+        // Too short to transcribe (Vikunja #2185): not failures — offer the Bin.
+        if !controller.tooShortRecordings.isEmpty {
+            let count = controller.tooShortRecordings.count
+            Text("\(count) recording\(count == 1 ? "" : "s") too short to transcribe")
+            ForEach(controller.tooShortRecordings.prefix(5), id: \.base) { entry in
+                Button("Delete “\(entry.base)” (\(entry.reason))") {
+                    controller.deleteTooShortRecording(entry.base)
+                }
+            }
+            if count > 1 {
+                Button("Delete all \(count) too-short recordings") {
+                    controller.deleteAllTooShortRecordings()
+                }
+            }
+        }
+
         Divider()
 
         if MeetingCaptureController.isSupported {
@@ -38,7 +54,12 @@ struct StatusMenu: View {
                    : "● Record meeting (system audio + mic)") {
                 capture.toggle()
             }
+            if capture.isRecording {
+                // Vikunja #2068: a take started by mistake — stop, delete, never transcribe.
+                Button("✕ Stop and delete recording") { capture.discard() }
+            }
         }
+
 
         Button("Process now") { controller.processNow() }
         Button("Copy last transcript") { controller.copyLastTranscript() }

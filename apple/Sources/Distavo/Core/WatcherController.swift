@@ -31,6 +31,16 @@ final class WatcherController: ObservableObject {
     /// reflects the current run and resets on relaunch), this is read from disk,
     /// so a recording that failed weeks ago stays visible until it is retried.
     @Published private(set) var failedRecordings: [(base: String, error: String)] = []
+    /// Recordings set aside as too short to transcribe (Vikunja #2185), read
+    /// from their `.tooshort` markers like `failedRecordings`. The menu offers
+    /// to move each one to the Bin.
+    @Published private(set) var tooShortRecordings: [(base: String, reason: String)] = []
+    /// "Catalan 92%, English 71%" from the last recording the router detected
+    /// a language for (Vikunja #2161); survives relaunch via UserDefaults so
+    /// Settings can caption the Language picker with it.
+    @Published private(set) var lastDetectedLanguages: String? =
+        UserDefaults.standard.string(forKey: WatcherController.lastDetectedKey)
+
     /// The `ModelCoordinator`'s latest progress message, published unconditionally
     /// (unlike `status`, which only moves while `processingActive`) so Settings'
     /// "Download now" can show it. This controller owns the coordinator's one
@@ -52,6 +62,8 @@ final class WatcherController: ObservableObject {
         folderProvider: { [weak self] in
             Config.resolvePath(self?.config.recordingsDir ?? Config().recordingsDir)
         },
+        configProvider: { [weak self] in self?.config ?? Config() },
+
         notify: { [weak self] title, body in self?.notifier.notify(title: title, body: body) },
         log: { [weak self] message in self?.log(message) })
     private let needsOnboarding: Bool
@@ -73,6 +85,8 @@ final class WatcherController: ObservableObject {
         seconds % 60 == 0 ? "\(seconds / 60)m" : "\(seconds)s"
     }
     private static let onboardedKey = "distavo.didOnboard"
+    private static let lastDetectedKey = "distavo.lastDetectedLanguages"
+
     private static let localNetWarnedKey = "distavo.didWarnLocalNetwork"
 
     init(deps: PipelineDeps = .appLive()) {
@@ -245,7 +259,48 @@ final class WatcherController: ObservableObject {
     /// only what happened since launch.
     private func refreshFailedRecordings() {
         failedRecordings = store()?.failedBases() ?? []
+        tooShortRecordings = store()?.tooShortBases() ?? []
     }
+
+    /// Move a too-short recording to the Bin and forget its marker (Vikunja
+    /// #2185). The Bin, not `removeItem`, so a mis-click is recoverable.
+    func deleteTooShortRecording(_ base: String) {
+        let recordingsDir = Config.resolvePath(config.recordingsDir)
+        guard let url = Self.recordingURL(forBase: base, in: recordingsDir) else {
+            // Already gone (deleted in Finder) — just drop the marker.
+            store()?.clearTooShort(base)
+            refreshFailedRecordings()
+            return
+        }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            store()?.clearTooShort(base)
+            log("Moved too-short recording to the Bin: \(url.lastPathComponent)")
+        } catch {
+            log("Could not delete \(url.lastPathComponent): \(error.localizedDescription)")
+            notifier.notify(title: "Could not delete recording", body: error.localizedDescription)
+        }
+        refreshFailedRecordings()
+    }
+
+    func deleteAllTooShortRecordings() {
+        for entry in tooShortRecordings { deleteTooShortRecording(entry.base) }
+    }
+
+    /// The recording whose sanitized, subfolder-aware base is `base`. Bases
+    /// are one-way (unsafe characters become `_`), so this walks the folder
+    /// the same way `iterPending` does and compares.
+    nonisolated static func recordingURL(forBase base: String, in recordingsDir: URL) -> URL? {
+        guard let en = FileManager.default.enumerator(
+            at: recordingsDir, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
+        for case let url as URL in en {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                  supportedExtensions.contains("." + url.pathExtension.lowercased()) else { continue }
+            if DistavoState.baseFor(recordingsDir: recordingsDir, path: url) == base { return url }
+        }
+        return nil
+    }
+
 
     /// Clear the failed markers and rescan, so a user who sees the warning has a
     /// way to act on it. Previously the only route was "Process now", which does
@@ -344,9 +399,25 @@ final class WatcherController: ObservableObject {
             hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             lastError = nil
+            if let detected = result.detectedLanguages {
+                log("Detected language: \(detected)")
+                lastDetectedLanguages = detected
+                UserDefaults.standard.set(detected, forKey: Self.lastDetectedKey)
+            }
             log("Saved note: \(result.base)")
+            if result.message.contains("recording compacted") {
+                log(result.message.replacingOccurrences(of: "note written; ", with: "")
+                    .replacingOccurrences(of: "recording compacted", with: "Recording compacted"))
+            }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
+        case .tooShort:
+            status = "Too short: \(result.base)"
+            log("Too short to transcribe — \(result.message): \(result.base)")
+            notifier.notify(title: "Recording too short — delete it?",
+                            body: "\(result.base): \(result.message). Delete it from the Distavo menu, "
+                                + "or lower the minimum in Settings and choose Process now.")
+
         case .deferredNeedLocal:
             status = "Needs local Ollama"
             if !deferredBases.contains(result.base) {

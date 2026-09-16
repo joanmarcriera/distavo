@@ -84,9 +84,18 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(store.isTooShort("demo"))
         XCTAssertFalse(store.isFailed("demo"))
         XCTAssertEqual(store.tooShortBases().map(\.base), ["demo"])
-        // And it is no longer pending — until "Process now" clears the marker.
+        // And it is no longer pending — until "Process now" clears the marker…
         XCTAssertTrue(DistavoState.iterPending(
             recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), state: store).isEmpty)
+        // …or a different file lands under the same name: the marker is
+        // fingerprinted with the measured file's size, so the newcomer is
+        // pending again and is never what a "Delete" would trash.
+        XCTAssertTrue(store.isTooShort("demo", currentSize: 4))
+        XCTAssertFalse(store.isTooShort("demo", currentSize: 4_000_000))
+        try Data(repeating: 1, count: 64).write(to: input)
+        XCTAssertEqual(DistavoState.iterPending(
+            recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), state: store).map(\.lastPathComponent),
+            ["demo.opus"])
         store.retryFailed()
         XCTAssertFalse(store.isTooShort("demo"))
     }
@@ -169,7 +178,8 @@ final class PipelineTests: XCTestCase {
     /// A bulky WAV source is replaced by the compact work WAV once the note is
     /// written; the message says so.
     func testBulkyWavIsReplacedByCompactCopyAfterNote() async throws {
-        let (cfg, _) = try makeEnv()
+        var (cfg, _) = try makeEnv()
+        cfg.compactRecordingsAfterNote = true
         let rec = URL(fileURLWithPath: cfg.recordingsDir)
         let big = rec.appendingPathComponent("Meeting 2026-09-09 10.58.19.wav")
         try Data(repeating: 7, count: 100_000).write(to: big)
@@ -197,7 +207,8 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(r1.message, "note written")
         XCTAssertEqual(try Data(contentsOf: input), before)
 
-        // A WAV source with the feature off is untouched.
+        // A WAV source with the feature off (the default for an existing
+        // config) is untouched.
         var off = cfg
         off.compactRecordingsAfterNote = false
         let wav = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("big.wav")

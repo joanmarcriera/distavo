@@ -243,7 +243,7 @@ public enum Pipeline {
         // converted WAV below. Nothing is written yet, so this is cheap.
         let minSeconds = Double(max(0, config.minRecordingSeconds))
         if minSeconds > 0, let seconds = await deps.audioDurationSeconds(path), seconds < minSeconds {
-            return setAsideTooShort(state: state, base: base, seconds: seconds, minimum: minSeconds)
+            return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
         }
 
         state.markProcessing(base)
@@ -274,7 +274,7 @@ public enum Pipeline {
             // Second chance for the length check: containers AVFoundation
             // could not measure directly (video files) are measurable now.
             if minSeconds > 0, let seconds = await deps.audioDurationSeconds(wavPath), seconds < minSeconds {
-                return setAsideTooShort(state: state, base: base, seconds: seconds, minimum: minSeconds)
+                return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
             }
 
             deps.onPhase?(.transcribing)
@@ -338,10 +338,10 @@ public enum Pipeline {
     /// Record `base` as too short and report it. Not a failure: `.tooshort` is
     /// its own marker so the menu can offer "delete it?" instead of "retry".
     private static func setAsideTooShort(
-        state: DistavoState.Store, base: String, seconds: Double, minimum: Double
+        state: DistavoState.Store, base: String, source: URL, seconds: Double, minimum: Double
     ) -> ProcessResult {
         let reason = "\(Int(seconds.rounded())) s of audio, below the \(Int(minimum)) s minimum"
-        state.markTooShort(base, reason)
+        state.markTooShort(base, reason, fileSize: DistavoState.fileSize(source))
         return ProcessResult(status: .tooShort, base: base, message: reason)
     }
 

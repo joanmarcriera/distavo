@@ -120,7 +120,9 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
   recorder's "who was in this meeting?" question, `SpeakerHints`) overrides `num_speakers` for that recording
   and reaches `Prompt.build(participants:)`; without it the prompt is byte-identical to before. Once a note is
   written, a WAV source is atomically replaced by the 16 kHz mono work WAV when `compact_recordings_after_note`
-  is on and the copy is under half the size — non-WAV sources are never touched.
+  is on and the copy is under half the size — non-WAV sources are never touched. That key is **off for any
+  config predating it** (the original take is gone once compacted) and on only for fresh installs via
+  `Config.recommendedForThisMac()` — the same migration rule as `transcribe.backend`.
 - **Backend migration rule:** a config file predating `transcribe.backend` decodes to `"server"` (never
   silently switch existing WhisperX users to embedded); only fresh installs get `"embedded"` via `Config.recommendedForThisMac()`.
 - **Concurrency:** scan is self-serializing so overlapping timer ticks and "Process now" can't double-process.

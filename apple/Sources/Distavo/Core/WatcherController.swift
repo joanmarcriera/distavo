@@ -272,6 +272,15 @@ final class WatcherController: ObservableObject {
             refreshFailedRecordings()
             return
         }
+        // The marker is fingerprinted with the file it was set for: if a
+        // different file now sits under that name, it is a real recording —
+        // release it to the scanner instead of trashing it.
+        guard store()?.isTooShort(base, currentSize: DistavoState.fileSize(url)) == true else {
+            store()?.clearTooShort(base)
+            log("\(url.lastPathComponent) was replaced since it was marked too short — it will be processed instead")
+            refreshFailedRecordings()
+            return
+        }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             store()?.clearTooShort(base)

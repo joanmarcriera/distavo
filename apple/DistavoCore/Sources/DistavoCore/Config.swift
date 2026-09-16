@@ -173,6 +173,10 @@ public struct Config: Codable, Equatable {
     /// mono 16-bit copy the transcriber used (~20x smaller, Vikunja #2061).
     /// Only WAV sources are touched, and only when the copy is materially
     /// smaller; the note and transcript are already on disk by then.
+    /// **Off for any config file that predates the key** (the original take
+    /// is gone once compacted — an upgrade must never do that unasked, same
+    /// rule as `transcribe.backend`); fresh installs turn it on via
+    /// `recommendedForThisMac()`, and Settings has the toggle.
     public var compactRecordingsAfterNote: Bool
     /// After the built-in recorder stops, ask who was in the meeting (count,
     /// the owner's role, the other participants) and hand that to the
@@ -198,7 +202,7 @@ public struct Config: Codable, Equatable {
                 noteOwner: String = "Me",
                 userSpeaker: String = "unknown",
                 minRecordingSeconds: Int = 15,
-                compactRecordingsAfterNote: Bool = true,
+                compactRecordingsAfterNote: Bool = false,
                 askSpeakersOnStop: Bool = true) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
@@ -261,6 +265,9 @@ public struct Config: Codable, Equatable {
         memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes
     ) -> Config {
         var cfg = Config()
+        // New installs shrink WAV recordings once the note exists; existing
+        // files keep their originals unless the user opts in (Vikunja #2061).
+        cfg.compactRecordingsAfterNote = true
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

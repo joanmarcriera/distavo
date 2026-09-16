@@ -127,7 +127,20 @@ public enum DistavoState {
         public func isDone(_ base: String) -> Bool { exists(notePath(base)) || exists(marker(base, "done")) }
         public func isProcessing(_ base: String) -> Bool { exists(marker(base, "processing")) }
         public func isFailed(_ base: String) -> Bool { exists(marker(base, "failed")) }
-        public func isTooShort(_ base: String) -> Bool { exists(marker(base, "tooshort")) }
+        /// True when `base` carries a `.tooshort` marker for the file as it
+        /// is now. The marker records the file size it was set for, so a
+        /// recording later replaced by a different file under the same name
+        /// (a voice-memo app reusing a fixed name, a corrected re-take) is
+        /// pending again rather than skipped forever — and is never the
+        /// file the menu's "Delete" trashes. `currentSize` nil (file
+        /// missing/unreadable) trusts the marker.
+        public func isTooShort(_ base: String, currentSize: Int? = nil) -> Bool {
+            guard let content = try? String(contentsOf: marker(base, "tooshort"), encoding: .utf8) else { return false }
+            guard let currentSize else { return true }
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            guard lines.count >= 2, let recorded = Int(lines[1].trimmingCharacters(in: .whitespaces)) else { return true }
+            return recorded == currentSize
+        }
 
         // MARK: Too-short recordings (Vikunja #2185)
         //
@@ -139,9 +152,11 @@ public enum DistavoState {
         // replaced file is retried.
 
         /// Set `base` aside as too short to transcribe; the reason is shown in
-        /// the menu (e.g. "4 s of audio, below the 15 s minimum").
-        public func markTooShort(_ base: String, _ reason: String) {
-            write(reason + "\n", marker(base, "tooshort"))
+        /// the menu (e.g. "4 s of audio, below the 15 s minimum"). `fileSize`
+        /// fingerprints the file so `isTooShort(_:currentSize:)` can tell a
+        /// replaced file from the one that was measured.
+        public func markTooShort(_ base: String, _ reason: String, fileSize: Int? = nil) {
+            write(reason + "\n" + (fileSize.map(String.init) ?? "") + "\n", marker(base, "tooshort"))
             clearProcessing(base)
             clearDeferred(base)
         }
@@ -160,8 +175,10 @@ public enum DistavoState {
             return items
                 .filter { $0.pathExtension == suffix }
                 .map { url in
+                    // First line only: `.tooshort` markers carry a size on line 2.
                     let reason = (try? String(contentsOf: url, encoding: .utf8))?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        .split(separator: "\n", omittingEmptySubsequences: false).first
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
                     return (url.deletingPathExtension().lastPathComponent, reason)
                 }
                 .sorted { $0.0 < $1.0 }
@@ -279,6 +296,11 @@ public enum DistavoState {
             .url
     }
 
+    /// Size in bytes, or nil when unreadable.
+    public static func fileSize(_ url: URL) -> Int? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
+    }
+
     public static func iterPending(
         recordingsDir: URL, state: Store, extensions: Set<String> = supportedExtensions,
         now: () -> Date = Date.init
@@ -299,8 +321,8 @@ public enum DistavoState {
             let ext = "." + url.pathExtension.lowercased()
             if !extensions.contains(ext) { continue }
             let base = baseFor(recordingsDir: recordingsDir, path: url)
-            if state.isDone(base) || state.isProcessing(base) || state.isFailed(base)
-                || state.isTooShort(base) { continue }
+            if state.isDone(base) || state.isProcessing(base) || state.isFailed(base) { continue }
+            if state.isTooShort(base, currentSize: fileSize(url)) { continue }
 
             if let until = state.deferredUntil(base), until > now() { continue }
             pending.append(url)

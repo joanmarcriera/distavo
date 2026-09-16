@@ -23,8 +23,21 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.noteOwner, "Me")
         XCTAssertEqual(c.userSpeaker, "unknown")
         XCTAssertEqual(c.minRecordingSeconds, 15)
-        XCTAssertTrue(c.compactRecordingsAfterNote)
+        XCTAssertFalse(c.compactRecordingsAfterNote, "existing files never compact unasked")
         XCTAssertTrue(c.askSpeakersOnStop)
+    }
+
+    /// Compaction is opt-in for existing configs (the original take is gone
+    /// once compacted) and on only for fresh installs — the same migration
+    /// rule as `transcribe.backend`.
+    func testCompactionOnForFreshInstallsOnly() throws {
+        XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 1 << 34).compactRecordingsAfterNote)
+        XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: false, memoryBytes: 1 << 34).compactRecordingsAfterNote)
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"transcribe": {"backend": "embedded"}}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertFalse(try Config.load(from: url, fresh: .recommendedForThisMac()).compactRecordingsAfterNote)
     }
 
     /// The 1.12 keys are absent from every existing config file and must
@@ -36,17 +49,17 @@ final class ConfigTests: XCTestCase {
         try #"{"note_owner": "Marc"}"#.write(to: url, atomically: true, encoding: .utf8)
         let c = try Config.load(from: url)
         XCTAssertEqual(c.minRecordingSeconds, 15)
-        XCTAssertTrue(c.compactRecordingsAfterNote)
+        XCTAssertFalse(c.compactRecordingsAfterNote)
         XCTAssertTrue(c.askSpeakersOnStop)
 
         var edited = c
         edited.minRecordingSeconds = 30
-        edited.compactRecordingsAfterNote = false
+        edited.compactRecordingsAfterNote = true
         edited.askSpeakersOnStop = false
         try Config.save(edited, to: url)
         let json = try String(contentsOf: url, encoding: .utf8)
         XCTAssertTrue(json.contains("\"min_recording_seconds\" : 30"))
-        XCTAssertTrue(json.contains("\"compact_recordings_after_note\" : false"))
+        XCTAssertTrue(json.contains("\"compact_recordings_after_note\" : true"))
         XCTAssertTrue(json.contains("\"ask_speakers_on_stop\" : false"))
         XCTAssertEqual(try Config.load(from: url), edited)
     }

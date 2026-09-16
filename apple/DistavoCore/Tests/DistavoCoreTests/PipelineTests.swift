@@ -161,7 +161,7 @@ final class PipelineTests: XCTestCase {
                 summarise: { _, target, _, context in
                     XCTAssertEqual(context.noteOwner, "Me")
                     XCTAssertEqual(context.userSpeaker, "unknown")
-                    XCTAssertEqual(context.promptStyle, .factsFirst)
+                    XCTAssertEqual(context.promptStyle, .classic)
                     XCTAssertEqual(context.participants, "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
                     seen.set(target)
                     return "# Meeting notes\n\nA clean, valid summary."

@@ -135,6 +135,12 @@ public struct SummariseConfig: Codable, Equatable {
     public var options: SummariseOptions
     /// Which prompt the Ollama path uses (Vikunja #2063). The on-device
     /// Foundation Models path always uses `classic` (context budget).
+    /// **Classic for any config predating the key**: on the Catalan reference
+    /// meeting llama3.1:8b (the model every existing config names) loses
+    /// the section structure under the facts-first prompt and copies the
+    /// prompt's example dates into the ledger, while gemma4:26b is excellent
+    /// with it — so facts-first is paired with the gemma default for fresh
+    /// installs (`recommendedForThisMac`) and offered in Settings.
     public var promptStyle: Prompt.Style
 
     enum CodingKeys: String, CodingKey {
@@ -147,7 +153,7 @@ public struct SummariseConfig: Codable, Equatable {
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
                 embeddedEnabled: Bool = false,
                 options: SummariseOptions = .init(),
-                promptStyle: Prompt.Style = .factsFirst) {
+                promptStyle: Prompt.Style = .classic) {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.options = options
@@ -288,6 +294,8 @@ public struct Config: Codable, Equatable {
         // New installs shrink WAV recordings once the note exists; existing
         // files keep their originals unless the user opts in (Vikunja #2061).
         cfg.compactRecordingsAfterNote = true
+        // Fresh installs pair the gemma4:26b default with the facts-first prompt (#2063).
+        cfg.summarise.promptStyle = .factsFirst
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

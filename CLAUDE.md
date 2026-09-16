@@ -113,6 +113,15 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
   to Ollama (does not fail), and Settings does not offer it.
 - **Stale markers at startup:** leftover `.processing` markers mean a prior crash; they're cleared so files
   become pending again. `.failed` markers persist until "Process now" clears them.
+- **Too short is not failed:** a recording under `min_recording_seconds` (default 15) gets a `.tooshort` marker
+  (never `.failed`) and is never transcribed; the menu offers to move it to the Bin, "Process now" clears the
+  marker. Duration comes through the `audioDurationSeconds` seam in `PipelineDeps`.
+- **Speaker hints and compaction after the note:** `<base>.speakers.json` in the work dir (written by the
+  recorder's "who was in this meeting?" question, `SpeakerHints`) overrides `num_speakers` for that recording
+  and reaches `Prompt.build(participants:)`; without it the prompt is byte-identical to before. Once a note is
+  written, a WAV source is atomically replaced by the 16 kHz mono work WAV when `compact_recordings_after_note`
+  is on and the copy is under half the size — non-WAV sources are never touched.
+
 - **Backend migration rule:** a config file predating `transcribe.backend` decodes to `"server"` (never
   silently switch existing WhisperX users to embedded); only fresh installs get `"embedded"` via `Config.recommendedForThisMac()`.
 - **Concurrency:** scan is self-serializing so overlapping timer ticks and "Process now" can't double-process.
@@ -120,7 +129,8 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
 ## Runtime data locations (not in the repo)
 
 - Config: `~/Library/Application Support/Distavo/watcher-config.json`
-- Work/cache + `.state` markers: `~/Library/Application Support/Distavo/work`
+- Work/cache + `.state` markers (+ `<base>.speakers.json` sidecars): `~/Library/Application Support/Distavo/work`
+
 - Default recordings/notes: `~/Documents/Distavo/recordings` and `.../notes`
 - Logs: `~/Library/Logs/Distavo/distavo.log`
 - WhisperKit models: `~/Library/Application Support/Distavo/models`

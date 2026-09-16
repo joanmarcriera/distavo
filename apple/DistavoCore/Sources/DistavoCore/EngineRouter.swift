@@ -54,6 +54,14 @@ public enum EngineRouter {
         } else if set == ["es"] {
             chosen = EmbeddedModelCatalog.model(id: "bsc-los")          // rule 5a
             hint = "es"
+        } else if let (code, packModel) = packHit(confident, config: config) {
+            // Rule 5p (Vikunja #2124): any confident language covered by an
+            // ENABLED language pack goes to that pack — like Catalan, never to
+            // Parakeet, which would silently drop the pack language's speech.
+            // The hint is the covered code, not the dominant one, so a Hebrew
+            // meeting with English asides is transcribed as Hebrew.
+            chosen = packModel
+            hint = code
         } else if !set.isEmpty, set.isSubset(of: EmbeddedModelCatalog.parakeetLanguages) {
             chosen = EmbeddedModelCatalog.model(id: "parakeet-tdt-v3")  // rule 5b
         } else {
@@ -69,6 +77,20 @@ public enum EngineRouter {
                 note: "\(chosen.displayName) needs \(chosen.minimumMemoryGB) GB of memory; using \(fallback.displayName) on this Mac.")
         }
         return RoutingDecision(model: chosen, languageHint: hint, note: nil)
+    }
+
+    /// The first confident code (in detection order) that an enabled pack
+    /// covers, with that pack's model. Explicit language (`fixedLanguage`)
+    /// arrives here as the single confident code, so a user who picks
+    /// "Hebrew" with an enabled Hebrew pack gets the pack too.
+    static func packHit(_ confident: [String], config: TranscribeConfig) -> (String, EmbeddedModel)? {
+        guard !config.languagePacks.isEmpty else { return nil }
+        for code in confident {
+            if let model = EmbeddedModelCatalog.packModel(for: code, enabled: config.languagePacks) {
+                return (code, model)
+            }
+        }
+        return nil
     }
 
     /// The code with the highest summed probability, or nil when nothing was detected.

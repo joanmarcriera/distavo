@@ -101,4 +101,62 @@ final class EngineRouterTests: XCTestCase {
         XCTAssertEqual(EngineRouter.dominantCode([d("fr", 0.6), d("de", 0.6)]), "de")
         XCTAssertEqual(EngineRouter.dominantCode([d("de", 0.6), d("fr", 0.6)]), "de")
     }
+
+    // MARK: Language packs (Vikunja #2124)
+
+    private func packs(_ ids: [String]) -> TranscribeConfig {
+        TranscribeConfig(backend: "embedded", embeddedModel: "auto", language: "auto", languagePacks: ids)
+    }
+
+    func testDisabledPackLeavesRoutingUnchanged() {
+        // Hebrew with no pack enabled: rule 6, exactly as before packs existed.
+        let r = EngineRouter.choose(detections: [d("he")], config: auto(), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "large-v3-turbo")
+        XCTAssertEqual(r.languageHint, "he")
+    }
+
+    func testEnabledPackRoutesItsLanguage() {
+        let r = EngineRouter.choose(detections: [d("he"), d("he")], config: packs(["hebrew"]), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "ivrit-he")
+        XCTAssertEqual(r.languageHint, "he")
+        XCTAssertNil(r.note)
+    }
+
+    func testPackLanguageMixedWithEnglishNeverGoesToParakeet() {
+        for order in [[d("en"), d("he"), d("en")], [d("he"), d("en"), d("en")]] {
+            let r = EngineRouter.choose(detections: order, config: packs(["hebrew"]), memoryBytes: gb16)
+            XCTAssertEqual(r.model.id, "ivrit-he")
+            XCTAssertEqual(r.languageHint, "he")
+        }
+    }
+
+    func testFixedLanguageUsesEnabledPack() {
+        var cfg = packs(["thai"]); cfg.language = "th"
+        XCTAssertFalse(EngineRouter.needsDetection(cfg))
+        let r = EngineRouter.choose(detections: [], config: cfg, memoryBytes: gb8)
+        XCTAssertEqual(r.model.id, "thonburian-th")   // medium: no memory floor
+        XCTAssertEqual(r.languageHint, "th")
+    }
+
+    func testPackMemoryFloorFallsBackWithNote() {
+        let r = EngineRouter.choose(detections: [d("he")], config: packs(["hebrew"]), memoryBytes: gb8)
+        XCTAssertEqual(r.model.id, "small")
+        XCTAssertEqual(r.languageHint, "he")
+        XCTAssertNotNil(r.note)
+    }
+
+    func testCatalanStillBeatsAnEnabledPack() {
+        let r = EngineRouter.choose(detections: [d("ca"), d("he")], config: packs(["hebrew"]), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "bsc-los")
+    }
+
+    func testUnknownPackIdIsIgnored() {
+        let r = EngineRouter.choose(detections: [d("he")], config: packs(["no-such-pack"]), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "large-v3-turbo")
+    }
+
+    func testExplicitPackModelIsHonouredLikeAnyModel() {
+        let cfg = TranscribeConfig(backend: "embedded", embeddedModel: "ivrit-he", language: "auto")
+        XCTAssertEqual(EngineRouter.choose(detections: [d("en")], config: cfg, memoryBytes: gb16).model.id, "ivrit-he")
+    }
 }

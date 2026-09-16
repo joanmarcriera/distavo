@@ -76,21 +76,28 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Which BSC catalog id automatic Catalan routing should prefer.
     /// See `effectivePreferredCatalanModel` for the validated accessor.
     public var preferredCatalanModel: String
+    /// Ids of the opt-in `EmbeddedModelCatalog.languagePacks` automatic routing
+    /// may use (Vikunja #2124). Absent in every config written before packs
+    /// existed, so it decodes to `[]` and nothing is routed differently until
+    /// the user switches a pack on in Settings.
+    public var languagePacks: [String]
 
     enum CodingKeys: String, CodingKey {
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
+        case languagePacks = "language_packs"
     }
 
     public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 2,
-                preferredCatalanModel: String = "bsc-los") {
+                preferredCatalanModel: String = "bsc-los", languagePacks: [String] = []) {
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
         self.preferredCatalanModel = preferredCatalanModel
+        self.languagePacks = languagePacks
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +111,12 @@ public struct TranscribeConfig: Codable, Equatable {
         diarize = try c.decodeIfPresent(Bool.self, forKey: .diarize) ?? d.diarize
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
         preferredCatalanModel = try c.decodeIfPresent(String.self, forKey: .preferredCatalanModel) ?? d.preferredCatalanModel
+        languagePacks = try c.decodeIfPresent([String].self, forKey: .languagePacks) ?? d.languagePacks
+    }
+
+    /// Enabled packs that actually exist in the catalog, in catalog order.
+    public var enabledLanguagePacks: [LanguagePack] {
+        EmbeddedModelCatalog.languagePacks.filter { languagePacks.contains($0.id) }
     }
 
     /// Which BSC model automatic routing uses for Catalan; an unknown value

@@ -63,4 +63,22 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertEqual(again.transcribe.embeddedModel, "small")
         XCTAssertEqual(again.transcribe.language, "en")
     }
+
+    /// A config written before language packs existed decodes to no packs, so
+    /// automatic routing is byte-for-byte what it was (Vikunja #2124).
+    func testPreLanguagePackConfigHasNoPacksEnabled() throws {
+        let cfg = try decode(#"{"transcribe": {"backend": "embedded", "embedded_model": "auto"}}"#)
+        XCTAssertEqual(cfg.transcribe.languagePacks, [])
+        XCTAssertTrue(cfg.transcribe.enabledLanguagePacks.isEmpty)
+        XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: true).transcribe.languagePacks.isEmpty)
+    }
+
+    func testLanguagePacksRoundTripAndDropUnknownIds() throws {
+        let cfg = try decode(#"{"transcribe": {"language_packs": ["thai", "bogus", "hebrew"]}}"#)
+        XCTAssertEqual(cfg.transcribe.languagePacks, ["thai", "bogus", "hebrew"])
+        XCTAssertEqual(cfg.transcribe.enabledLanguagePacks.map(\.id), ["hebrew", "thai"])   // catalog order
+        let data = try JSONEncoder().encode(cfg)
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains(#""language_packs":["thai","bogus","hebrew"]"#), json)
+    }
 }

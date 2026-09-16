@@ -80,13 +80,15 @@ extension PipelineDeps {
         // The target is chosen by Pipeline.chooseSummariser, which only returns
         // .embedded when summarise.embeddedEnabled is on (Vikunja #336).
         let ollamaSummarise = deps.summarise
-        deps.summarise = { transcript, target, options, owner, speaker, participants in
+        deps.summarise = { transcript, target, options, context in
             if case .embedded = target {
+                // Always the classic prompt on-device: the 4096-token window
+                // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(
-                    transcript: transcript, noteOwner: owner, userSpeaker: speaker,
-                    participants: participants)
+                    transcript: transcript, noteOwner: context.noteOwner,
+                    userSpeaker: context.userSpeaker, participants: context.participants)
             }
-            return try await ollamaSummarise(transcript, target, options, owner, speaker, participants)
+            return try await ollamaSummarise(transcript, target, options, context)
         }
 
         // Readiness of the on-device summariser, so chooseSummariser can DEFER a

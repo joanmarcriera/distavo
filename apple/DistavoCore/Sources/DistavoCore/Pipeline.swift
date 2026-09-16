@@ -91,6 +91,32 @@ enum SummariserChoice: Equatable {
     case unavailable(String)
 }
 
+/// Everything the summariser needs to know about the note besides the
+/// transcript (Vikunja #2063, #2182). One value instead of a growing list
+/// of closure parameters.
+public struct NoteContext: Equatable, Sendable {
+    public var noteOwner: String
+    public var userSpeaker: String
+    /// The owner's post-recording description of who was in the meeting, or nil.
+    public var participants: String?
+    /// When the recording started, when known (recorder filename or file date).
+    public var meetingDate: Date?
+    public var promptStyle: Prompt.Style
+
+    public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
+                meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic) {
+        self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
+        self.participants = participants; self.meetingDate = meetingDate
+        self.promptStyle = promptStyle
+    }
+
+    /// The full prompt for the Ollama path.
+    public func prompt(transcript: String) -> String {
+        Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
+                     participants: participants, style: promptStyle, meetingDate: meetingDate)
+    }
+}
+
 public struct PipelineDeps {
     public var convertToWav: (URL, URL) async throws -> Void
     public var transcribe: (URL, TranscribeConfig) async throws -> [String: Any]
@@ -100,11 +126,8 @@ public struct PipelineDeps {
     /// `ollamaReachable`. Defaults to `.ready`, keeping every existing caller and
     /// test unchanged; the app layer wires it to `EmbeddedSummariser`.
     public var embeddedReadiness: () async -> EmbeddedReadiness
-    /// `participants` is the note owner's own description of who was in the
-    /// meeting (`SpeakerHints`), or nil — it reaches `Prompt.build` verbatim.
     public var summarise: (_ transcript: String, _ target: SummariseTarget,
-                           _ options: SummariseOptions, _ noteOwner: String,
-                           _ userSpeaker: String, _ participants: String?) async throws -> String
+                           _ options: SummariseOptions, _ context: NoteContext) async throws -> String
     /// Seconds of audio in a file, or nil when unknown. Consulted before
     /// transcribing so a too-short recording is set aside rather than failed
     /// (Vikunja #2185). Defaults to AVFoundation; tests inject a stub.
@@ -117,7 +140,7 @@ public struct PipelineDeps {
         convertToWav: @escaping (URL, URL) async throws -> Void,
         transcribe: @escaping (URL, TranscribeConfig) async throws -> [String: Any],
         ollamaReachable: @escaping (String) async -> Bool,
-        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String, String?) async throws -> String,
+        summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String,
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
         embeddedReadiness: @escaping () async -> EmbeddedReadiness = { .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) }
@@ -139,17 +162,15 @@ public struct PipelineDeps {
             convertToWav: { try await AudioConverter.convertToWav(source: $0, dest: $1) },
             transcribe: { try await whisper.transcribe(wavURL: $0, config: $1) },
             ollamaReachable: { await ollama.reachable($0) },
-            summarise: { transcript, target, options, owner, speaker, participants in
+            summarise: { transcript, target, options, context in
                 // DistavoCore is dependency-free, so it can only serve the Ollama
                 // target. The app layer (AppPipelineDeps) wraps this to route
                 // `.embedded` at the FoundationModels engine.
                 guard case let .ollama(url, model) = target else {
                     throw OllamaError("On-device summarisation is not available in this build.")
                 }
-                let prompt = Prompt.build(transcript: transcript, noteOwner: owner,
-                                          userSpeaker: speaker, participants: participants)
-
-                return try await ollama.generate(url: url, model: model, prompt: prompt, options: options)
+                return try await ollama.generate(url: url, model: model,
+                                                 prompt: context.prompt(transcript: transcript), options: options)
             })
     }
 }
@@ -323,9 +344,11 @@ public enum Pipeline {
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
 
             deps.onPhase?(.summarising)
-            let summary = try await deps.summarise(
-                clean, target, config.summarise.options,
-                config.noteOwner, config.userSpeaker, participants)
+            let context = NoteContext(
+                noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
+                participants: participants, meetingDate: meetingDate(for: path),
+                promptStyle: config.summarise.promptStyle)
+            let summary = try await deps.summarise(clean, target, config.summarise.options, context)
             let noteText = summary + provenanceFooter(from: result)
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
 
@@ -407,6 +430,27 @@ public enum Pipeline {
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
         return "\(formatter.string(fromByteCount: Int64(sourceSize))) → \(formatter.string(fromByteCount: Int64(compactSize)))"
+    }
+
+    private static let recorderNameFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        return f
+    }()
+
+    /// When the recording started: the built-in recorder's file name
+    /// ("Meeting 2026-09-16 16.13.08.wav", local time) is authoritative and
+    /// survives copies and syncs; otherwise the file's creation date, which
+    /// a phone recording or a dropped export usually keeps; nil if neither.
+    static func meetingDate(for url: URL) -> Date? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        if let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression),
+           let date = recorderNameFormatter.date(from: String(stem[range])) {
+            return date
+        }
+        return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
     }
 
     /// The router's detections from the transcribe result, formatted for the

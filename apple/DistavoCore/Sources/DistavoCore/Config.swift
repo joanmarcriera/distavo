@@ -8,6 +8,10 @@ public struct OllamaTarget: Codable, Equatable {
     public var url: String
     public var model: String
 
+    /// Default model: gemma4:26b for the server target since 1.12 (the
+    /// 2026-09-09 bake-off, Vikunja #2063); the local (on-this-Mac) target
+    /// keeps the small llama3.1:8b. Existing config files carry their own
+    /// `model` key and are not changed by this default.
     public init(url: String = "http://127.0.0.1:11434", model: String = "llama3.1:8b") {
         self.url = url
         self.model = model
@@ -36,7 +40,7 @@ public struct SummariseOptions: Codable, Equatable {
     }
 
     public init(numCtx: Int = 65536, temperature: Double = 0.1, topP: Double = 0.85,
-                seed: Int = 42, numPredict: Int = 6144, repeatPenalty: Double = 1.15,
+                seed: Int = 42, numPredict: Int = 6144, repeatPenalty: Double = 1.05,
                 repeatLastN: Int = 512) {
         self.numCtx = numCtx; self.temperature = temperature; self.topP = topP
         self.seed = seed; self.numPredict = numPredict
@@ -129,19 +133,25 @@ public struct SummariseConfig: Codable, Equatable {
     /// the Ollama path rather than failing, and Settings does not offer it.
     public var embeddedEnabled: Bool
     public var options: SummariseOptions
+    /// Which prompt the Ollama path uses (Vikunja #2063). The on-device
+    /// Foundation Models path always uses `classic` (context budget).
+    public var promptStyle: Prompt.Style
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", options
+        case promptStyle = "prompt_style"
     }
 
-    public init(backend: String = "server", server: OllamaTarget = .init(),
+    public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
                 embeddedEnabled: Bool = false,
-                options: SummariseOptions = .init()) {
+                options: SummariseOptions = .init(),
+                promptStyle: Prompt.Style = .factsFirst) {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.options = options
+        self.promptStyle = promptStyle
     }
 
     public init(from decoder: Decoder) throws {
@@ -153,6 +163,10 @@ public struct SummariseConfig: Codable, Equatable {
         allowLocalFallback = try c.decodeIfPresent(Bool.self, forKey: .allowLocalFallback) ?? d.allowLocalFallback
         embeddedEnabled = try c.decodeIfPresent(Bool.self, forKey: .embeddedEnabled) ?? d.embeddedEnabled
         options = try c.decodeIfPresent(SummariseOptions.self, forKey: .options) ?? d.options
+        // An unknown string (or a missing key) falls back to the default
+        // rather than failing the whole config.
+        promptStyle = (try? c.decodeIfPresent(String.self, forKey: .promptStyle))
+            .flatMap { $0.flatMap(Prompt.Style.init(rawValue:)) } ?? d.promptStyle
     }
 }
 

@@ -46,7 +46,7 @@ final class PipelineTests: XCTestCase {
             ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
         },
         reachable: @escaping (String) async -> Bool = { _ in true },
-        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String, String?) async throws -> String = { _, _, _, _, _, _ in
+        summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String = { _, _, _, _ in
             "# Meeting notes\n\nA clean, valid summary."
         },
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
@@ -158,10 +158,11 @@ final class PipelineTests: XCTestCase {
                     counts.append(.transcribing)
                     return ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
                 },
-                summarise: { _, target, _, owner, speaker, participants in
-                    XCTAssertEqual(owner, "Me")
-                    XCTAssertEqual(speaker, "unknown")
-                    XCTAssertEqual(participants, "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
+                summarise: { _, target, _, context in
+                    XCTAssertEqual(context.noteOwner, "Me")
+                    XCTAssertEqual(context.userSpeaker, "unknown")
+                    XCTAssertEqual(context.promptStyle, .factsFirst)
+                    XCTAssertEqual(context.participants, "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
                     seen.set(target)
                     return "# Meeting notes\n\nA clean, valid summary."
                 }),
@@ -176,8 +177,8 @@ final class PipelineTests: XCTestCase {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(
             path: input, config: cfg,
-            deps: deps(summarise: { _, _, _, _, _, participants in
-                XCTAssertNil(participants)
+            deps: deps(summarise: { _, _, _, context in
+                XCTAssertNil(context.participants)
                 return "# Meeting notes\n\nA clean, valid summary."
             }),
             stableChecks: 1, stableDelay: 0)
@@ -293,6 +294,43 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(ProcessVariant(suffix: "a/b c", transcribe: .init()).suffix, "a_b_c")
     }
 
+    // MARK: Meeting date for the prompt metadata (Vikunja #2063)
+
+    func testMeetingDateFromRecorderFileNameElseCreationDate() throws {
+        let dir = tempDir()
+        let named = dir.appendingPathComponent("Meeting 2026-09-16 16.13.08.wav")
+        try Data([0]).write(to: named)
+        let date = try XCTUnwrap(Pipeline.meetingDate(for: named))
+        var cal = Calendar(identifier: .gregorian); cal.timeZone = .current
+        let c = cal.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+        XCTAssertEqual([c.year, c.month, c.day, c.hour, c.minute, c.second], [2026, 9, 16, 16, 13, 8])
+
+        let plain = dir.appendingPathComponent("voice memo.m4a")
+        try Data([0]).write(to: plain)
+        let created = try XCTUnwrap(Pipeline.meetingDate(for: plain))
+        XCTAssertLessThan(abs(created.timeIntervalSinceNow), 60)
+
+        XCTAssertNil(Pipeline.meetingDate(for: dir.appendingPathComponent("missing.wav")))
+    }
+
+    /// The context handed to the summariser carries the recording's date and
+    /// the configured prompt style.
+    func testSummariseContextCarriesDateAndStyle() async throws {
+        var (cfg, _) = try makeEnv()
+        cfg.summarise.promptStyle = .classic
+        let wav = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("Meeting 2026-07-23 10.58.50.wav")
+        try Data([0, 1]).write(to: wav)
+        let result = await Pipeline.processOne(
+            path: wav, config: cfg,
+            deps: deps(summarise: { _, _, _, context in
+                XCTAssertEqual(context.promptStyle, .classic)
+                XCTAssertNotNil(context.meetingDate)
+                return "# Meeting notes\n\nA clean, valid summary."
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+    }
+
     // MARK: Detected languages on the result (Vikunja #2161)
 
     func testResultCarriesDetectedLanguagesWhenPresent() async throws {
@@ -395,7 +433,7 @@ final class PipelineTests: XCTestCase {
         let repeated = String(repeating: "the cat sat on mat ", count: 20)
         let result = await Pipeline.processOne(
             path: input, config: cfg,
-            deps: deps(summarise: { _, _, _, _, _, _ in repeated }),
+            deps: deps(summarise: { _, _, _, _ in repeated }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .failed)
         XCTAssertTrue(result.message.contains("repetition collapse"))
@@ -552,7 +590,7 @@ final class PipelineTests: XCTestCase {
         let result = await Pipeline.processOne(
             path: input, config: cfg,
             deps: deps(reachable: { _ in false },
-                       summarise: { _, target, _, _, _, _ in
+                       summarise: { _, target, _, _ in
                            seen.set(target)
                            return "# Meeting notes\n\nA clean, valid summary."
                        }),

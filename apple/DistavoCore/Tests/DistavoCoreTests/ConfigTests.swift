@@ -15,7 +15,10 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.transcribe.whisperxURL, "http://127.0.0.1:9000")
         XCTAssertEqual(c.transcribe.model, "medium")
         XCTAssertEqual(c.summarise.backend, "server")
-        XCTAssertEqual(c.summarise.server.model, "llama3.1:8b")
+        XCTAssertEqual(c.summarise.server.model, "gemma4:26b", "1.12 default for fresh installs (#2063)")
+        XCTAssertEqual(c.summarise.local.model, "llama3.1:8b")
+        XCTAssertEqual(c.summarise.options.repeatPenalty, 1.05)
+        XCTAssertEqual(c.summarise.promptStyle, .factsFirst)
         XCTAssertFalse(c.summarise.allowLocalFallback)
         XCTAssertFalse(c.summarise.embeddedEnabled)
         XCTAssertEqual(c.summarise.options.numCtx, 65536)
@@ -38,6 +41,29 @@ final class ConfigTests: XCTestCase {
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{"transcribe": {"backend": "embedded"}}"#.write(to: url, atomically: true, encoding: .utf8)
         XCTAssertFalse(try Config.load(from: url, fresh: .recommendedForThisMac()).compactRecordingsAfterNote)
+    }
+
+    /// An existing config keeps its own model and options; `prompt_style`
+    /// decodes to facts-first when absent, and an unknown value falls back
+    /// rather than failing the load.
+    func testPromptStyleDecodesAndExistingModelKept() throws {
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"summarise": {"server": {"model": "llama3.1:8b"}, "options": {"repeat_penalty": 1.15}}}"#
+            .write(to: url, atomically: true, encoding: .utf8)
+        let c = try Config.load(from: url)
+        XCTAssertEqual(c.summarise.server.model, "llama3.1:8b")
+        XCTAssertEqual(c.summarise.options.repeatPenalty, 1.15)
+        XCTAssertEqual(c.summarise.promptStyle, .factsFirst)
+
+        try #"{"summarise": {"prompt_style": "classic"}}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).summarise.promptStyle, .classic)
+        try #"{"summarise": {"prompt_style": "bogus"}}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).summarise.promptStyle, .factsFirst)
+        var saved = Config(); saved.summarise.promptStyle = .classic
+        try Config.save(saved, to: url)
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"prompt_style\" : \"classic\""))
     }
 
     /// The 1.12 keys are absent from every existing config file and must

@@ -163,6 +163,24 @@ public enum EmbeddedModelCatalog {
             whisperKitName: "biodatlab_whisper-th-large-v3-combined",
             languages: .only(["th"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by Mahidol University (Thonburian Whisper) on Thai speech; 6.6 % WER on Common Voice."),
+        EmbeddedModel(
+            id: "techiaith-cy", displayName: "Cymraeg · Welsh (Bangor University)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "techiaith_whisper-large-ft-cy-en",
+            languages: .only(["cy"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large fine-tuned by Bangor University's Language Technologies Unit on Welsh and Welsh–English speech."),
+        EmbeddedModel(
+            id: "lvl-is", displayName: "Íslenska · Icelandic (Reykjavík University)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h",
+            languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
+        EmbeddedModel(
+            id: "nb-whisper-no", displayName: "Norsk · Norwegian, Bokmål and Nynorsk (National Library)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "NbAiLab_nb-whisper-large",
+            languages: .only(["no", "nn"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "NB-Whisper large by the National Library of Norway. Writes Bokmål for Norwegian; set the language to Nynorsk to get Nynorsk spelling."),
     ]
 
     /// Every pack Distavo can offer. Order = Settings order.
@@ -173,6 +191,15 @@ public enum EmbeddedModelCatalog {
         LanguagePack(id: "thai", displayName: "Thai",
                      models: ["th": "thonburian-th"],
                      credit: "Thonburian Whisper, Mahidol University — Apache-2.0"),
+        LanguagePack(id: "welsh", displayName: "Welsh",
+                     models: ["cy": "techiaith-cy"],
+                     credit: "Uned Technolegau Iaith, Bangor University — Apache-2.0"),
+        LanguagePack(id: "icelandic", displayName: "Icelandic",
+                     models: ["is": "lvl-is"],
+                     credit: "Language and Voice Lab, Reykjavík University — CC BY 4.0"),
+        LanguagePack(id: "norwegian", displayName: "Norwegian (Bokmål + Nynorsk)",
+                     models: ["no": "nb-whisper-no", "nn": "nb-whisper-no"],
+                     credit: "NB-Whisper, National Library of Norway — Apache-2.0"),
     ]
 
     public static func pack(id: String) -> LanguagePack? { languagePacks.first { $0.id == id } }

@@ -52,6 +52,13 @@ Nothing is downloaded until the pack is switched on in Settings.
 - **Hebrew** — https://huggingface.co/ivrit-ai/whisper-large-v3-turbo — License: Apache-2.0 — © ivrit.ai.
 - **Thai** — https://huggingface.co/biodatlab/whisper-th-large-v3-combined — License: Apache-2.0 —
   © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
+- **Welsh** — https://huggingface.co/techiaith/whisper-large-ft-cy-en — License: Apache-2.0 —
+  © Uned Technolegau Iaith (Language Technologies Unit), Bangor University.
+- **Icelandic** — https://huggingface.co/language-and-voice-lab/whisper-large-icelandic-30k-steps-1000h —
+  License: CC BY 4.0 — © Language and Voice Lab, Reykjavík University. Attribution: "whisper-large-icelandic
+  by the Language and Voice Lab, Reykjavík University".
+- **Norwegian (Bokmål and Nynorsk)** — https://huggingface.co/NbAiLab/nb-whisper-large — License: Apache-2.0 —
+  © Nasjonalbiblioteket (National Library of Norway), NB AI Lab.
 
 ## Models downloaded at runtime (with your consent, on first use)
 

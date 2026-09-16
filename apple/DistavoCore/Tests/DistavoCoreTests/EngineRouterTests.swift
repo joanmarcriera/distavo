@@ -131,17 +131,17 @@ final class EngineRouterTests: XCTestCase {
     }
 
     func testFixedLanguageUsesEnabledPack() {
-        var cfg = packs(["thai"]); cfg.language = "th"
+        var cfg = packs(["hebrew"]); cfg.language = "he"
         XCTAssertFalse(EngineRouter.needsDetection(cfg))
         let r = EngineRouter.choose(detections: [], config: cfg, memoryBytes: gb8)
-        XCTAssertEqual(r.model.id, "thonburian-th")   // medium: no memory floor
-        XCTAssertEqual(r.languageHint, "th")
+        XCTAssertEqual(r.model.id, "ivrit-he")   // turbo fine-tune: no memory floor
+        XCTAssertEqual(r.languageHint, "he")
     }
 
     func testPackMemoryFloorFallsBackWithNote() {
-        let r = EngineRouter.choose(detections: [d("he")], config: packs(["hebrew"]), memoryBytes: gb8)
-        XCTAssertEqual(r.model.id, "small")
-        XCTAssertEqual(r.languageHint, "he")
+        let r = EngineRouter.choose(detections: [d("th")], config: packs(["thai"]), memoryBytes: gb8)
+        XCTAssertEqual(r.model.id, "small")           // large-v3 fine-tune: 16 GB floor
+        XCTAssertEqual(r.languageHint, "th")
         XCTAssertNotNil(r.note)
     }
 

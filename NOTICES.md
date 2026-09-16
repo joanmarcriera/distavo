@@ -49,8 +49,8 @@ Each pack is a Whisper checkpoint published by its authors on Hugging Face and
 converted to Core ML by Distavo (https://huggingface.co/Joanmarcriera/distavo-whisperkit-coreml).
 Nothing is downloaded until the pack is switched on in Settings.
 
-- **Hebrew** — https://huggingface.co/ivrit-ai/whisper-large-v3 — License: Apache-2.0 — © ivrit.ai.
-- **Thai** — https://huggingface.co/biodatlab/whisper-th-medium-combined — License: Apache-2.0 —
+- **Hebrew** — https://huggingface.co/ivrit-ai/whisper-large-v3-turbo — License: Apache-2.0 — © ivrit.ai.
+- **Thai** — https://huggingface.co/biodatlab/whisper-th-large-v3-combined — License: Apache-2.0 —
   © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
 
 ## Models downloaded at runtime (with your consent, on first use)

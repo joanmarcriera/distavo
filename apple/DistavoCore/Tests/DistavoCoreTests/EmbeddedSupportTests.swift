@@ -73,7 +73,7 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertNil(EmbeddedModelCatalog.packModel(for: "en", enabled: ["hebrew", "thai"]))
         let hebrew = EmbeddedModelCatalog.pack(id: "hebrew")!
         XCTAssertEqual(hebrew.modelIDs, ["ivrit-he"])
-        XCTAssertEqual(hebrew.downloadMB, 3100)
+        XCTAssertEqual(hebrew.downloadMB, 1600)
         XCTAssertEqual(hebrew.languageLabel, "Hebrew")
         XCTAssertNil(EmbeddedModelCatalog.pack(id: "bsc"))
     }

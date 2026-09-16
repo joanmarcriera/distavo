@@ -154,15 +154,15 @@ public enum EmbeddedModelCatalog {
         EmbeddedModel(
             id: "ivrit-he", displayName: "עברית · Hebrew (ivrit.ai)",
             engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "ivrit-ai_whisper-large-v3",
-            languages: .only(["he"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
-            detail: "Whisper large-v3 fine-tuned by ivrit.ai on thousands of hours of Hebrew speech."),
+            whisperKitName: "ivrit-ai_whisper-large-v3-turbo",
+            languages: .only(["he"]), downloadMB: 1600, ramGB: 2, minimumMemoryGB: 0,
+            detail: "Whisper large-v3 turbo fine-tuned by ivrit.ai on thousands of hours of Hebrew speech (Knesset and crowd recordings)."),
         EmbeddedModel(
             id: "thonburian-th", displayName: "ไทย · Thai (Thonburian Whisper)",
             engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "biodatlab_whisper-th-medium-combined",
-            languages: .only(["th"]), downloadMB: 1500, ramGB: 2, minimumMemoryGB: 0,
-            detail: "Whisper medium fine-tuned by Mahidol University (biodatlab) on Thai speech."),
+            whisperKitName: "biodatlab_whisper-th-large-v3-combined",
+            languages: .only(["th"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large-v3 fine-tuned by Mahidol University (Thonburian Whisper) on Thai speech; 6.6 % WER on Common Voice."),
     ]
 
     /// Every pack Distavo can offer. Order = Settings order.

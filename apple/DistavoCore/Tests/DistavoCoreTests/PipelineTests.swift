@@ -100,6 +100,17 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(store.isTooShort("demo"))
     }
 
+    /// A short file is set aside even while Ollama is offline — it must not
+    /// hide behind a deferral (found on the live app, 2026-09-16).
+    func testShortRecordingIsSetAsideEvenWhenSummariserOffline() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(reachable: { _ in false }, duration: { _ in 2 }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .tooShort)
+    }
+
     /// The length check also runs on the converted WAV, for containers the
     /// source probe cannot measure (nil for the source, a number for the WAV).
     func testShortRecordingDetectedAfterConversion() async throws {

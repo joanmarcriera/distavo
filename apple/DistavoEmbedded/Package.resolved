@@ -1,5 +1,4 @@
 {
-  "originHash" : "e731f72655b8d69aeafd5f71c7f46eec6119155ebff85e3b08d8efbdf80e9652",
   "pins" : [
     {
       "identity" : "argmax-oss-swift",
@@ -19,6 +18,15 @@
       }
     },
     {
+      "identity" : "sparkle",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/sparkle-project/Sparkle",
+      "state" : {
+        "revision" : "eef1a539a373c1f1a320624b1130fc5de7b2e100",
+        "version" : "2.10.0"
+      }
+    },
+    {
       "identity" : "swift-argument-parser",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-argument-parser.git",
@@ -28,5 +36,5 @@
       }
     }
   ],
-  "version" : 3
+  "version" : 2
 }

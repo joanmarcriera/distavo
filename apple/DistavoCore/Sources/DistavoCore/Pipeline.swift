@@ -254,6 +254,16 @@ public enum Pipeline {
             return ProcessResult(status: .skipped, base: base, message: "already being processed")
         }
 
+        // Too short to be a meeting? Decide from the source file when
+        // AVFoundation can read it directly (WAV/M4A/…), otherwise from the
+        // converted WAV below. Nothing is written yet, so this is cheap — and
+        // it comes BEFORE the summariser choice: a file that will be set aside
+        // must not sit deferred behind an offline Ollama instead.
+        let minSeconds = Double(max(0, config.minRecordingSeconds))
+        if minSeconds > 0, let seconds = await deps.audioDurationSeconds(path), seconds < minSeconds {
+            return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
+        }
+
         let target: SummariseTarget
         switch await chooseSummariser(config, reachable: deps.ollamaReachable,
                                       embeddedReadiness: deps.embeddedReadiness) {
@@ -266,14 +276,6 @@ public enum Pipeline {
             // recording explained, instead of it being retried every scan.
             state.markFailed(base, why)
             return ProcessResult(status: .failed, base: base, message: why)
-        }
-
-        // Too short to be a meeting? Decide from the source file when
-        // AVFoundation can read it directly (WAV/M4A/…), otherwise from the
-        // converted WAV below. Nothing is written yet, so this is cheap.
-        let minSeconds = Double(max(0, config.minRecordingSeconds))
-        if minSeconds > 0, let seconds = await deps.audioDurationSeconds(path), seconds < minSeconds {
-            return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
         }
 
         state.markProcessing(base)

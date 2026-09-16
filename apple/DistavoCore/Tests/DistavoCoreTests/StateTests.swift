@@ -315,3 +315,21 @@ final class StateTests: XCTestCase {
         XCTAssertEqual(afterWindow.map(\.lastPathComponent), ["demo.opus"])
     }
 }
+
+// MARK: - Speaker hints sidecar (Vikunja #2182)
+
+final class SpeakerHintsTests: XCTestCase {
+    func testRoundTripAndEmptyDetection() throws {
+        let work = FileManager.default.temporaryDirectory
+            .appendingPathComponent("distavo-hints-\(UUID().uuidString)")
+        XCTAssertNil(SpeakerHints.load(workDir: work, base: "x"))
+        let hints = SpeakerHints(count: 2, participants: "A — host; B (me) — guest")
+        try hints.save(workDir: work, base: "Meeting 2026-09-16 10.00.00")
+        XCTAssertEqual(SpeakerHints.load(workDir: work, base: "Meeting 2026-09-16 10.00.00"), hints)
+        XCTAssertEqual(SpeakerHints.url(workDir: work, base: "b").lastPathComponent, "b.speakers.json")
+        XCTAssertTrue(SpeakerHints().isEmpty)
+        XCTAssertTrue(SpeakerHints(count: 0, participants: "  ").isEmpty)
+        XCTAssertFalse(SpeakerHints(count: 2).isEmpty)
+        XCTAssertFalse(SpeakerHints(participants: "someone").isEmpty)
+    }
+}

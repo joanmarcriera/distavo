@@ -46,10 +46,11 @@ final class PipelineTests: XCTestCase {
             ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
         },
         reachable: @escaping (String) async -> Bool = { _ in true },
-        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String) async throws -> String = { _, _, _, _, _ in
+        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String, String?) async throws -> String = { _, _, _, _, _, _ in
             "# Meeting notes\n\nA clean, valid summary."
         },
-        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil
+        onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
+        duration: @escaping (URL) async -> Double? = { _ in nil }
     ) -> PipelineDeps {
         PipelineDeps(
             convertToWav: { _, dest in
@@ -58,8 +59,185 @@ final class PipelineTests: XCTestCase {
                 try Data([0]).write(to: dest)
             },
             transcribe: transcribe, ollamaReachable: reachable, summarise: summarise,
-            onPhase: onPhase)
+            onPhase: onPhase, audioDurationSeconds: duration)
     }
+
+    // MARK: Too-short recordings (Vikunja #2185)
+
+    /// A 4-second take is set aside — no transcription, no note, no `.failed`
+    /// marker — and the reason names both numbers so the menu can show it.
+    func testShortRecordingIsSetAsideNotFailed() async throws {
+        let (cfg, input) = try makeEnv()
+        let transcribed = PhaseRecorder()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in transcribed.append(.transcribing); return [:] },
+                       duration: { _ in 4 }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .tooShort)
+        XCTAssertEqual(result.message, "4 s of audio, below the 15 s minimum")
+        XCTAssertNil(result.notePath)
+        XCTAssertTrue(transcribed.all.isEmpty, "must not transcribe a too-short file")
+        let store = try DistavoState.Store(
+            stateDir: URL(fileURLWithPath: cfg.workDir).appendingPathComponent(".state"),
+            notesDir: URL(fileURLWithPath: cfg.notesDir))
+        XCTAssertTrue(store.isTooShort("demo"))
+        XCTAssertFalse(store.isFailed("demo"))
+        XCTAssertEqual(store.tooShortBases().map(\.base), ["demo"])
+        // And it is no longer pending — until "Process now" clears the marker.
+        XCTAssertTrue(DistavoState.iterPending(
+            recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), state: store).isEmpty)
+        store.retryFailed()
+        XCTAssertFalse(store.isTooShort("demo"))
+    }
+
+    /// The length check also runs on the converted WAV, for containers the
+    /// source probe cannot measure (nil for the source, a number for the WAV).
+    func testShortRecordingDetectedAfterConversion() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(duration: { url in url.pathExtension == "wav" ? 3 : nil }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .tooShort)
+    }
+
+    /// An unknown duration never counts as short; a long one proceeds; a zero
+    /// minimum disables the check entirely.
+    func testUnknownOrLongDurationProceeds() async throws {
+        let (cfg, input) = try makeEnv()
+        let long = await Pipeline.processOne(
+            path: input, config: cfg, deps: deps(duration: { _ in 600 }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(long.status, .done)
+
+        var (off, input2) = try makeEnv()
+        off.minRecordingSeconds = 0
+        let disabled = await Pipeline.processOne(
+            path: input2, config: off, deps: deps(duration: { _ in 1 }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(disabled.status, .done)
+
+    }
+
+    // MARK: Speaker hints (Vikunja #2182)
+
+    /// The owner's post-recording description reaches the summariser verbatim
+    /// and its speaker count overrides the config's for that recording only.
+    func testSpeakerHintsReachTranscribeAndSummarise() async throws {
+        let (cfg, input) = try makeEnv()
+        try SpeakerHints(count: 3, participants: "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
+            .save(workDir: URL(fileURLWithPath: cfg.workDir), base: "demo")
+        let seen = TargetRecorder()
+        let counts = PhaseRecorder()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, tc in
+                    XCTAssertEqual(tc.numSpeakers, 3)
+                    counts.append(.transcribing)
+                    return ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]]
+                },
+                summarise: { _, target, _, owner, speaker, participants in
+                    XCTAssertEqual(owner, "Me")
+                    XCTAssertEqual(speaker, "unknown")
+                    XCTAssertEqual(participants, "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
+                    seen.set(target)
+                    return "# Meeting notes\n\nA clean, valid summary."
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(counts.all.count, 1)
+        XCTAssertNotNil(seen.value)
+        XCTAssertEqual(cfg.transcribe.numSpeakers, 2, "the config itself is untouched")
+    }
+
+    func testNoSpeakerHintsMeansNilParticipants() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, _, _, _, participants in
+                XCTAssertNil(participants)
+                return "# Meeting notes\n\nA clean, valid summary."
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+    }
+
+    // MARK: Recording compaction (Vikunja #2061)
+
+    /// A bulky WAV source is replaced by the compact work WAV once the note is
+    /// written; the message says so.
+    func testBulkyWavIsReplacedByCompactCopyAfterNote() async throws {
+        let (cfg, _) = try makeEnv()
+        let rec = URL(fileURLWithPath: cfg.recordingsDir)
+        let big = rec.appendingPathComponent("Meeting 2026-09-09 10.58.19.wav")
+        try Data(repeating: 7, count: 100_000).write(to: big)
+        let result = await Pipeline.processOne(
+            path: big, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertTrue(result.message.hasPrefix("note written; recording compacted "), result.message)
+        let size = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: big.path)[.size] as? Int)
+        XCTAssertEqual(size, 1, "the source now holds the compact WAV the fake converter wrote")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: big.path))
+        // No staging leftovers beside the recording.
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: rec.path)
+            .filter { $0.contains(".compact-") }
+        XCTAssertTrue(leftovers.isEmpty)
+    }
+
+    /// Off by config, a non-WAV source, or a copy that is not materially
+    /// smaller — the recording is left exactly as it was.
+    func testCompactionLeavesOtherRecordingsAlone() async throws {
+        // Non-WAV source (the default demo.opus) is untouched.
+        let (cfg, input) = try makeEnv()
+        let before = try Data(contentsOf: input)
+        let r1 = await Pipeline.processOne(path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r1.status, .done)
+        XCTAssertEqual(r1.message, "note written")
+        XCTAssertEqual(try Data(contentsOf: input), before)
+
+        // A WAV source with the feature off is untouched.
+        var off = cfg
+        off.compactRecordingsAfterNote = false
+        let wav = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("big.wav")
+        try Data(repeating: 1, count: 50_000).write(to: wav)
+        let r2 = await Pipeline.processOne(path: wav, config: off, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r2.status, .done)
+        XCTAssertEqual(try Data(contentsOf: wav).count, 50_000)
+
+        // A WAV source barely larger than the compact copy is untouched.
+        XCTAssertNil(Pipeline.compactRecording(
+            source: wav, compactWav: URL(fileURLWithPath: cfg.workDir).appendingPathComponent("missing.wav")))
+        let small = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("small.wav")
+        try Data([1, 2]).write(to: small)
+        let compact = URL(fileURLWithPath: cfg.workDir).appendingPathComponent("small.wav")
+        try Data([1]).write(to: compact)
+        XCTAssertNil(Pipeline.compactRecording(source: small, compactWav: compact))
+        XCTAssertEqual(try Data(contentsOf: small).count, 2)
+    }
+
+    // MARK: Detected languages on the result (Vikunja #2161)
+
+    func testResultCarriesDetectedLanguagesWhenPresent() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]],
+                 "engine": "Whisper large-v3-turbo",
+                 "detections": [["code": "ca", "probability": 0.92], ["code": "en", "probability": 0.71],
+                                ["code": "ca", "probability": 0.85]]]
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(result.detectedLanguages, "Catalan 92%, English 71%")
+
+        let plain = await Pipeline.processOne(
+            path: try makeEnv().1, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertNil(plain.detectedLanguages)
+    }
+
 
     func testSuccessWritesNoteAndMarksDone() async throws {
         let (cfg, input) = try makeEnv()
@@ -142,7 +320,7 @@ final class PipelineTests: XCTestCase {
         let repeated = String(repeating: "the cat sat on mat ", count: 20)
         let result = await Pipeline.processOne(
             path: input, config: cfg,
-            deps: deps(summarise: { _, _, _, _, _ in repeated }),
+            deps: deps(summarise: { _, _, _, _, _, _ in repeated }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .failed)
         XCTAssertTrue(result.message.contains("repetition collapse"))
@@ -299,7 +477,7 @@ final class PipelineTests: XCTestCase {
         let result = await Pipeline.processOne(
             path: input, config: cfg,
             deps: deps(reachable: { _ in false },
-                       summarise: { _, target, _, _, _ in
+                       summarise: { _, target, _, _, _, _ in
                            seen.set(target)
                            return "# Meeting notes\n\nA clean, valid summary."
                        }),

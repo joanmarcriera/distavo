@@ -22,7 +22,18 @@ public enum AudioConverter {
                       channels: 1, interleaved: true)!
     }
 
+    /// Seconds of audio in `url`, or nil when AVFoundation cannot open it as
+    /// an audio file (a video container, an unsupported codec, a truncated
+    /// header). Callers treat nil as "unknown" — never as "short".
+    public static func durationSeconds(of url: URL) -> Double? {
+        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        let rate = file.fileFormat.sampleRate
+        guard rate > 0 else { return nil }
+        return Double(file.length) / rate
+    }
+
     /// Convert any AVFoundation-readable recording to a 16 kHz mono PCM WAV at `dest`.
+
     public static func convertToWav(source: URL, dest: URL) async throws {
         let ext = "." + source.pathExtension.lowercased()
         if unsupportedExtensions.contains(ext) {

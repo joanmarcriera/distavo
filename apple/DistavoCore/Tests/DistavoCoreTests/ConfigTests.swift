@@ -22,7 +22,35 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(c.summarise.options.seed, 42)
         XCTAssertEqual(c.noteOwner, "Me")
         XCTAssertEqual(c.userSpeaker, "unknown")
+        XCTAssertEqual(c.minRecordingSeconds, 15)
+        XCTAssertTrue(c.compactRecordingsAfterNote)
+        XCTAssertTrue(c.askSpeakersOnStop)
     }
+
+    /// The 1.12 keys are absent from every existing config file and must
+    /// decode to their defaults, and round-trip once written.
+    func testNewKeysDefaultWhenAbsentAndRoundTrip() throws {
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"note_owner": "Marc"}"#.write(to: url, atomically: true, encoding: .utf8)
+        let c = try Config.load(from: url)
+        XCTAssertEqual(c.minRecordingSeconds, 15)
+        XCTAssertTrue(c.compactRecordingsAfterNote)
+        XCTAssertTrue(c.askSpeakersOnStop)
+
+        var edited = c
+        edited.minRecordingSeconds = 30
+        edited.compactRecordingsAfterNote = false
+        edited.askSpeakersOnStop = false
+        try Config.save(edited, to: url)
+        let json = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(json.contains("\"min_recording_seconds\" : 30"))
+        XCTAssertTrue(json.contains("\"compact_recordings_after_note\" : false"))
+        XCTAssertTrue(json.contains("\"ask_speakers_on_stop\" : false"))
+        XCTAssertEqual(try Config.load(from: url), edited)
+    }
+
 
     func testLoadCreatesDefaultsWhenMissing() throws {
         let url = tempFile()

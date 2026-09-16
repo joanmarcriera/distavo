@@ -9,7 +9,12 @@ public enum ProcessStatus: String, Equatable {
     /// and is retried on the next scan — never marked failed.
     case deferred
     case failed
+    /// Under `min_recording_seconds` of audio — set aside with a `.tooshort`
+    /// marker, never transcribed, never `failed`; the menu offers to delete
+    /// the file (Vikunja #2185).
+    case tooShort = "too_short"
 }
+
 
 /// Thrown by any `PipelineDeps.transcribe` implementation for a condition that
 /// resolves on its own (no internet for a one-time model download, a download
@@ -49,13 +54,20 @@ public struct ProcessResult: Equatable {
     public let message: String
     public var notePath: URL?
     public var transcriptPath: URL?
+    /// "Catalan 92%, English 71%" when the transcribe result carried the
+    /// router's detections (the built-in engine in Automatic mode); nil
+    /// otherwise. Same text as the note footer (Vikunja #2161).
+    public var detectedLanguages: String?
 
     public init(status: ProcessStatus, base: String, message: String,
-                notePath: URL? = nil, transcriptPath: URL? = nil) {
+                notePath: URL? = nil, transcriptPath: URL? = nil,
+                detectedLanguages: String? = nil) {
         self.status = status; self.base = base; self.message = message
         self.notePath = notePath; self.transcriptPath = transcriptPath
+        self.detectedLanguages = detectedLanguages
     }
 }
+
 
 /// Injectable effects, mirroring the Python `deps` SimpleNamespace seam so the
 /// pipeline can be tested without servers, ffmpeg, or AVFoundation.
@@ -90,9 +102,15 @@ public struct PipelineDeps {
     /// `ollamaReachable`. Defaults to `.ready`, keeping every existing caller and
     /// test unchanged; the app layer wires it to `EmbeddedSummariser`.
     public var embeddedReadiness: () async -> EmbeddedReadiness
+    /// `participants` is the note owner's own description of who was in the
+    /// meeting (`SpeakerHints`), or nil — it reaches `Prompt.build` verbatim.
     public var summarise: (_ transcript: String, _ target: SummariseTarget,
                            _ options: SummariseOptions, _ noteOwner: String,
-                           _ userSpeaker: String) async throws -> String
+                           _ userSpeaker: String, _ participants: String?) async throws -> String
+    /// Seconds of audio in a file, or nil when unknown. Consulted before
+    /// transcribing so a too-short recording is set aside rather than failed
+    /// (Vikunja #2185). Defaults to AVFoundation; tests inject a stub.
+    public var audioDurationSeconds: (URL) async -> Double?
     /// Optional stage-boundary progress. Defaults to nil so tests and callers
     /// that don't care are unaffected (preserves the DI seam).
     public var onPhase: (@Sendable (ProcessingPhase) -> Void)?
@@ -101,9 +119,10 @@ public struct PipelineDeps {
         convertToWav: @escaping (URL, URL) async throws -> Void,
         transcribe: @escaping (URL, TranscribeConfig) async throws -> [String: Any],
         ollamaReachable: @escaping (String) async -> Bool,
-        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String) async throws -> String,
+        summarise: @escaping (String, SummariseTarget, SummariseOptions, String, String, String?) async throws -> String,
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
-        embeddedReadiness: @escaping () async -> EmbeddedReadiness = { .ready }
+        embeddedReadiness: @escaping () async -> EmbeddedReadiness = { .ready },
+        audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) }
     ) {
         self.convertToWav = convertToWav
         self.transcribe = transcribe
@@ -111,7 +130,9 @@ public struct PipelineDeps {
         self.summarise = summarise
         self.onPhase = onPhase
         self.embeddedReadiness = embeddedReadiness
+        self.audioDurationSeconds = audioDurationSeconds
     }
+
 
     /// Real dependencies wired to AVFoundation + the HTTP clients.
     public static func live() -> PipelineDeps {
@@ -121,14 +142,16 @@ public struct PipelineDeps {
             convertToWav: { try await AudioConverter.convertToWav(source: $0, dest: $1) },
             transcribe: { try await whisper.transcribe(wavURL: $0, config: $1) },
             ollamaReachable: { await ollama.reachable($0) },
-            summarise: { transcript, target, options, owner, speaker in
+            summarise: { transcript, target, options, owner, speaker, participants in
                 // DistavoCore is dependency-free, so it can only serve the Ollama
                 // target. The app layer (AppPipelineDeps) wraps this to route
                 // `.embedded` at the FoundationModels engine.
                 guard case let .ollama(url, model) = target else {
                     throw OllamaError("On-device summarisation is not available in this build.")
                 }
-                let prompt = Prompt.build(transcript: transcript, noteOwner: owner, userSpeaker: speaker)
+                let prompt = Prompt.build(transcript: transcript, noteOwner: owner,
+                                          userSpeaker: speaker, participants: participants)
+
                 return try await ollama.generate(url: url, model: model, prompt: prompt, options: options)
             })
     }
@@ -218,13 +241,30 @@ public enum Pipeline {
             return ProcessResult(status: .failed, base: base, message: why)
         }
 
+        // Too short to be a meeting? Decide from the source file when
+        // AVFoundation can read it directly (WAV/M4A/…), otherwise from the
+        // converted WAV below. Nothing is written yet, so this is cheap.
+        let minSeconds = Double(max(0, config.minRecordingSeconds))
+        if minSeconds > 0, let seconds = await deps.audioDurationSeconds(path), seconds < minSeconds {
+            return setAsideTooShort(state: state, base: base, seconds: seconds, minimum: minSeconds)
+        }
+
         state.markProcessing(base)
         try? FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
         let notePath = state.notePath(base)
 
+        // The owner's post-recording description of the meeting, if any:
+        // its speaker count is authoritative for diarisation, and the
+        // participants text goes into the prompt.
+        let hints = SpeakerHints.load(workDir: workDir, base: base)
+        var transcribeConfig = config.transcribe
+        if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
+        let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+
         do {
             let wavPath = workDir.appendingPathComponent("\(base).wav")
             deps.onPhase?(.converting)
+
             // A prior attempt (e.g. one that later hit a RetryableDependencyError
             // at the transcribe stage) may have already produced a good WAV for
             // this exact source file — re-converting it is wasted work on every
@@ -234,9 +274,16 @@ public enum Pipeline {
             if !wavIsFresh(wavPath: wavPath, sourcePath: path) {
                 try await deps.convertToWav(path, wavPath)
             }
+            // Second chance for the length check: containers AVFoundation
+            // could not measure directly (video files) are measurable now.
+            if minSeconds > 0, let seconds = await deps.audioDurationSeconds(wavPath), seconds < minSeconds {
+                return setAsideTooShort(state: state, base: base, seconds: seconds, minimum: minSeconds)
+            }
 
             deps.onPhase?(.transcribing)
-            let result = try await deps.transcribe(wavPath, config.transcribe)
+            let result = try await deps.transcribe(wavPath, transcribeConfig)
+            let detectedLanguages = detectedLanguages(from: result)
+
             let clean = TranscriptCleaner.clean(TranscriptCleaner.segments(from: result))
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state.markFailed(base, "empty transcript")
@@ -248,7 +295,7 @@ public enum Pipeline {
             deps.onPhase?(.summarising)
             let summary = try await deps.summarise(
                 clean, target, config.summarise.options,
-                config.noteOwner, config.userSpeaker)
+                config.noteOwner, config.userSpeaker, participants)
             let noteText = summary + provenanceFooter(from: result)
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
 
@@ -257,12 +304,20 @@ public enum Pipeline {
                 let message = failures.joined(separator: "; ")
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
-                                     notePath: notePath, transcriptPath: transcriptPath)
+                                     notePath: notePath, transcriptPath: transcriptPath,
+                                     detectedLanguages: detectedLanguages)
             }
             state.markDone(base)
-            return ProcessResult(status: .done, base: base, message: "note written",
-                                 notePath: notePath, transcriptPath: transcriptPath)
+            var message = "note written"
+            if config.compactRecordingsAfterNote,
+               let compacted = compactRecording(source: path, compactWav: wavPath) {
+                message += "; recording compacted \(compacted)"
+            }
+            return ProcessResult(status: .done, base: base, message: message,
+                                 notePath: notePath, transcriptPath: transcriptPath,
+                                 detectedLanguages: detectedLanguages)
         } catch let retry as RetryableDependencyError {
+
             // I2: grow the wait with each consecutive deferral (60 s, 120 s,
             // 240 s, … capped at 1800 s) instead of retrying on every scan —
             // a dependency that stays offline for a while (or a model folder
@@ -283,7 +338,60 @@ public enum Pipeline {
         }
     }
 
+    /// Record `base` as too short and report it. Not a failure: `.tooshort` is
+    /// its own marker so the menu can offer "delete it?" instead of "retry".
+    private static func setAsideTooShort(
+        state: DistavoState.Store, base: String, seconds: Double, minimum: Double
+    ) -> ProcessResult {
+        let reason = "\(Int(seconds.rounded())) s of audio, below the \(Int(minimum)) s minimum"
+        state.markTooShort(base, reason)
+        return ProcessResult(status: .tooShort, base: base, message: reason)
+    }
+
+    /// Replace a bulky WAV recording with the 16 kHz mono 16-bit WAV the
+    /// transcriber consumed (Vikunja #2061) — the recorder's 48 kHz stereo
+    /// float32 take is ~20x larger and, once the note is written, only ever
+    /// re-read for a retry, which the compact copy serves equally well.
+    /// Only `.wav` sources are touched, and only when the compact copy is
+    /// under half the size, so a phone's M4A or an already-small WAV is left
+    /// alone. Atomic (`replaceItemAt`), so a crash mid-copy leaves the
+    /// original. Returns a "486 MB → 24 MB" label, or nil when nothing
+    /// happened (including on any error — never fail a written note over
+    /// housekeeping).
+    static func compactRecording(source: URL, compactWav: URL) -> String? {
+        guard source.pathExtension.lowercased() == "wav" else { return nil }
+        let fm = FileManager.default
+        guard let sourceSize = (try? fm.attributesOfItem(atPath: source.path))?[.size] as? Int,
+              let compactSize = (try? fm.attributesOfItem(atPath: compactWav.path))?[.size] as? Int,
+              compactSize > 0, compactSize * 2 < sourceSize else { return nil }
+        // Stage a copy beside the recording so the replace stays on one volume.
+        let staged = source.deletingLastPathComponent()
+            .appendingPathComponent(".\(source.lastPathComponent).compact-\(UUID().uuidString)")
+        do {
+            try fm.copyItem(at: compactWav, to: staged)
+            _ = try fm.replaceItemAt(source, withItemAt: staged)
+        } catch {
+            try? fm.removeItem(at: staged)
+            return nil
+        }
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        return "\(formatter.string(fromByteCount: Int64(sourceSize))) → \(formatter.string(fromByteCount: Int64(compactSize)))"
+    }
+
+    /// The router's detections from the transcribe result, formatted for the
+    /// menu — nil when absent (server path) or empty.
+    static func detectedLanguages(from transcribeResult: [String: Any]) -> String? {
+        let detections: [(code: String, probability: Double)] =
+            (transcribeResult["detections"] as? [[String: Any]] ?? []).compactMap { entry in
+                guard let code = entry["code"] as? String else { return nil }
+                return (code: code, probability: entry["probability"] as? Double ?? 0)
+            }
+        return NoteProvenance.detectedLanguages(detections)
+    }
+
     /// Builds the note's provenance footer from the transcribe result's
+
     /// optional `"engine"` / `"detections"` keys (set only by the app layer's
     /// embedded path — `PipelineDeps.live()`'s own transcribe closure never
     /// sets them, and neither does the WhisperX server response). Empty

@@ -165,13 +165,30 @@ public struct Config: Codable, Equatable {
     public var summarise: SummariseConfig
     public var noteOwner: String
     public var userSpeaker: String
+    /// A recording shorter than this (seconds of audio) is set aside as "too
+    /// short" instead of being transcribed and failing on an empty transcript
+    /// (Vikunja #2185): the menu offers to delete it. 0 disables the check.
+    public var minRecordingSeconds: Int
+    /// Once a note is written, replace a bulky WAV recording with the 16 kHz
+    /// mono 16-bit copy the transcriber used (~20x smaller, Vikunja #2061).
+    /// Only WAV sources are touched, and only when the copy is materially
+    /// smaller; the note and transcript are already on disk by then.
+    public var compactRecordingsAfterNote: Bool
+    /// After the built-in recorder stops, ask who was in the meeting (count,
+    /// the owner's role, the other participants) and hand that to the
+    /// summariser as authoritative context (Vikunja #2182).
+    public var askSpeakersOnStop: Bool
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
         case recordingsDir = "recordings_dir", notesDir = "notes_dir", workDir = "work_dir"
         case transcribe, summarise
         case noteOwner = "note_owner", userSpeaker = "user_speaker"
+        case minRecordingSeconds = "min_recording_seconds"
+        case compactRecordingsAfterNote = "compact_recordings_after_note"
+        case askSpeakersOnStop = "ask_speakers_on_stop"
     }
+
 
     public init(watchIntervalSeconds: Int = 20,
                 recordingsDir: String = "~/Documents/Distavo/recordings",
@@ -180,12 +197,19 @@ public struct Config: Codable, Equatable {
                 transcribe: TranscribeConfig = .init(),
                 summarise: SummariseConfig = .init(),
                 noteOwner: String = "Me",
-                userSpeaker: String = "unknown") {
+                userSpeaker: String = "unknown",
+                minRecordingSeconds: Int = 15,
+                compactRecordingsAfterNote: Bool = true,
+                askSpeakersOnStop: Bool = true) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
+        self.minRecordingSeconds = minRecordingSeconds
+        self.compactRecordingsAfterNote = compactRecordingsAfterNote
+        self.askSpeakersOnStop = askSpeakersOnStop
     }
+
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -198,7 +222,11 @@ public struct Config: Codable, Equatable {
         summarise = try c.decodeIfPresent(SummariseConfig.self, forKey: .summarise) ?? d.summarise
         noteOwner = try c.decodeIfPresent(String.self, forKey: .noteOwner) ?? d.noteOwner
         userSpeaker = try c.decodeIfPresent(String.self, forKey: .userSpeaker) ?? d.userSpeaker
+        minRecordingSeconds = try c.decodeIfPresent(Int.self, forKey: .minRecordingSeconds) ?? d.minRecordingSeconds
+        compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
+        askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
     }
+
 
     // MARK: Paths
 

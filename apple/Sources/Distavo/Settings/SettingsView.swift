@@ -295,6 +295,13 @@ struct SettingsView: View {
                 }
                 TextField("Server model", text: $draft.summarise.server.model)
                 HStack {
+                    Picker("Prompt", selection: $draft.summarise.promptStyle) {
+                        Text("Facts first (recommended)").tag(Prompt.Style.factsFirst)
+                        Text("Classic").tag(Prompt.Style.classic)
+                    }
+                    HelpButton(text: "‘Facts first’ makes the model identify the speakers with evidence and list every number, date, company and rate it heard (with UK-contracting corrections such as “8.50 per day” → £850) before writing the notes, and keeps that ledger in the note as an audit trail. Best with a capable model such as gemma4:26b. ‘Classic’ is the shorter original prompt. On-device (Apple Intelligence) summaries always use Classic.")
+                }
+                HStack {
                     TextField("Local Ollama URL", text: $draft.summarise.local.url)
                     ServerHelpButton(kind: .ollama)
                 }

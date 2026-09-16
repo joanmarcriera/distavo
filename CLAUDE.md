@@ -62,7 +62,9 @@ of the original Python module (noted in its header).
   WhisperX / Ollama URLs. **`NetworkScope.swift`** classifies endpoints as loopback / private-LAN / public.
 - **`EmbeddedSummary.swift`** — dependency-free token budgeting and chunking for Foundation Models.
   Context is 4096 tokens (input + output); long recordings are map-reduced through Prompt.build.
-- **`Prompt.swift`** — builds the meeting-notes prompt, kept verbatim in parity with the original.
+- **`Prompt.swift`** — two templates: `classic` (the original port, verbatim; always used by the Foundation Models
+  path) and `factsFirst` (bake-off variant D: speakers with evidence, facts ledger, recording metadata; the
+  Ollama default since 1.12 via `summarise.prompt_style`). `NoteContext` carries owner/speaker/participants/date/style.
 - **`TranscriptCleaner.swift`** — turns raw WhisperX output into speaker-grouped, timestamp-free transcript.
   **`SummaryValidator.swift`** — post-summary sanity checks (repetition collapse / empty / overlong).
 - **`ActivityLog.swift`** — append-only activity log at `~/Library/Logs/Distavo/distavo.log`.

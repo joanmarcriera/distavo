@@ -111,10 +111,15 @@ public enum EmbeddedSummariser {
     /// ones are map-reduced: each chunk is summarised into compact bullets, then
     /// those bullets are fed through the *same* normal prompt, so the final note
     /// keeps the format `SummaryValidator` expects either way.
+    /// `participants` is the owner's post-recording description of who was in
+    /// the meeting (Vikunja #2182); it goes into the final prompt only — the
+    /// map step summarises chunks without it.
     public static func summarise(
         transcript: String, noteOwner: String, userSpeaker: String,
+        participants: String? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
+
         // Fall back to the handler set by the app when no per-call one is given.
         let report: @Sendable (String) -> Void = onProgress ?? { handlerBox.report($0) }
         if let reason = unavailableReason() { throw reason }
@@ -137,7 +142,8 @@ public enum EmbeddedSummariser {
         case .single:
             report("Summarising on this Mac…")
             let prompt = Prompt.build(
-                transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker)
+                transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
+                participants: participants)
             return try await generate(prompt, maxOutputTokens: finalBudget.reservedForOutput)
 
         case .contextTooSmall:
@@ -162,8 +168,10 @@ public enum EmbeddedSummariser {
                 partials: partials, contextSize: contextSize,
                 noteOwner: noteOwner, userSpeaker: userSpeaker, onProgress: report)
             return try await generate(
-                Prompt.build(transcript: merged, noteOwner: noteOwner, userSpeaker: userSpeaker),
+                Prompt.build(transcript: merged, noteOwner: noteOwner, userSpeaker: userSpeaker,
+                             participants: participants),
                 maxOutputTokens: finalBudget.reservedForOutput)
+
         }
         #else
         throw EmbeddedSummariserError.unsupportedOS

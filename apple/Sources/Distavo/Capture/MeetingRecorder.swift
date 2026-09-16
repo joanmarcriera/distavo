@@ -174,17 +174,56 @@ final class MeetingRecorder {
     /// each side of the recording actually contained signal. The file appears
     /// under its final `.wav` name only after the (asynchronous) channel
     /// balance finishes, so the folder scanner never sees it early.
-    func stop() -> Outcome? {
+    ///
+    /// With `deferFinalize`, the take stays a `.part` (invisible to the
+    /// scanner) until `finalizeDeferred()` — so the UI can ask the owner about
+    /// the speakers first and have the answer on disk before the pipeline can
+    /// possibly pick the recording up (Vikunja #2182).
+    func stop(deferFinalize: Bool = false) -> Outcome? {
         guard isRecording, let url = fileURL, let part = partURL else { return nil }
         isRecording = false
         teardown()  // closes `file`, so `part` is fully flushed
-        queue.async { Self.finalize(part: part, to: url) }
+        if deferFinalize {
+            deferred = (part, url)
+        } else {
+            queue.async { Self.finalize(part: part, to: url) }
+        }
         return Outcome(url: url,
                        microphoneHeard: micPeak > 0.001,
                        systemAudioHeard: tapPeak > 0.001)
     }
 
+    private var deferred: (part: URL, url: URL)?
+
+    /// Balance and publish a take held back by `stop(deferFinalize: true)`.
+    func finalizeDeferred() {
+        guard let pending = deferred else { return }
+        deferred = nil
+        queue.async { Self.finalize(part: pending.part, to: pending.url) }
+
+    }
+
+    /// Stop and throw the take away (Vikunja #2068): the `.part` file is
+    /// deleted before it could ever be renamed to a `.wav` the folder scanner
+    /// would pick up, so nothing is transcribed. Returns the discarded name.
+    func discard() -> String? {
+        guard isRecording, let url = fileURL, let part = partURL else { return nil }
+        isRecording = false
+        teardown()  // closes `file`
+        try? FileManager.default.removeItem(at: part)
+        try? FileManager.default.removeItem(at: url)  // never exists yet; belt and braces
+        return url.lastPathComponent
+    }
+
+    /// Whether the system-audio tap has delivered any signal so far — read
+    /// while recording so the UI can warn early that the meeting side is
+    /// silent (Vikunja #2060), instead of only after the call has ended.
+    var systemAudioHeardSoFar: Bool {
+        queue.sync { tapPeak > 0.001 }
+    }
+
     /// Balance mic vs system-audio loudness and move `part` to its final
+
     /// name. If balancing fails, deliver the raw recording — never lose a
     /// meeting to post-processing.
     private static func finalize(part: URL, to url: URL) {

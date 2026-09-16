@@ -127,6 +127,62 @@ public enum DistavoState {
         public func isDone(_ base: String) -> Bool { exists(notePath(base)) || exists(marker(base, "done")) }
         public func isProcessing(_ base: String) -> Bool { exists(marker(base, "processing")) }
         public func isFailed(_ base: String) -> Bool { exists(marker(base, "failed")) }
+        /// True when `base` carries a `.tooshort` marker for the file as it
+        /// is now. The marker records the file size it was set for, so a
+        /// recording later replaced by a different file under the same name
+        /// (a voice-memo app reusing a fixed name, a corrected re-take) is
+        /// pending again rather than skipped forever — and is never the
+        /// file the menu's "Delete" trashes. `currentSize` nil (file
+        /// missing/unreadable) trusts the marker.
+        public func isTooShort(_ base: String, currentSize: Int? = nil) -> Bool {
+            guard let content = try? String(contentsOf: marker(base, "tooshort"), encoding: .utf8) else { return false }
+            guard let currentSize else { return true }
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            guard lines.count >= 2, let recorded = Int(lines[1].trimmingCharacters(in: .whitespaces)) else { return true }
+            return recorded == currentSize
+        }
+
+        // MARK: Too-short recordings (Vikunja #2185)
+        //
+        // A `.tooshort` marker is deliberately NOT a `.failed` marker: nothing
+        // went wrong, there was just nothing worth transcribing (a mis-click
+        // on Record, a 4 KB header-only WAV from an interrupted capture). The
+        // menu lists these separately and offers to delete the file; "Process
+        // now" clears them like any other marker so a raised threshold or a
+        // replaced file is retried.
+
+        /// Set `base` aside as too short to transcribe; the reason is shown in
+        /// the menu (e.g. "4 s of audio, below the 15 s minimum"). `fileSize`
+        /// fingerprints the file so `isTooShort(_:currentSize:)` can tell a
+        /// replaced file from the one that was measured.
+        public func markTooShort(_ base: String, _ reason: String, fileSize: Int? = nil) {
+            write(reason + "\n" + (fileSize.map(String.init) ?? "") + "\n", marker(base, "tooshort"))
+            clearProcessing(base)
+            clearDeferred(base)
+        }
+
+        public func clearTooShort(_ base: String) { remove(marker(base, "tooshort")) }
+
+        /// Every recording currently set aside as too short, with its reason,
+        /// sorted by base name — the menu's "delete it?" list.
+        public func tooShortBases() -> [(base: String, reason: String)] {
+            markers(suffix: "tooshort")
+        }
+
+        private func markers(suffix: String) -> [(base: String, reason: String)] {
+            let items = (try? fm.contentsOfDirectory(
+                at: stateDir, includingPropertiesForKeys: nil)) ?? []
+            return items
+                .filter { $0.pathExtension == suffix }
+                .map { url in
+                    // First line only: `.tooshort` markers carry a size on line 2.
+                    let reason = (try? String(contentsOf: url, encoding: .utf8))?
+                        .split(separator: "\n", omittingEmptySubsequences: false).first
+                        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+                    return (url.deletingPathExtension().lastPathComponent, reason)
+                }
+                .sorted { $0.0 < $1.0 }
+        }
 
         public func markProcessing(_ base: String) { write("processing\n", marker(base, "processing")) }
         public func clearProcessing(_ base: String) { remove(marker(base, "processing")) }
@@ -137,6 +193,7 @@ public enum DistavoState {
             clearProcessing(base)
             clearFailed(base)
             clearDeferred(base)
+            clearTooShort(base)
         }
 
         public func markFailed(_ base: String, _ error: String) {
@@ -191,16 +248,7 @@ public enum DistavoState {
         /// a permanently-failed recording is invisible, discoverable only by
         /// noticing a missing note or reading the activity log.
         public func failedBases() -> [(base: String, error: String)] {
-            let items = (try? fm.contentsOfDirectory(
-                at: stateDir, includingPropertiesForKeys: nil)) ?? []
-            return items
-                .filter { $0.pathExtension == "failed" }
-                .map { url in
-                    let reason = (try? String(contentsOf: url, encoding: .utf8))?
-                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    return (url.deletingPathExtension().lastPathComponent, reason)
-                }
-                .sorted { $0.0 < $1.0 }
+            markers(suffix: "failed").map { (base: $0.base, error: $0.reason) }
         }
 
         private func removeMarkers(suffix: String) {
@@ -213,14 +261,16 @@ public enum DistavoState {
         /// they indicate a prior crash mid-process).
         public func clearStaleProcessing() { removeMarkers(suffix: "processing") }
 
-        /// Clear all `.failed` (and stale `.processing`, and `.deferred`)
-        /// markers so every recording gets retried right away (the "Process
-        /// now" path) rather than waiting out its backoff window.
+        /// Clear all `.failed` (and stale `.processing`, `.deferred` and
+        /// `.tooshort`) markers so every recording gets retried right away
+        /// (the "Process now" path) rather than waiting out its backoff window.
         public func retryFailed() {
             removeMarkers(suffix: "failed")
             removeMarkers(suffix: "processing")
             removeMarkers(suffix: "deferred")
+            removeMarkers(suffix: "tooshort")
         }
+
     }
 
     /// List recordings still needing work (recursive, sorted, marker-filtered).
@@ -246,6 +296,11 @@ public enum DistavoState {
             .url
     }
 
+    /// Size in bytes, or nil when unreadable.
+    public static func fileSize(_ url: URL) -> Int? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
+    }
+
     public static func iterPending(
         recordingsDir: URL, state: Store, extensions: Set<String> = supportedExtensions,
         now: () -> Date = Date.init
@@ -267,6 +322,8 @@ public enum DistavoState {
             if !extensions.contains(ext) { continue }
             let base = baseFor(recordingsDir: recordingsDir, path: url)
             if state.isDone(base) || state.isProcessing(base) || state.isFailed(base) { continue }
+            if state.isTooShort(base, currentSize: fileSize(url)) { continue }
+
             if let until = state.deferredUntil(base), until > now() { continue }
             pending.append(url)
         }

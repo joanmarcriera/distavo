@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import Combine
+import UniformTypeIdentifiers
 import DistavoCore
 import DistavoEmbedded
 
@@ -31,6 +32,16 @@ final class WatcherController: ObservableObject {
     /// reflects the current run and resets on relaunch), this is read from disk,
     /// so a recording that failed weeks ago stays visible until it is retried.
     @Published private(set) var failedRecordings: [(base: String, error: String)] = []
+    /// Recordings set aside as too short to transcribe (Vikunja #2185), read
+    /// from their `.tooshort` markers like `failedRecordings`. The menu offers
+    /// to move each one to the Bin.
+    @Published private(set) var tooShortRecordings: [(base: String, reason: String)] = []
+    /// "Catalan 92%, English 71%" from the last recording the router detected
+    /// a language for (Vikunja #2161); survives relaunch via UserDefaults so
+    /// Settings can caption the Language picker with it.
+    @Published private(set) var lastDetectedLanguages: String? =
+        UserDefaults.standard.string(forKey: WatcherController.lastDetectedKey)
+
     /// The `ModelCoordinator`'s latest progress message, published unconditionally
     /// (unlike `status`, which only moves while `processingActive`) so Settings'
     /// "Download now" can show it. This controller owns the coordinator's one
@@ -52,6 +63,8 @@ final class WatcherController: ObservableObject {
         folderProvider: { [weak self] in
             Config.resolvePath(self?.config.recordingsDir ?? Config().recordingsDir)
         },
+        configProvider: { [weak self] in self?.config ?? Config() },
+
         notify: { [weak self] title, body in self?.notifier.notify(title: title, body: body) },
         log: { [weak self] message in self?.log(message) })
     private let needsOnboarding: Bool
@@ -73,6 +86,8 @@ final class WatcherController: ObservableObject {
         seconds % 60 == 0 ? "\(seconds / 60)m" : "\(seconds)s"
     }
     private static let onboardedKey = "distavo.didOnboard"
+    private static let lastDetectedKey = "distavo.lastDetectedLanguages"
+
     private static let localNetWarnedKey = "distavo.didWarnLocalNetwork"
 
     init(deps: PipelineDeps = .appLive()) {
@@ -245,6 +260,55 @@ final class WatcherController: ObservableObject {
     /// only what happened since launch.
     private func refreshFailedRecordings() {
         failedRecordings = store()?.failedBases() ?? []
+        tooShortRecordings = store()?.tooShortBases() ?? []
+    }
+
+    /// Move a too-short recording to the Bin and forget its marker (Vikunja
+    /// #2185). The Bin, not `removeItem`, so a mis-click is recoverable.
+    func deleteTooShortRecording(_ base: String) {
+        let recordingsDir = Config.resolvePath(config.recordingsDir)
+        guard let url = Self.recordingURL(forBase: base, in: recordingsDir) else {
+            // Already gone (deleted in Finder) — just drop the marker.
+            store()?.clearTooShort(base)
+            refreshFailedRecordings()
+            return
+        }
+        // The marker is fingerprinted with the file it was set for: if a
+        // different file now sits under that name, it is a real recording —
+        // release it to the scanner instead of trashing it.
+        guard store()?.isTooShort(base, currentSize: DistavoState.fileSize(url)) == true else {
+            store()?.clearTooShort(base)
+            log("\(url.lastPathComponent) was replaced since it was marked too short — it will be processed instead")
+            refreshFailedRecordings()
+            return
+        }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            store()?.clearTooShort(base)
+            log("Moved too-short recording to the Bin: \(url.lastPathComponent)")
+        } catch {
+            log("Could not delete \(url.lastPathComponent): \(error.localizedDescription)")
+            notifier.notify(title: "Could not delete recording", body: error.localizedDescription)
+        }
+        refreshFailedRecordings()
+    }
+
+    func deleteAllTooShortRecordings() {
+        for entry in tooShortRecordings { deleteTooShortRecording(entry.base) }
+    }
+
+    /// The recording whose sanitized, subfolder-aware base is `base`. Bases
+    /// are one-way (unsafe characters become `_`), so this walks the folder
+    /// the same way `iterPending` does and compares.
+    nonisolated static func recordingURL(forBase base: String, in recordingsDir: URL) -> URL? {
+        guard let en = FileManager.default.enumerator(
+            at: recordingsDir, includingPropertiesForKeys: [.isRegularFileKey]) else { return nil }
+        for case let url as URL in en {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true,
+                  supportedExtensions.contains("." + url.pathExtension.lowercased()) else { continue }
+            if DistavoState.baseFor(recordingsDir: recordingsDir, path: url) == base { return url }
+        }
+        return nil
     }
 
     /// Clear the failed markers and rescan, so a user who sees the warning has a
@@ -344,9 +408,25 @@ final class WatcherController: ObservableObject {
             hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             lastError = nil
+            if let detected = result.detectedLanguages {
+                log("Detected language: \(detected)")
+                lastDetectedLanguages = detected
+                UserDefaults.standard.set(detected, forKey: Self.lastDetectedKey)
+            }
             log("Saved note: \(result.base)")
+            if result.message.contains("recording compacted") {
+                log(result.message.replacingOccurrences(of: "note written; ", with: "")
+                    .replacingOccurrences(of: "recording compacted", with: "Recording compacted"))
+            }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
+        case .tooShort:
+            status = "Too short: \(result.base)"
+            log("Too short to transcribe — \(result.message): \(result.base)")
+            notifier.notify(title: "Recording too short — delete it?",
+                            body: "\(result.base): \(result.message). Delete it from the Distavo menu, "
+                                + "or lower the minimum in Settings and choose Process now.")
+
         case .deferredNeedLocal:
             status = "Needs local Ollama"
             if !deferredBases.contains(result.base) {
@@ -370,6 +450,124 @@ final class WatcherController: ObservableObject {
     }
 
     // MARK: Manual actions (menu)
+
+    /// "Process a recording with…" (Vikunja #2159): pick a file, then an
+    /// engine/model and a language, and run the pipeline once with those
+    /// settings. The note is written beside the normal one as
+    /// `<base>@<model>-<language>.md`, with its own markers, so the automatic
+    /// run of the same file is neither pre-empted nor duplicated. The tool
+    /// for comparing models on a real meeting without a terminal.
+    func processRecordingWith() {
+        let panel = NSOpenPanel()
+        panel.title = "Process a recording with…"
+        panel.message = "Choose a recording; you will pick the engine and language next."
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = supportedExtensions.compactMap { UTType(filenameExtension: String($0.dropFirst())) }
+        panel.directoryURL = Config.resolvePath(config.recordingsDir)
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let variant = chooseVariant(for: url) else { return }
+        Task { [weak self] in await self?.runVariant(variant, on: url) }
+    }
+
+    /// The model + language sheet. Built-in engine: every catalog model plus
+    /// Automatic; WhisperX server: its model sizes. Language: Automatic (the
+    /// router picks) / Auto-detect within the model / a fixed language.
+    private func chooseVariant(for url: URL) -> ProcessVariant? {
+        var chosen = config.transcribe
+        let embedded = chosen.backend == "embedded" && HardwareProbe.supportsEmbeddedTranscription
+
+        let modelPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        var modelIDs: [String] = []
+        if embedded {
+            modelPopup.addItem(withTitle: "Automatic (route by language)")
+            modelIDs.append(EmbeddedModelCatalog.automaticID)
+            for m in EmbeddedModelCatalog.models {
+                modelPopup.addItem(withTitle: "\(m.displayName) — \(m.downloadLabel), \(m.ramLabel)")
+                modelIDs.append(m.id)
+            }
+            modelPopup.selectItem(at: max(0, modelIDs.firstIndex(of: chosen.embeddedModel) ?? 0))
+        } else {
+            for size in ["tiny", "base", "small", "medium", "large-v2", "large-v3"] {
+                modelPopup.addItem(withTitle: size)
+                modelIDs.append(size)
+            }
+            modelPopup.selectItem(at: max(0, modelIDs.firstIndex(of: chosen.model) ?? 0))
+        }
+
+        let languagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        var languageCodes: [String] = []
+        if embedded {
+            languagePopup.addItem(withTitle: "Automatic — pick the engine by language")
+            languageCodes.append(EmbeddedModelCatalog.automaticID)
+        }
+        for lang in WhisperLanguageCatalog.all {
+            languagePopup.addItem(withTitle: lang.code.isEmpty ? "Auto-detect within the chosen model" : lang.englishName)
+            languageCodes.append(lang.code)
+        }
+        languagePopup.selectItem(at: max(0, languageCodes.firstIndex(of: chosen.language) ?? 0))
+
+        func row(_ label: String, _ control: NSView) -> NSView {
+            let text = NSTextField(labelWithString: label)
+            text.alignment = .right
+            text.widthAnchor.constraint(equalToConstant: 90).isActive = true
+            control.widthAnchor.constraint(equalToConstant: 340).isActive = true
+            let stack = NSStackView(views: [text, control])
+            stack.orientation = .horizontal
+            stack.alignment = .firstBaseline
+            return stack
+        }
+        let form = NSStackView(views: [row(embedded ? "Model:" : "WhisperX model:", modelPopup),
+                                       row("Language:", languagePopup)])
+        form.orientation = .vertical
+        form.alignment = .trailing
+        form.spacing = 8
+        form.frame = NSRect(x: 0, y: 0, width: 440, height: 64)
+
+        let alert = NSAlert()
+        alert.messageText = "Process “\(url.lastPathComponent)” with…"
+        alert.informativeText = "The note is written beside the normal one, named after the model and language, so you can compare them. The automatic run is not affected."
+        alert.accessoryView = form
+        alert.addButton(withTitle: "Process")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return nil }
+
+        let modelID = modelIDs[max(0, modelPopup.indexOfSelectedItem)]
+        let language = languageCodes[max(0, languagePopup.indexOfSelectedItem)]
+        if embedded { chosen.embeddedModel = modelID } else { chosen.model = modelID }
+        chosen.language = language
+        return ProcessVariant(suffix: ProcessVariant.suffix(model: modelID, language: language),
+                              transcribe: chosen)
+    }
+
+    /// Run one variant under the same single-flight lock as the scanner, so
+    /// it never overlaps a timer tick (the built-in engines share memory and
+    /// the model folder).
+    private func runVariant(_ variant: ProcessVariant, on url: URL) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let cfg = config
+        processingActive = true
+        processingPhase = .loading
+        status = "Processing \(url.lastPathComponent) with \(variant.suffix)…"
+        log("Processing \(url.lastPathComponent) with \(variant.suffix)")
+        refreshActivity()
+        // A repeat of the same variant is a deliberate re-run: clear its markers.
+        store()?.clearFailed(variant.base(for: DistavoState.baseFor(
+            recordingsDir: Config.resolvePath(cfg.recordingsDir), path: url)))
+        let result = await Pipeline.processOne(path: url, config: cfg, deps: deps, variant: variant)
+        if result.status == .skipped {
+            notifier.notify(title: "Already processed with \(variant.suffix)",
+                            body: "\(result.base).md exists — open the notes folder to compare.")
+        }
+        handle(result)
+        processingActive = false
+        refreshFailedRecordings()
+        refreshActivity()
+    }
 
     /// "Process now" clears failed markers so every file gets retried, then scans.
     func processNow() {

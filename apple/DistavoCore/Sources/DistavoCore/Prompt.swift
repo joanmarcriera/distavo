@@ -98,10 +98,26 @@ public enum Prompt {
 
     """
 
-    public static func build(transcript: String, noteOwner: String, userSpeaker: String) -> String {
-        template
+    /// Inserted after the speaker-label line when the note owner described the
+    /// participants after recording (Vikunja #2182). Absent otherwise, so the
+    /// prompt stays byte-identical for every recording without a description.
+    static let participantsBlock = """
+    Participants, as stated by the note owner right after the recording (authoritative — \
+    use this to name the speakers, to decide which speaker label is the note owner, and to \
+    write the follow-up email from the note owner): {participants}
+
+    """
+
+    public static func build(transcript: String, noteOwner: String, userSpeaker: String,
+                             participants: String? = nil) -> String {
+        let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let block = hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint)
+        return template
             .replacingOccurrences(of: "{note_owner}", with: noteOwner)
+            .replacingOccurrences(of: "Known speaker label for the note owner: {user_speaker}.\n",
+                                  with: "Known speaker label for the note owner: {user_speaker}.\n" + block)
             .replacingOccurrences(of: "{user_speaker}", with: userSpeaker)
             .replacingOccurrences(of: "{transcript_text}", with: transcript)
     }
+
 }

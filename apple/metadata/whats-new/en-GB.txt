@@ -1,7 +1,8 @@
-• Meeting notes in Catalan, Spanish — and meetings that switch between them. Two new built-in models from the Barcelona Supercomputing Center (Languages of Spain: Catalan, Spanish, Galician, Basque; and a Catalan-only model) transcribe entirely on your Mac. Distavo is the first Mac app with the Barcelona Supercomputing Center's Catalan models built in.
-• A new "Fast" engine (NVIDIA Parakeet) transcribes an hour-long meeting in seconds for English, French, German, Italian, Portuguese and 20 other European languages.
-• "Automatic" model and language: Distavo listens to three short windows, picks the right engine for what it hears, and downloads it once. Fresh installs start on Automatic; your existing choice is untouched.
-• "Download now" in Settings fetches the models ahead of your first meeting, with progress and Cancel.
-• If a model can't be downloaded because you're offline, the recording now waits and retries automatically instead of being marked failed.
-• If your Language setting is "English" but your meetings aren't, Whisper was quietly translating them. Switch Language to "Automatic — pick the engine by language" in Settings to transcribe them as spoken (built-in engine only — WhisperX users pick a language).
-• Notes transcribed on this Mac now end with a provenance line: which built-in engine transcribed them and what language was detected.
+• After you stop a recording, Distavo asks who was in the meeting — how many people, your role, who the others were — and uses that to name the speakers and write the notes and follow-up email from your side. Skip it any time, or turn it off in Settings.
+• "Stop and delete recording": started recording by mistake? One menu item stops it and deletes it — nothing is saved or transcribed.
+• "Process a recording with…": pick any recording, a model and a language, and get a second note beside the normal one, named after the model and language — the easy way to compare engines on a real meeting.
+• Recordings under 15 seconds are set aside instead of failing; the menu offers to delete them. Adjust the minimum in Settings.
+• "Benchmark this Mac" in Settings times each downloaded engine on 30 seconds of a recent recording and turns the model suggestion into a measurement.
+• A new "Facts first" prompt (Settings → Summarisation) has the model identify the speakers with evidence and list every number, date, company and rate it heard before writing the notes — best with a capable Ollama model such as gemma4:26b. Your current prompt is unchanged unless you switch.
+• Optional: shrink recordings to about a twentieth of their size once the note is written (Settings → Recordings; off unless you turn it on).
+• Early warning when the meeting audio is silent 20 seconds into a recording, and the detected language now shows in the Activity menu and Settings.

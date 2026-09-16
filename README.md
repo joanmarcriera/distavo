@@ -12,8 +12,10 @@
 recordings and automatically turns each new one into a structured Markdown
 meeting note. It converts the file locally with **AVFoundation**, transcribes it
 with a **built-in on-device engine** (Whisper, a Fast engine for 25 European
-languages, or two Catalan/Spanish models from the Barcelona Supercomputing
-Center) — or on **your own WhisperX server** if you prefer — summarises the
+languages, two Catalan/Spanish models from the Barcelona Supercomputing
+Center, or an opt-in **language pack** — community Whisper fine-tunes for
+Hebrew, Thai, Tagalog, Gujarati, Tamil, Malayalam, Welsh, Icelandic and
+Norwegian) — or on **your own WhisperX server** if you prefer — summarises the
 transcript with **your own Ollama server**, validates the result, and writes
 a note to your notes folder.
 
@@ -35,7 +37,9 @@ The native menu and settings window:
   deployment target).
 - **Apple Silicon Mac** for the built-in transcription engines — Intel Macs
   use a WhisperX server instead (see below). The two Catalan/Spanish models
-  additionally need **16 GB of memory or more**.
+  and the large-v3-based language packs (Thai, Welsh, Icelandic, Norwegian)
+  additionally need **16 GB of memory or more**; the Hebrew, Tagalog and
+  Indian-language packs run on any Apple Silicon Mac.
 - **Ollama for summaries** — a reachable Ollama HTTP endpoint with a model
   pulled (for example `llama3.1:8b`), see [Ollama](https://ollama.com).
 - Optional: **a reachable WhisperX HTTP endpoint** that you run — see

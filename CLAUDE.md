@@ -125,6 +125,13 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
   is on and the copy is under half the size — non-WAV sources are never touched. That key is **off for any
   config predating it** (the original take is gone once compacted) and on only for fresh installs via
   `Config.recommendedForThisMac()` — the same migration rule as `transcribe.backend`.
+- **Language packs are opt-in (Vikunja #2124):** `EmbeddedModelCatalog.languagePacks` lists community Whisper
+  fine-tunes (Hebrew, Thai, Tagalog, Gujarati, Tamil, Malayalam, Welsh, Icelandic, Norwegian) hosted in Marc's
+  `Joanmarcriera/distavo-whisperkit-coreml` repo. `transcribe.language_packs` names the enabled ones; a config
+  predating the key decodes to `[]`, so nothing routes differently until the user switches a pack on in Settings.
+  The router sends any confident pack language to the pack (never Parakeet) after the unconditional Catalan/
+  Spanish rules; pack-only models are hidden from the Model picker until enabled. Every pack source must be
+  credited in `NOTICES.md` (`NoticesCoverageTests` enforces it) and converted with `tools/whisperkit-models/convert.sh`.
 - **Backend migration rule:** a config file predating `transcribe.backend` decodes to `"server"` (never
   silently switch existing WhisperX users to embedded); only fresh installs get `"embedded"` via `Config.recommendedForThisMac()`.
 - **Concurrency:** scan is self-serializing so overlapping timer ticks and "Process now" can't double-process.

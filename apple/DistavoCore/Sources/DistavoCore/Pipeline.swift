@@ -15,7 +15,6 @@ public enum ProcessStatus: String, Equatable {
     case tooShort = "too_short"
 }
 
-
 /// Thrown by any `PipelineDeps.transcribe` implementation for a condition that
 /// resolves on its own (no internet for a one-time model download, a download
 /// interrupted mid-way, a model folder busy with removal). `Pipeline.processOne`
@@ -67,7 +66,6 @@ public struct ProcessResult: Equatable {
         self.detectedLanguages = detectedLanguages
     }
 }
-
 
 /// Injectable effects, mirroring the Python `deps` SimpleNamespace seam so the
 /// pipeline can be tested without servers, ffmpeg, or AVFoundation.
@@ -132,7 +130,6 @@ public struct PipelineDeps {
         self.embeddedReadiness = embeddedReadiness
         self.audioDurationSeconds = audioDurationSeconds
     }
-
 
     /// Real dependencies wired to AVFoundation + the HTTP clients.
     public static func live() -> PipelineDeps {

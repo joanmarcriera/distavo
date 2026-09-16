@@ -146,7 +146,6 @@ public enum EmbeddedSummariser {
                 participants: participants)
             return try await generate(prompt, maxOutputTokens: finalBudget.reservedForOutput)
 
-
         case .contextTooSmall:
             throw EmbeddedSummariserError.contextTooSmall
 

@@ -60,7 +60,6 @@ struct StatusMenu: View {
             }
         }
 
-
         Button("Process now") { controller.processNow() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)

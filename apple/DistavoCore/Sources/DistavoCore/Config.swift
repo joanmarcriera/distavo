@@ -189,7 +189,6 @@ public struct Config: Codable, Equatable {
         case askSpeakersOnStop = "ask_speakers_on_stop"
     }
 
-
     public init(watchIntervalSeconds: Int = 20,
                 recordingsDir: String = "~/Documents/Distavo/recordings",
                 notesDir: String = "~/Documents/Distavo/notes",
@@ -210,7 +209,6 @@ public struct Config: Codable, Equatable {
         self.askSpeakersOnStop = askSpeakersOnStop
     }
 
-
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Config()
@@ -226,7 +224,6 @@ public struct Config: Codable, Equatable {
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
     }
-
 
     // MARK: Paths
 

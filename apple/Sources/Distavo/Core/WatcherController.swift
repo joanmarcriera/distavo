@@ -301,7 +301,6 @@ final class WatcherController: ObservableObject {
         return nil
     }
 
-
     /// Clear the failed markers and rescan, so a user who sees the warning has a
     /// way to act on it. Previously the only route was "Process now", which does
     /// not say that it retries failures.

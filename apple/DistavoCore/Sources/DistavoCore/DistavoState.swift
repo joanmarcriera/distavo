@@ -167,7 +167,6 @@ public enum DistavoState {
                 .sorted { $0.0 < $1.0 }
         }
 
-
         public func markProcessing(_ base: String) { write("processing\n", marker(base, "processing")) }
         public func clearProcessing(_ base: String) { remove(marker(base, "processing")) }
         public func clearFailed(_ base: String) { remove(marker(base, "failed")) }
@@ -179,7 +178,6 @@ public enum DistavoState {
             clearDeferred(base)
             clearTooShort(base)
         }
-
 
         public func markFailed(_ base: String, _ error: String) {
             write(error + "\n", marker(base, "failed"))
@@ -235,7 +233,6 @@ public enum DistavoState {
         public func failedBases() -> [(base: String, error: String)] {
             markers(suffix: "failed").map { (base: $0.base, error: $0.reason) }
         }
-
 
         private func removeMarkers(suffix: String) {
             let items = (try? fm.contentsOfDirectory(

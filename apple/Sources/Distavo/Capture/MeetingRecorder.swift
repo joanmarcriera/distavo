@@ -203,7 +203,6 @@ final class MeetingRecorder {
 
     }
 
-
     /// Stop and throw the take away (Vikunja #2068): the `.part` file is
     /// deleted before it could ever be renamed to a `.wav` the folder scanner
     /// would pick up, so nothing is transcribed. Returns the discarded name.

@@ -151,7 +151,6 @@ struct SettingsView: View {
                 }
             }
 
-
             Section("Transcription") {
                 if embeddedSupported {
                     HStack {

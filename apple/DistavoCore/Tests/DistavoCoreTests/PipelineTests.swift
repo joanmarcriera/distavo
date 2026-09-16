@@ -238,7 +238,6 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(plain.detectedLanguages)
     }
 
-
     func testSuccessWritesNoteAndMarksDone() async throws {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(

@@ -89,7 +89,6 @@ extension PipelineDeps {
             return try await ollamaSummarise(transcript, target, options, owner, speaker, participants)
         }
 
-
         // Readiness of the on-device summariser, so chooseSummariser can DEFER a
         // recording (rather than fail it permanently) when Apple Intelligence is
         // merely still downloading or switched off — the on-device analogue of

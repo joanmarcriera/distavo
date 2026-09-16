@@ -51,7 +51,6 @@ final class ConfigTests: XCTestCase {
         XCTAssertEqual(try Config.load(from: url), edited)
     }
 
-
     func testLoadCreatesDefaultsWhenMissing() throws {
         let url = tempFile()
         let c = try Config.load(from: url)

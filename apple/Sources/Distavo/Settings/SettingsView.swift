@@ -270,6 +270,14 @@ struct SettingsView: View {
             }
 
             Section(draft.summarise.embeddedEnabled ? "Summarisation" : "Summarisation (Ollama)") {
+                if #available(macOS 26, *), EmbeddedSummariser.unavailableReason() == nil
+                    || draft.summarise.embeddedEnabled {
+                    HStack {
+                        Toggle("Offer on-device summaries (Apple Intelligence, preview)",
+                               isOn: $draft.summarise.embeddedEnabled)
+                        HelpButton(text: "Adds an ‘On this Mac (Apple Intelligence)’ backend below. It needs no server, but Apple’s on-device model has a small context window, so long meetings are summarised in parts and the notes are less detailed than a capable Ollama model’s. Off by default in this version; switch it on to try it.")
+                    }
+                }
                 HStack {
                     Picker("Backend", selection: $draft.summarise.backend) {
                         Text("Server (GPU)").tag("server")

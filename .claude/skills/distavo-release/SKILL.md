@@ -75,6 +75,18 @@ artifact only, no GitHub Release.
 timed out, after fixing an App Review rejection, or to stage-test before a real submission. Same
 ASC secrets as `release-appstore.yml`.
 
+## One version in review at a time (learned 2026-09-17, v1.14.0)
+
+If the previous version is still `WAITING_FOR_REVIEW`/`IN_REVIEW`, the tag's App Store run uploads the
+build fine but `submit-for-review` fails with **409 `ENTITY_ERROR.RELATIONSHIP.INVALID` "You cannot
+create a new version of the App in the current state"**. Two ways out: replace the pending submission
+(cancel it, rename the draft to the new version, attach the new build — loses the queue place), or wait.
+For waiting: `nohup ops/submit-when-review-clears.sh <blocking> <new> <build> > ~/Library/Logs/Distavo/submit-when-clear.log 2>&1 &`
+polls ASC every 30 min and dispatches `submit-appstore.yml` (dry_run=false) when the queue clears;
+manual equivalent: `gh workflow run submit-appstore.yml --ref main -f version=X -f build_number=N -f dry_run=false -f until=submit`.
+Locally the submit script needs PyJWT: `uv run --with "pyjwt[crypto]" --with requests python3 scripts/submit-appstore-review.py …`
+with `ASC_API_KEY_P8_PATH/ASC_API_KEY_ID/ASC_API_ISSUER_ID` mapped from the `APPLE_API_*` names in `~/.tokens`.
+
 ## Setapp — stays manual
 
 The **first** Setapp version must be uploaded through the Setapp Web UI (needs Marc's vendor

@@ -176,12 +176,6 @@ public enum EmbeddedModelCatalog {
             languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
         EmbeddedModel(
-            id: "lwobole-tl", displayName: "Tagalog · Filipino (community fine-tune)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "LWobole_whisper-small-tagalog",
-            languages: .only(["tl"]), downloadMB: 500, ramGB: 1, minimumMemoryGB: 0,
-            detail: "Whisper small fine-tuned on Tagalog; 16.7 % WER on FLEURS against about 24 % for stock Whisper."),
-        EmbeddedModel(
             id: "vasista-gu", displayName: "ગુજરાતી · Gujarati (IIT Madras)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "vasista22_whisper-gujarati-medium",
@@ -209,9 +203,10 @@ public enum EmbeddedModelCatalog {
         LanguagePack(id: "thai", displayName: "Thai",
                      models: ["th": "thonburian-th"],
                      credit: "Thonburian Whisper, Mahidol University — Apache-2.0"),
-        LanguagePack(id: "tagalog", displayName: "Tagalog (Filipino)",
-                     models: ["tl": "lwobole-tl"],
-                     credit: "LWobole — Apache-2.0"),
+        // Tagalog: the only convertible fine-tune (LWobole/whisper-small-tagalog)
+        // LOST the bake-off to stock turbo on a Palace press briefing — a
+        // repetition loop, a stray "[música]" token, garbled proper names. Turbo
+        // already handles Tagalog–English code-switching well; no pack (#2128).
         LanguagePack(id: "gujarati", displayName: "Gujarati",
                      models: ["gu": "vasista-gu"],
                      credit: "Speech Lab, IIT Madras — Apache-2.0"),

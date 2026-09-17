@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Distavo** (v1.11.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
+**Distavo** (v1.13.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
 recordings and turns each new one into a structured Markdown meeting note. The pipeline is:
 **AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
 Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the
@@ -62,7 +62,7 @@ of the original Python module (noted in its header).
   WhisperX / Ollama URLs. **`NetworkScope.swift`** classifies endpoints as loopback / private-LAN / public.
 - **`EmbeddedSummary.swift`** — dependency-free token budgeting and chunking for Foundation Models.
   Context is 4096 tokens (input + output); long recordings are map-reduced through Prompt.build.
-- **`Prompt.swift`** — two templates: `classic` (the original port, verbatim; always used by the Foundation Models
+- **`Prompt.swift`** — two templates: `classic` (the original port plus four rules sharpened for the on-device model in 1.13; always used by the Foundation Models
   path) and `factsFirst` (bake-off variant D: speakers with evidence, facts ledger, recording metadata; the
   Ollama default since 1.12 via `summarise.prompt_style`). `NoteContext` carries owner/speaker/participants/date/style.
 - **`TranscriptCleaner.swift`** — turns raw WhisperX output into speaker-grouped, timestamp-free transcript.
@@ -125,6 +125,13 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
   is on and the copy is under half the size — non-WAV sources are never touched. That key is **off for any
   config predating it** (the original take is gone once compacted) and on only for fresh installs via
   `Config.recommendedForThisMac()` — the same migration rule as `transcribe.backend`.
+- **Language packs are opt-in (Vikunja #2124):** `EmbeddedModelCatalog.languagePacks` lists community Whisper
+  fine-tunes (Hebrew, Thai, Welsh) hosted in Marc's
+  `Joanmarcriera/distavo-whisperkit-coreml` repo. `transcribe.language_packs` names the enabled ones; a config
+  predating the key decodes to `[]`, so nothing routes differently until the user switches a pack on in Settings.
+  The router sends any confident pack language to the pack (never Parakeet) after the unconditional Catalan/
+  Spanish rules; pack-only models are hidden from the Model picker until enabled. Every pack source must be
+  credited in `NOTICES.md` (`NoticesCoverageTests` enforces it) and converted with `tools/whisperkit-models/convert.sh`.
 - **Backend migration rule:** a config file predating `transcribe.backend` decodes to `"server"` (never
   silently switch existing WhisperX users to embedded); only fresh installs get `"embedded"` via `Config.recommendedForThisMac()`.
 - **Concurrency:** scan is self-serializing so overlapping timer ticks and "Process now" can't double-process.

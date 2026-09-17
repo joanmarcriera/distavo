@@ -63,4 +63,58 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertEqual(again.transcribe.embeddedModel, "small")
         XCTAssertEqual(again.transcribe.language, "en")
     }
+
+    /// A config written before language packs existed decodes to no packs, so
+    /// automatic routing is byte-for-byte what it was (Vikunja #2124).
+    func testPreLanguagePackConfigHasNoPacksEnabled() throws {
+        let cfg = try decode(#"{"transcribe": {"backend": "embedded", "embedded_model": "auto"}}"#)
+        XCTAssertEqual(cfg.transcribe.languagePacks, [])
+        XCTAssertTrue(cfg.transcribe.enabledLanguagePacks.isEmpty)
+        XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: true).transcribe.languagePacks.isEmpty)
+    }
+
+    /// A config written before `open_when_done` existed (Vikunja #2199) decodes
+    /// to `.off`, so nothing opens automatically until the user opts in.
+    func testPreOpenWhenDoneConfigStaysOff() throws {
+        let cfg = try decode(#"{"transcribe": {"backend": "embedded", "embedded_model": "auto"}}"#)
+        XCTAssertEqual(cfg.openWhenDone, .off)
+    }
+
+    func testLanguagePacksRoundTripAndDropUnknownIds() throws {
+        let cfg = try decode(#"{"transcribe": {"language_packs": ["thai", "bogus", "hebrew"]}}"#)
+        XCTAssertEqual(cfg.transcribe.languagePacks, ["thai", "bogus", "hebrew"])
+        XCTAssertEqual(cfg.transcribe.enabledLanguagePacks.map(\.id), ["hebrew", "thai"])   // catalog order
+        let data = try JSONEncoder().encode(cfg)
+        let json = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(json.contains(#""language_packs":["thai","bogus","hebrew"]"#), json)
+    }
+
+    // MARK: Note language (Vikunja #2147) — same migration rule as `transcribe.backend`.
+
+    /// A config predating `summarise.note_language` decodes to "en": no
+    /// existing user's notes silently change language.
+    func testPreNoteLanguageConfigStaysEnglish() throws {
+        let cfg = try decode(#"{"summarise": {"backend": "server"}}"#)
+        XCTAssertEqual(cfg.summarise.noteLanguage, "en")
+    }
+
+    /// An empty config (no summarise key at all) also stays "en".
+    func testEmptyConfigNoteLanguageStaysEnglish() throws {
+        let cfg = try decode("{}")
+        XCTAssertEqual(cfg.summarise.noteLanguage, "en")
+    }
+
+    /// An explicit value round-trips as-is.
+    func testExplicitNoteLanguageIsKeptVerbatim() throws {
+        let cfg = try decode(#"{"summarise": {"note_language": "auto"}}"#)
+        XCTAssertEqual(cfg.summarise.noteLanguage, "auto")
+    }
+
+    /// Only a fresh install (no config file yet) gets "auto".
+    func testFreshInstallGetsAutoNoteLanguage() {
+        let cfg = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 16 << 30)
+        XCTAssertEqual(cfg.summarise.noteLanguage, "auto")
+        let intel = Config.recommendedForThisMac(embeddedSupported: false, memoryBytes: 16 << 30)
+        XCTAssertEqual(intel.summarise.noteLanguage, "auto")
+    }
 }

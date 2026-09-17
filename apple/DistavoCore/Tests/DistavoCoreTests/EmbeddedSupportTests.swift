@@ -46,6 +46,38 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertTrue(on16.contains("bsc-los") && on16.contains("bsc-ca-3370h"))
     }
 
+    // MARK: Language packs (Vikunja #2124)
+
+    func testEveryPackModelIsAConvertedCustomRepoWhisperEntry() {
+        for pack in EmbeddedModelCatalog.languagePacks {
+            XCTAssertFalse(pack.languages.isEmpty, pack.id)
+            for (code, modelID) in pack.models {
+                XCTAssertNotNil(WhisperLanguageCatalog.language(forCode: code), "\(pack.id): \(code) is not a Whisper language")
+                let m = EmbeddedModelCatalog.model(id: modelID)
+                XCTAssertEqual(m.id, modelID, "\(pack.id) names an unknown model \(modelID)")
+                XCTAssertEqual(m.engine, .whisperKit)
+                XCTAssertEqual(m.whisperKitRepo, EmbeddedModelCatalog.customRepo)
+                XCTAssertTrue(m.languages.covers(code), "\(modelID) does not cover \(code)")
+                XCTAssertTrue(EmbeddedModelCatalog.packModelIDs.contains(modelID))
+                // The converter names folders "<org>_<name>"; a bare name would 404 on the Hub.
+                XCTAssertTrue(m.whisperKitName.contains("_"), m.whisperKitName)
+            }
+        }
+        XCTAssertEqual(Set(EmbeddedModelCatalog.languagePacks.map(\.id)).count, EmbeddedModelCatalog.languagePacks.count)
+    }
+
+    func testPackLookups() {
+        XCTAssertEqual(EmbeddedModelCatalog.packModel(for: "he", enabled: ["hebrew"])?.id, "ivrit-he")
+        XCTAssertNil(EmbeddedModelCatalog.packModel(for: "he", enabled: []))
+        XCTAssertNil(EmbeddedModelCatalog.packModel(for: "he", enabled: ["thai"]))
+        XCTAssertNil(EmbeddedModelCatalog.packModel(for: "en", enabled: ["hebrew", "thai"]))
+        let hebrew = EmbeddedModelCatalog.pack(id: "hebrew")!
+        XCTAssertEqual(hebrew.modelIDs, ["ivrit-he"])
+        XCTAssertEqual(hebrew.downloadMB, 1600)
+        XCTAssertEqual(hebrew.languageLabel, "Hebrew")
+        XCTAssertNil(EmbeddedModelCatalog.pack(id: "bsc"))
+    }
+
     func testAutomaticIsNotACatalogModel() {
         XCTAssertTrue(EmbeddedModelCatalog.isAutomatic("auto"))
         XCTAssertEqual(EmbeddedModelCatalog.model(id: "auto").id, EmbeddedModelCatalog.defaultModelID)

@@ -201,10 +201,18 @@ public actor EmbeddedTranscriber {
                 await self.report("Loading \(model.displayName)…")
             }
 
+            // Text decoder on the GPU, not the Neural Engine (Vikunja #2158):
+            // on the 2026-07-23 Catalan bake-off excerpt the default ANE decoder
+            // truncated a 24 s segment to 7–10 words in two out of two runs
+            // (accepted at a low fallback temperature after ANE contention),
+            // while cpuAndGPU decoded all 62–68 words every time — and ran the
+            // autoregressive decode 2–3x faster. The encoder stays on the ANE
+            // (no speed benefit measured from moving it).
             let whisperConfig = WhisperKitConfig(
                 model: model.whisperKitName,
                 downloadBase: EmbeddedModelStore.modelsDirectory,
                 modelRepo: model.whisperKitRepo,
+                computeOptions: ModelComputeOptions(textDecoderCompute: .cpuAndGPU),
                 verbose: false,
                 load: true,
                 download: true)

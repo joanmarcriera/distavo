@@ -55,7 +55,13 @@ struct SettingsView: View {
     /// value stays selected and visible instead of the Picker landing on nothing.
     private var modelChoices: [EmbeddedModel] {
         let stored = draft.transcribe.embeddedModel
-        let selectable = EmbeddedModelCatalog.models.filter { selectableIDs.contains($0.id) }
+        // Pack-only models stay out of the picker until their pack is switched on
+        // (Vikunja #2124) — otherwise every language adds a 3 GB row nobody asked for.
+        let enabledPackModels = Set(draft.transcribe.enabledLanguagePacks.flatMap(\.modelIDs))
+        let selectable = EmbeddedModelCatalog.models.filter {
+            selectableIDs.contains($0.id)
+                && (!EmbeddedModelCatalog.packModelIDs.contains($0.id) || enabledPackModels.contains($0.id) || $0.id == stored)
+        }
         guard !EmbeddedModelCatalog.isAutomatic(stored), !selectableIDs.contains(stored) else {
             return selectable
         }
@@ -78,6 +84,10 @@ struct SettingsView: View {
         if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
             var ids = ["parakeet-tdt-v3"]
             if bscSelectable { ids.append(draft.transcribe.effectivePreferredCatalanModel) }
+            // Enabled language packs this Mac can run (Vikunja #2124).
+            for pack in draft.transcribe.enabledLanguagePacks {
+                ids += pack.modelIDs.filter { selectableIDs.contains($0) && !ids.contains($0) }
+            }
             return ids
         }
         return [draft.transcribe.embeddedModel]
@@ -94,6 +104,41 @@ struct SettingsView: View {
         let needsDetector = EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel)
             && !EmbeddedModelStore.isDetectorDownloaded()
         return modelsMB + (needsDetector ? 77 : 0)
+    }
+
+    /// Opt-in language packs (Vikunja #2124): one toggle per pack. A pack whose
+    /// model this Mac cannot run (memory floor) is shown disabled with the reason,
+    /// never silently dropped, so the user learns why Hebrew still goes to Whisper.
+    @ViewBuilder private var languagePacksRows: some View {
+        HStack {
+            Text("Language packs").font(.callout)
+            HelpButton(text: "Community fine-tunes of Whisper for languages the stock models handle poorly. Switch one on and Distavo routes meetings in that language to it (downloaded once, like every other model). Off by default; nothing changes for languages you have not switched on.")
+        }
+        ForEach(EmbeddedModelCatalog.languagePacks) { pack in
+            let runnable = pack.modelIDs.allSatisfy { selectableIDs.contains($0) }
+            let floor = pack.modelIDs.map { EmbeddedModelCatalog.model(id: $0).minimumMemoryGB }.max() ?? 0
+            HStack {
+                Toggle(isOn: packBinding(pack.id)) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(pack.displayName) — \(pack.languageLabel) · \(pack.downloadMB) MB")
+                        Text(runnable ? pack.credit : "\(pack.credit) · needs \(floor) GB of memory")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(!runnable)
+            }
+        }
+    }
+
+    /// Membership of `pack` in `transcribe.language_packs`, kept in catalog order.
+    private func packBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { draft.transcribe.languagePacks.contains(id) },
+            set: { on in
+                var ids = Set(draft.transcribe.languagePacks)
+                if on { ids.insert(id) } else { ids.remove(id) }
+                draft.transcribe.languagePacks = EmbeddedModelCatalog.languagePacks.map(\.id).filter { ids.contains($0) }
+            })
     }
 
     init(controller: WatcherController) {
@@ -152,6 +197,14 @@ struct SettingsView: View {
                            isOn: $draft.compactRecordingsAfterNote)
                     HelpButton(text: "The built-in recorder keeps a 48 kHz stereo take (about 1.4 GB per hour). Once the note is written, Distavo replaces WAV recordings with the 16 kHz mono copy the transcriber used — about 20x smaller. Other formats are left alone.")
                 }
+                HStack {
+                    Picker("When a recording finishes", selection: $draft.openWhenDone) {
+                        Text("Off").tag(OpenWhenDone.off)
+                        Text("Open the note").tag(OpenWhenDone.note)
+                        Text("Open the transcript").tag(OpenWhenDone.transcript)
+                    }
+                    HelpButton(text: "Automatically open the finished note (or its cleaned transcript) as soon as a recording is processed, instead of waiting to open it from the menu.")
+                }
             }
 
             Section("Transcription") {
@@ -185,7 +238,7 @@ struct SettingsView: View {
                         }
                     }
                     if EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel) {
-                        Text("Distavo listens to three short windows, picks the engine for the language it hears — Catalan, Spanish and their mix on the Barcelona models, 25 other European languages on the fast Parakeet engine, everything else on Whisper — and downloads what it needs once.")
+                        Text("Distavo listens to three short windows, picks the engine for the language it hears — Catalan, Spanish and their mix on the Barcelona models, 25 other European languages on the fast Parakeet engine, everything else on Whisper (or a language pack you switch on below) — and downloads what it needs once.")
                             .font(.caption).foregroundStyle(.secondary)
                         if bscSelectable {
                             Picker("Preferred Catalan model", selection: $draft.transcribe.preferredCatalanModel) {
@@ -193,6 +246,7 @@ struct SettingsView: View {
                                 Text("Català only (3,370 hours)").tag("bsc-ca-3370h")
                             }
                         }
+                        languagePacksRows
                     } else {
                         let m = EmbeddedModelCatalog.model(id: draft.transcribe.embeddedModel)
                         Text("\(m.detail) \(m.ramLabel).").font(.caption).foregroundStyle(.secondary)
@@ -312,6 +366,13 @@ struct SettingsView: View {
                         Text("Classic").tag(Prompt.Style.classic)
                     }
                     HelpButton(text: "‘Facts first’ makes the model identify the speakers with evidence and list every number, date, company and rate it heard (with UK-contracting corrections such as “8.50 per day” → £850) before writing the notes, and keeps that ledger in the note as an audit trail. Best with a capable model such as gemma4:26b. ‘Classic’ is the shorter original prompt. On-device (Apple Intelligence) summaries always use Classic.")
+                }
+                HStack {
+                    Picker("Write notes in", selection: $draft.summarise.noteLanguage) {
+                        Text("Match the meeting language").tag("auto")
+                        Text("English").tag("en")
+                    }
+                    HelpButton(text: "‘Match the meeting language’ writes the note in Catalan or Spanish when that's the meeting's dominant detected language (section headings stay in English); any other detected language still gets English notes. ‘English’ always writes English notes, whatever was spoken. On-device (Apple Intelligence) summaries always write English.")
                 }
                 HStack {
                     TextField("Local Ollama URL", text: $draft.summarise.local.url)

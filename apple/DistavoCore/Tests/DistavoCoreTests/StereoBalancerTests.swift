@@ -50,6 +50,46 @@ final class StereoBalancerTests: XCTestCase {
         return url
     }
 
+    /// Write a mono float32 WAV with a 440 Hz sine at the given amplitude.
+    private func makeMonoWav(amplitude: Float, seconds: Double = 1.0,
+                              sampleRate: Double = 48000) throws -> URL {
+        let url = tempURL(".wav.part")
+        let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
+        let frames = AVAudioFrameCount(sampleRate * seconds)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: max(frames, 1))!
+        buffer.frameLength = max(frames, 1)
+        let data = buffer.floatChannelData![0]
+        for i in 0..<Int(buffer.frameLength) {
+            data[i] = amplitude * Float(sin(Double(i) * 2.0 * .pi * 440.0 / sampleRate))
+        }
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: sampleRate,
+            AVNumberOfChannelsKey: 1,
+            AVLinearPCMBitDepthKey: 32,
+            AVLinearPCMIsFloatKey: true,
+        ]
+        do {
+            let file = try AVAudioFile(forWriting: url, settings: settings,
+                                       commonFormat: .pcmFormatFloat32, interleaved: false)
+            try file.write(from: buffer)
+        }
+        return url
+    }
+
+    /// Channel count of a written file.
+    private func channelCount(of url: URL) throws -> Int {
+        let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32,
+                                    interleaved: false)
+        return Int(file.processingFormat.channelCount)
+    }
+
+    /// A scratch `ActivityLog` writing to a temp file, so tests never touch
+    /// the real `~/Library/Logs/Distavo/distavo.log`.
+    private func scratchActivityLog() -> ActivityLog {
+        ActivityLog(url: tempURL(".log"))
+    }
+
     /// (rms per channel, peak per channel) of a whole file.
     private func analyze(_ url: URL) throws -> (rms: [Float], peak: [Float]) {
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatFloat32,
@@ -136,5 +176,82 @@ final class StereoBalancerTests: XCTestCase {
         try StereoBalancer.balance(from: src, to: dst)
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: dst.path))
+    }
+
+    // MARK: - Silent system-audio fallback (Vikunja #2060)
+
+    func testSilentSystemAudioDownmixesToNormalizedMono() throws {
+        // Left (mic) is quiet but present; right (system audio) never
+        // registers at all — the tap failed silently.
+        let src = try makeStereoWav(left: 0.02, right: 0.0)
+        let dst = tempURL(".wav")
+        let log = scratchActivityLog()
+
+        try StereoBalancer.balance(from: src, to: dst, activityLog: log)
+
+        XCTAssertEqual(try channelCount(of: dst), 1, "downmixed to mono")
+        let (rms, peak) = try analyze(dst)
+        XCTAssertEqual(rms[0], StereoBalancer.monoNormalizationTarget, accuracy: 0.02,
+                       "loudness raised to the normalisation target")
+        XCTAssertLessThanOrEqual(peak[0], StereoBalancer.peakCeiling + 0.001)
+        XCTAssertTrue(log.recent().contains { $0.lowercased().contains("mono") },
+                      "one Activity line records the fallback")
+    }
+
+    func testNormalStereoIsUntouchedByTheMonoFallback() throws {
+        // Right channel has real signal — the mono fallback must not fire;
+        // this stays on the ordinary stereo-balance path.
+        let src = try makeStereoWav(left: 0.05, right: 0.5)
+        let dst = tempURL(".wav")
+
+        try StereoBalancer.balance(from: src, to: dst)
+
+        XCTAssertEqual(try channelCount(of: dst), 2, "right channel has signal — stays stereo")
+    }
+
+    func testFullySilentStereoFileIsNeverAmplified() throws {
+        let src = try makeStereoWav(left: 0.0, right: 0.0)
+        let dst = tempURL(".wav")
+
+        try StereoBalancer.balance(from: src, to: dst, activityLog: scratchActivityLog())
+
+        let (rms, _) = try analyze(dst)
+        XCTAssertLessThan(rms[0], 0.0005, "no signal to normalise — never amplified")
+    }
+
+    func testQuietMonoInputIsNormalized() throws {
+        let src = try makeMonoWav(amplitude: 0.02)
+        let dst = tempURL(".wav")
+        let log = scratchActivityLog()
+
+        try StereoBalancer.balance(from: src, to: dst, activityLog: log)
+
+        XCTAssertEqual(try channelCount(of: dst), 1)
+        let (rms, peak) = try analyze(dst)
+        XCTAssertEqual(rms[0], StereoBalancer.monoNormalizationTarget, accuracy: 0.02)
+        XCTAssertLessThanOrEqual(peak[0], StereoBalancer.peakCeiling + 0.001)
+        XCTAssertTrue(log.recent().contains { $0.lowercased().contains("normalis") })
+    }
+
+    func testLoudMonoInputIsUnchanged() throws {
+        // Already at/above target loudness: normalised only if quiet, so
+        // this is left alone rather than attenuated.
+        let src = try makeMonoWav(amplitude: 0.5)
+        let dst = tempURL(".wav")
+
+        try StereoBalancer.balance(from: src, to: dst)
+
+        let (rms, _) = try analyze(dst)
+        XCTAssertEqual(rms[0], 0.5 / sqrt(2), accuracy: 0.01, "already loud enough — left alone")
+    }
+
+    func testSilentMonoFileIsNeverAmplified() throws {
+        let src = try makeMonoWav(amplitude: 0.0)
+        let dst = tempURL(".wav")
+
+        try StereoBalancer.balance(from: src, to: dst)
+
+        let (rms, _) = try analyze(dst)
+        XCTAssertLessThan(rms[0], 0.0005)
     }
 }

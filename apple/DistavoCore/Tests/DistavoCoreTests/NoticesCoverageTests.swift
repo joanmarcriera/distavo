@@ -55,6 +55,12 @@ final class NoticesCoverageTests: XCTestCase {
         // no-op on them (no underscore to split).
         let customRepos = Set(EmbeddedModelCatalog.models.compactMap(\.whisperKitRepo)).map(repositoryForm)
         required.append(contentsOf: customRepos)
+        // Every language-pack fine-tune's SOURCE checkpoint (Vikunja #2124):
+        // the converter names the folder "<org>_<name>", NOTICES.md credits
+        // the upstream "<org>/<name>" repository it was converted from.
+        required.append(contentsOf: EmbeddedModelCatalog.packModelIDs.map {
+            repositoryForm(EmbeddedModelCatalog.model(id: $0).whisperKitName)
+        })
 
         let missing = required.filter { !notices.contains($0) }
         XCTAssertTrue(

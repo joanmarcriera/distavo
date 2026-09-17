@@ -420,6 +420,7 @@ final class WatcherController: ObservableObject {
             }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
+            openWhenDoneIfNeeded(result)
         case .tooShort:
             status = "Too short: \(result.base)"
             log("Too short to transcribe — \(result.message): \(result.base)")
@@ -624,6 +625,21 @@ final class WatcherController: ObservableObject {
         NSPasteboard.general.setString(text, forType: .string)
         notifier.notify(title: "Transcript copied", body: "\(lastDone?.base ?? "") is on the clipboard.")
         acknowledgeNote()
+    }
+
+    /// "When a recording finishes" (Vikunja #2199): opens the note or the
+    /// transcript in the default app once processing succeeds, per
+    /// `config.openWhenDone`. Only called for `.done` — a deferred, too-short,
+    /// or failed recording has nothing ready to open.
+    private func openWhenDoneIfNeeded(_ result: ProcessResult) {
+        let url: URL?
+        switch config.openWhenDone {
+        case .off: return
+        case .note: url = result.notePath
+        case .transcript: url = result.transcriptPath
+        }
+        guard let url else { return }
+        NSWorkspace.shared.open(url)
     }
 
     func openLastNote() {

@@ -66,6 +66,36 @@ public struct EmbeddedModel: Equatable, Identifiable, Sendable {
     }
 }
 
+/// One opt-in "language pack" (Vikunja #2124): a community fine-tune of Whisper
+/// for languages the stock models handle poorly, converted to Core ML and hosted
+/// in `EmbeddedModelCatalog.customRepo`. A pack names one catalog model per
+/// language it covers (`models[code]`); automatic routing only considers packs
+/// listed in `TranscribeConfig.languagePacks`, so existing configs — which decode
+/// to an empty list — keep the exact engine choice they had before packs existed.
+/// The Barcelona models are NOT a pack: Catalan/Spanish routing is Distavo's
+/// flagship behaviour and stays unconditional (see `EngineRouter`).
+public struct LanguagePack: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let displayName: String
+    /// Language code → catalog model id. One model may serve several codes.
+    public let models: [String: String]
+    /// Who trained it and under which licence — shown in Settings and NOTICES.
+    public let credit: String
+
+    public init(id: String, displayName: String, models: [String: String], credit: String) {
+        self.id = id; self.displayName = displayName; self.models = models; self.credit = credit
+    }
+
+    public var languages: Set<String> { Set(models.keys) }
+    /// Catalog ids, de-duplicated, in a stable order (for "Download now" totals).
+    public var modelIDs: [String] { Array(Set(models.values)).sorted() }
+    public var downloadMB: Int { modelIDs.map { EmbeddedModelCatalog.model(id: $0).downloadMB }.reduce(0, +) }
+    /// The language names as the Settings row shows them.
+    public var languageLabel: String {
+        languages.compactMap { WhisperLanguageCatalog.language(forCode: $0)?.englishName }.sorted().joined(separator: ", ")
+    }
+}
+
 public enum EmbeddedModelCatalog {
     public static let defaultModelID = "large-v3-turbo"
     /// Stored in `embedded_model` (and `language`) to mean "let Distavo choose".
@@ -111,7 +141,82 @@ public enum EmbeddedModelCatalog {
             whisperKitName: "BSC-LT_whisper-large-v3-ca-punctuated-3370h",
             languages: .only(["ca"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by the Barcelona Supercomputing Center on 3,370 hours of Catalan, with punctuation. Catalan-only meetings."),
+    ] + packModels
+
+    // MARK: Language packs (Vikunja #2124, #2126–#2129)
+
+    /// Models that only exist as part of a language pack. They are hidden from
+    /// the Model picker until their pack is enabled, so the picker does not
+    /// grow a 3 GB row per language nobody asked for. `whisperKitName` is the
+    /// Hugging Face id with "/" → "_", exactly as `tools/whisperkit-models/convert.sh`
+    /// publishes it; the memory floor mirrors the BSC rule (16 GB for fp16 large-v3).
+    static let packModels: [EmbeddedModel] = [
+        EmbeddedModel(
+            id: "ivrit-he", displayName: "עברית · Hebrew (ivrit.ai)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "ivrit-ai_whisper-large-v3-turbo",
+            languages: .only(["he"]), downloadMB: 1600, ramGB: 2, minimumMemoryGB: 0,
+            detail: "Whisper large-v3 turbo fine-tuned by ivrit.ai on thousands of hours of Hebrew speech (Knesset and crowd recordings)."),
+        EmbeddedModel(
+            id: "thonburian-th", displayName: "ไทย · Thai (Thonburian Whisper)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "biodatlab_whisper-th-large-v3-combined",
+            languages: .only(["th"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large-v3 fine-tuned by Mahidol University (Thonburian Whisper) on Thai speech; 6.6 % WER on Common Voice."),
+        EmbeddedModel(
+            id: "techiaith-cy", displayName: "Cymraeg · Welsh (Bangor University)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "techiaith_whisper-large-ft-cy-en",
+            languages: .only(["cy"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large fine-tuned by Bangor University's Language Technologies Unit on Welsh and Welsh–English speech."),
     ]
+
+    /// Every pack Distavo can offer. Order = Settings order.
+    public static let languagePacks: [LanguagePack] = [
+        LanguagePack(id: "hebrew", displayName: "Hebrew",
+                     models: ["he": "ivrit-he"],
+                     credit: "ivrit.ai — Apache-2.0"),
+        LanguagePack(id: "thai", displayName: "Thai",
+                     models: ["th": "thonburian-th"],
+                     credit: "Thonburian Whisper, Mahidol University — Apache-2.0"),
+        // Tagalog: the only convertible fine-tune (LWobole/whisper-small-tagalog)
+        // LOST the bake-off to stock turbo on a Palace press briefing — a
+        // repetition loop, a stray "[música]" token, garbled proper names. Turbo
+        // already handles Tagalog–English code-switching well; no pack (#2128).
+        // Gujarati: withdrawn — its medium decoder converts at 31.9 dB PSNR (below the converter's 35 dB gate) and the Core ML output is garbage — 165 Gujarati characters in 2,951 (#2128). Stock turbo handles the language; no pack.
+        // Tamil: withdrawn — vasista22/whisper-tamil-medium converts cleanly (44 dB) and
+        // has tidier orthography than turbo, but on the bake-off it hallucinated a
+        // fluent off-topic passage (COVID deaths, hospitals) the speaker never said;
+        // turbo's defects are visible glyph bleed, not plausible fabrication (#2128).
+        // Malayalam: withdrawn — its decoder fails conversion outright (10 dB PSNR; argmax's decoder disagrees with the checkpoint even in torch) (#2128). Stock turbo handles the language; no pack.
+        LanguagePack(id: "welsh", displayName: "Welsh",
+                     models: ["cy": "techiaith-cy"],
+                     credit: "Uned Technolegau Iaith, Bangor University — Apache-2.0"),
+        // Icelandic: withdrawn — the Reykjavík 1000 h model (whisper-large v1 base) converts
+        // cleanly and is more accurate on grammar than turbo, but on the bake-off it replaced a
+        // whole passage with a run of invented numbers and writes no capitals or punctuation;
+        // turbo stays on topic. Re-evaluate with a v3-based Icelandic fine-tune (#2129).
+        // Norwegian (NbAiLab/nb-whisper-large) is converted and published but NOT
+        // offered: on a real Nynorsk talk it emitted <|nocaptions|> for most
+        // windows and kept 141 of ~680 words (WhisperKit has no handling for
+        // NB-Whisper's no-captions training token; suppress-tokens did not
+        // help). Re-enable once decoding is fixed (Vikunja #2129).
+    ]
+
+    public static func pack(id: String) -> LanguagePack? { languagePacks.first { $0.id == id } }
+
+    /// Ids of models that belong to some pack (hidden from the picker unless enabled).
+    public static var packModelIDs: Set<String> { Set(packModels.map(\.id)) }
+
+    /// The model an enabled pack provides for `code`, or nil when no enabled
+    /// pack covers it. `enabled` is `TranscribeConfig.languagePacks`; unknown
+    /// ids in it are ignored so a hand-edited config cannot break routing.
+    public static func packModel(for code: String, enabled: [String]) -> EmbeddedModel? {
+        for id in enabled {
+            if let modelID = pack(id: id)?.models[code] { return model(id: modelID) }
+        }
+        return nil
+    }
 
     public static func isAutomatic(_ id: String) -> Bool { id == automaticID }
 

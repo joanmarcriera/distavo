@@ -29,6 +29,34 @@ and published 2026-09-10:
 | `BSC-LT_whisper-large-v3-LoS` | `BSC-LT/whisper-large-v3-LoS` (8,110 h, Catalan/Spanish/Galician/Basque) | `e562381fff61707117dffb9de6d699905d78f8ef` | 3.10 GB | 21 (incl. `manifest.json`) |
 | `BSC-LT_whisper-large-v3-ca-punctuated-3370h` | `BSC-LT/whisper-large-v3-ca-punctuated-3370h` (3,370 h, Catalan, punctuated) | `5a5fb60f977e349e9d8d1fac1ecbb945c1e81b0a` | 3.10 GB | 21 (incl. `manifest.json`) |
 
+### Language packs (2026-09-17, Vikunja #2124–#2129)
+
+Shipped in 1.13 (each beat stock large-v3-turbo on a 5-minute real interview):
+
+| Folder | Source model | Source revision | Size | Notes |
+|---|---|---|---|---|
+| `ivrit-ai_whisper-large-v3-turbo` | `ivrit-ai/whisper-large-v3-turbo` (Hebrew) | `f33172a8c3c6` | 1.56 GB | turbo base, no memory floor |
+| `biodatlab_whisper-th-large-v3-combined` | `biodatlab/whisper-th-large-v3-combined` (Thai) | `ba7197f61840` | 2.96 GB | |
+| `techiaith_whisper-large-ft-cy-en` | `techiaith/whisper-large-ft-cy-en` (Welsh) | `ef20f81bcee7` | 2.96 GB | large-v2 base |
+
+Converted and published but **not offered** by the app (see the comments in `EmbeddedSupport.swift`):
+
+| Folder | Why not |
+|---|---|
+| `NbAiLab_nb-whisper-large` | emits `<|nocaptions|>` for most windows under WhisperKit; kept 141 of ~680 words |
+| `language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h` | converts cleanly (v1 base, `ALIGNMENT_BASE=large`) but replaced a passage with invented numbers; no capitals/punctuation |
+| `vasista22_whisper-tamil-medium` | converts cleanly (44 dB) but hallucinated a fluent off-topic passage on the bake-off |
+| `LWobole_whisper-small-tagalog` | lost the bake-off to stock turbo (repetition loop, garbled names) |
+| `vasista22_whisper-gujarati-medium` | decoder converts at 31.9 dB PSNR and transcribes garbage |
+| `thennal_whisper-medium-ml` | decoder fails conversion (10 dB PSNR) — published encoder-only |
+
+Converter traps found on the way: fine-tunes without `generation_config.alignment_heads` get **no
+text decoder** and no error (`alignment_heads.py` fills it in; a config carrying `_from_model_config`
+must lose that flag or transformers rebuilds it without the heads); the decoder is only compiled
+when its Core ML output matches torch above 35 dB PSNR (`PSNR_THR` lowers the gate — but a decoder
+that scraped through at 32 dB was unusable, so always bake off on real speech); the
+`test_torch2torch_correctness` failures on every fine-tune are benign.
+
 Each was converted with `whisperkittools` commit
 `84f77a83c8f530022ae55fbb1a64b3351ef63c7a` (installed as the PyPI-named `whisperkit`
 distribution — `pip show whisperkittools` finds nothing; check

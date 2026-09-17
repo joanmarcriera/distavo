@@ -43,6 +43,18 @@ transcription engine. Distavo itself is MIT-licensed; nothing here is GPL.
 - License: Apache-2.0 — © Language Technologies Unit, Barcelona Supercomputing Center,
   within Projecte AINA (Generalitat de Catalunya).
 
+## Language packs — community Whisper fine-tunes (downloaded at runtime, opt-in)
+
+Each pack is a Whisper checkpoint published by its authors on Hugging Face and
+converted to Core ML by Distavo (https://huggingface.co/Joanmarcriera/distavo-whisperkit-coreml).
+Nothing is downloaded until the pack is switched on in Settings.
+
+- **Hebrew** — https://huggingface.co/ivrit-ai/whisper-large-v3-turbo — License: Apache-2.0 — © ivrit.ai.
+- **Thai** — https://huggingface.co/biodatlab/whisper-th-large-v3-combined — License: Apache-2.0 —
+  © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
+- **Welsh** — https://huggingface.co/techiaith/whisper-large-ft-cy-en — License: Apache-2.0 —
+  © Uned Technolegau Iaith (Language Technologies Unit), Bangor University.
+
 ## Models downloaded at runtime (with your consent, on first use)
 
 The app itself ships no models. When a built-in engine is selected, it

@@ -76,21 +76,28 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Which BSC catalog id automatic Catalan routing should prefer.
     /// See `effectivePreferredCatalanModel` for the validated accessor.
     public var preferredCatalanModel: String
+    /// Ids of the opt-in `EmbeddedModelCatalog.languagePacks` automatic routing
+    /// may use (Vikunja #2124). Absent in every config written before packs
+    /// existed, so it decodes to `[]` and nothing is routed differently until
+    /// the user switches a pack on in Settings.
+    public var languagePacks: [String]
 
     enum CodingKeys: String, CodingKey {
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
+        case languagePacks = "language_packs"
     }
 
     public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 2,
-                preferredCatalanModel: String = "bsc-los") {
+                preferredCatalanModel: String = "bsc-los", languagePacks: [String] = []) {
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
         self.preferredCatalanModel = preferredCatalanModel
+        self.languagePacks = languagePacks
     }
 
     public init(from decoder: Decoder) throws {
@@ -104,6 +111,12 @@ public struct TranscribeConfig: Codable, Equatable {
         diarize = try c.decodeIfPresent(Bool.self, forKey: .diarize) ?? d.diarize
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
         preferredCatalanModel = try c.decodeIfPresent(String.self, forKey: .preferredCatalanModel) ?? d.preferredCatalanModel
+        languagePacks = try c.decodeIfPresent([String].self, forKey: .languagePacks) ?? d.languagePacks
+    }
+
+    /// Enabled packs that actually exist in the catalog, in catalog order.
+    public var enabledLanguagePacks: [LanguagePack] {
+        EmbeddedModelCatalog.languagePacks.filter { languagePacks.contains($0.id) }
     }
 
     /// Which BSC model automatic routing uses for Catalan; an unknown value
@@ -142,22 +155,33 @@ public struct SummariseConfig: Codable, Equatable {
     /// with it — so facts-first is paired with the gemma default for fresh
     /// installs (`recommendedForThisMac`) and offered in Settings.
     public var promptStyle: Prompt.Style
+    /// "auto" (follow the meeting's dominant detected language for the note
+    /// prose — Catalan/Spanish get their own instruction, everything else is
+    /// unaffected) or "en" (always British English, today's behaviour). Same
+    /// migration rule as `transcribe.backend`: a config file predating this
+    /// key decodes to "en" so no existing user's notes change language
+    /// silently; only fresh installs get "auto" via `recommendedForThisMac()`.
+    /// Ollama-only — the on-device Foundation Models path never sees it.
+    public var noteLanguage: String
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", options
         case promptStyle = "prompt_style"
+        case noteLanguage = "note_language"
     }
 
     public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
                 embeddedEnabled: Bool = false,
                 options: SummariseOptions = .init(),
-                promptStyle: Prompt.Style = .classic) {
+                promptStyle: Prompt.Style = .classic,
+                noteLanguage: String = "en") {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.options = options
         self.promptStyle = promptStyle
+        self.noteLanguage = noteLanguage
     }
 
     public init(from decoder: Decoder) throws {
@@ -173,7 +197,16 @@ public struct SummariseConfig: Codable, Equatable {
         // rather than failing the whole config.
         promptStyle = (try? c.decodeIfPresent(String.self, forKey: .promptStyle))
             .flatMap { $0.flatMap(Prompt.Style.init(rawValue:)) } ?? d.promptStyle
+        noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage) ?? d.noteLanguage
     }
+}
+
+/// What to open (if anything) once a recording finishes processing (Vikunja
+/// #2199, part a). An unrecognised or missing value falls back to `.off` — the
+/// same fallback pattern as `Prompt.Style` in `SummariseConfig` — so a config
+/// file written before this key existed never starts opening things unasked.
+public enum OpenWhenDone: String, Codable, Equatable, Sendable {
+    case off, note, transcript
 }
 
 public struct Config: Codable, Equatable {
@@ -204,6 +237,10 @@ public struct Config: Codable, Equatable {
     public var askSpeakersOnStop: Bool
     /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
     public var benchmark: [BenchmarkResult]
+    /// Open the note or transcript once a recording finishes (Vikunja #2199,
+    /// part a). Defaults to `.off`; a config predating the key decodes to
+    /// `.off` too, so upgrading never starts opening files unasked.
+    public var openWhenDone: OpenWhenDone
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -214,6 +251,7 @@ public struct Config: Codable, Equatable {
         case compactRecordingsAfterNote = "compact_recordings_after_note"
         case askSpeakersOnStop = "ask_speakers_on_stop"
         case benchmark
+        case openWhenDone = "open_when_done"
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -227,7 +265,8 @@ public struct Config: Codable, Equatable {
                 minRecordingSeconds: Int = 15,
                 compactRecordingsAfterNote: Bool = false,
                 askSpeakersOnStop: Bool = true,
-                benchmark: [BenchmarkResult] = []) {
+                benchmark: [BenchmarkResult] = [],
+                openWhenDone: OpenWhenDone = .off) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -236,6 +275,7 @@ public struct Config: Codable, Equatable {
         self.compactRecordingsAfterNote = compactRecordingsAfterNote
         self.askSpeakersOnStop = askSpeakersOnStop
         self.benchmark = benchmark
+        self.openWhenDone = openWhenDone
     }
 
     public init(from decoder: Decoder) throws {
@@ -253,6 +293,10 @@ public struct Config: Codable, Equatable {
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
+        // An unknown string (or a missing key) falls back to the default
+        // rather than failing the whole config — same pattern as `prompt_style`.
+        openWhenDone = (try? c.decodeIfPresent(String.self, forKey: .openWhenDone))
+            .flatMap { $0.flatMap(OpenWhenDone.init(rawValue:)) } ?? d.openWhenDone
     }
 
     // MARK: Paths
@@ -296,6 +340,8 @@ public struct Config: Codable, Equatable {
         cfg.compactRecordingsAfterNote = true
         // Fresh installs pair the gemma4:26b default with the facts-first prompt (#2063).
         cfg.summarise.promptStyle = .factsFirst
+        // Fresh installs follow the meeting's language for the note prose too (#2147).
+        cfg.summarise.noteLanguage = "auto"
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

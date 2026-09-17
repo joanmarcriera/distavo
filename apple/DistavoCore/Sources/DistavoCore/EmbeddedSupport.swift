@@ -176,23 +176,11 @@ public enum EmbeddedModelCatalog {
             languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
         EmbeddedModel(
-            id: "vasista-gu", displayName: "ગુજરાતી · Gujarati (IIT Madras)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "vasista22_whisper-gujarati-medium",
-            languages: .only(["gu"]), downloadMB: 1500, ramGB: 2, minimumMemoryGB: 0,
-            detail: "Whisper medium fine-tuned at IIT Madras (Speech Lab) on Gujarati; 12.3 % WER on FLEURS."),
-        EmbeddedModel(
             id: "vasista-ta", displayName: "தமிழ் · Tamil (IIT Madras)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "vasista22_whisper-tamil-medium",
             languages: .only(["ta"]), downloadMB: 1500, ramGB: 2, minimumMemoryGB: 0,
             detail: "Whisper medium fine-tuned at IIT Madras (Speech Lab) on Tamil; 7.0 % WER on FLEURS."),
-        EmbeddedModel(
-            id: "thennal-ml", displayName: "മലയാളം · Malayalam (community fine-tune)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "thennal_whisper-medium-ml",
-            languages: .only(["ml"]), downloadMB: 1500, ramGB: 2, minimumMemoryGB: 0,
-            detail: "Whisper medium fine-tuned on Malayalam; 11.5 % WER on Common Voice."),
     ]
 
     /// Every pack Distavo can offer. Order = Settings order.
@@ -207,15 +195,11 @@ public enum EmbeddedModelCatalog {
         // LOST the bake-off to stock turbo on a Palace press briefing — a
         // repetition loop, a stray "[música]" token, garbled proper names. Turbo
         // already handles Tagalog–English code-switching well; no pack (#2128).
-        LanguagePack(id: "gujarati", displayName: "Gujarati",
-                     models: ["gu": "vasista-gu"],
-                     credit: "Speech Lab, IIT Madras — Apache-2.0"),
+        // Gujarati: withdrawn — its medium decoder converts at 31.9 dB PSNR (below the converter's 35 dB gate) and the Core ML output is garbage — 165 Gujarati characters in 2,951 (#2128). Stock turbo handles the language; no pack.
         LanguagePack(id: "tamil", displayName: "Tamil",
                      models: ["ta": "vasista-ta"],
                      credit: "Speech Lab, IIT Madras — Apache-2.0"),
-        LanguagePack(id: "malayalam", displayName: "Malayalam",
-                     models: ["ml": "thennal-ml"],
-                     credit: "Thennal D K — Apache-2.0"),
+        // Malayalam: withdrawn — its decoder fails conversion outright (10 dB PSNR; argmax's decoder disagrees with the checkpoint even in torch) (#2128). Stock turbo handles the language; no pack.
         LanguagePack(id: "welsh", displayName: "Welsh",
                      models: ["cy": "techiaith-cy"],
                      credit: "Uned Technolegau Iaith, Bangor University — Apache-2.0"),

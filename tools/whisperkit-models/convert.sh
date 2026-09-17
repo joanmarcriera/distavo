@@ -44,8 +44,9 @@ fi
 "$wvenv/bin/python" "$here/alignment_heads.py" "$local" ${ALIGNMENT_BASE:-}
 # The converter only compiles a component whose Core ML output matches torch above
 # TEST_PSNR_THR (35 dB, hard-coded in argmaxtools/whisperkittools). Some fine-tuned
-# medium decoders land at ~27 dB in fp16 and would be silently left out; PSNR_THR=20
-# lowers the gate — the bake-off on real speech is Distavo's real quality test.
+# medium decoders land at ~27 dB in fp16 and are silently left out; PSNR_THR=20 lowers the
+# gate. Treat the number as meaningful: a decoder that passed at 31.9 dB (vasista22 Gujarati)
+# produced garbage on real speech, one at 44 dB (vasista22 Tamil) was fine — always bake off.
 if [ -n "${PSNR_THR:-}" ]; then
   sed -i '' -E "s/^TEST_PSNR_THR = [0-9]+/TEST_PSNR_THR = ${PSNR_THR}/" \
     "$work"/venv/lib/python3.11/site-packages/tests/test_text_decoder.py \

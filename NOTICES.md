@@ -52,11 +52,8 @@ Nothing is downloaded until the pack is switched on in Settings.
 - **Hebrew** — https://huggingface.co/ivrit-ai/whisper-large-v3-turbo — License: Apache-2.0 — © ivrit.ai.
 - **Thai** — https://huggingface.co/biodatlab/whisper-th-large-v3-combined — License: Apache-2.0 —
   © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
-- **Gujarati** — https://huggingface.co/vasista22/whisper-gujarati-medium — License: Apache-2.0 —
-  © Speech Lab, IIT Madras (Vasista Sai Lodagala).
 - **Tamil** — https://huggingface.co/vasista22/whisper-tamil-medium — License: Apache-2.0 —
   © Speech Lab, IIT Madras (Vasista Sai Lodagala).
-- **Malayalam** — https://huggingface.co/thennal/whisper-medium-ml — License: Apache-2.0 — © Thennal D K.
 - **Welsh** — https://huggingface.co/techiaith/whisper-large-ft-cy-en — License: Apache-2.0 —
   © Uned Technolegau Iaith (Language Technologies Unit), Bangor University.
 - **Icelandic** — https://huggingface.co/language-and-voice-lab/whisper-large-icelandic-30k-steps-1000h —

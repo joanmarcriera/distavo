@@ -63,8 +63,6 @@ Nothing is downloaded until the pack is switched on in Settings.
 - **Icelandic** — https://huggingface.co/language-and-voice-lab/whisper-large-icelandic-30k-steps-1000h —
   License: CC BY 4.0 — © Language and Voice Lab, Reykjavík University. Attribution: "whisper-large-icelandic
   by the Language and Voice Lab, Reykjavík University".
-- **Norwegian (Bokmål and Nynorsk)** — https://huggingface.co/NbAiLab/nb-whisper-large — License: Apache-2.0 —
-  © Nasjonalbiblioteket (National Library of Norway), NB AI Lab.
 
 ## Models downloaded at runtime (with your consent, on first use)
 

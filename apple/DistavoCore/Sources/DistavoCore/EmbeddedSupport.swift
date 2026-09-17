@@ -176,12 +176,6 @@ public enum EmbeddedModelCatalog {
             languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
         EmbeddedModel(
-            id: "nb-whisper-no", displayName: "Norsk · Norwegian, Bokmål and Nynorsk (National Library)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "NbAiLab_nb-whisper-large",
-            languages: .only(["no", "nn"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
-            detail: "NB-Whisper large by the National Library of Norway. Writes Bokmål for Norwegian; set the language to Nynorsk to get Nynorsk spelling."),
-        EmbeddedModel(
             id: "lwobole-tl", displayName: "Tagalog · Filipino (community fine-tune)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "LWobole_whisper-small-tagalog",
@@ -233,9 +227,11 @@ public enum EmbeddedModelCatalog {
         LanguagePack(id: "icelandic", displayName: "Icelandic",
                      models: ["is": "lvl-is"],
                      credit: "Language and Voice Lab, Reykjavík University — CC BY 4.0"),
-        LanguagePack(id: "norwegian", displayName: "Norwegian (Bokmål + Nynorsk)",
-                     models: ["no": "nb-whisper-no", "nn": "nb-whisper-no"],
-                     credit: "NB-Whisper, National Library of Norway — Apache-2.0"),
+        // Norwegian (NbAiLab/nb-whisper-large) is converted and published but NOT
+        // offered: on a real Nynorsk talk it emitted <|nocaptions|> for most
+        // windows and kept 141 of ~680 words (WhisperKit has no handling for
+        // NB-Whisper's no-captions training token; suppress-tokens did not
+        // help). Re-enable once decoding is fixed (Vikunja #2129).
     ]
 
     public static func pack(id: String) -> LanguagePack? { languagePacks.first { $0.id == id } }

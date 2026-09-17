@@ -54,6 +54,8 @@ Nothing is downloaded until the pack is switched on in Settings.
   © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
 - **Tamil** — https://huggingface.co/vasista22/whisper-tamil-large-v2 — License: Apache-2.0 —
   © Speech Lab, IIT Madras (Vasista Sai Lodagala).
+- **Norwegian (Bokmål and Nynorsk)** — https://huggingface.co/NbAiLab/nb-whisper-large-verbatim — License: Apache-2.0 —
+  © Nasjonalbiblioteket (National Library of Norway), NB AI Lab.
 - **Welsh** — https://huggingface.co/techiaith/whisper-large-ft-cy-en — License: Apache-2.0 —
   © Uned Technolegau Iaith (Language Technologies Unit), Bangor University.
 

@@ -164,6 +164,12 @@ public enum EmbeddedModelCatalog {
             languages: .only(["th"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by Mahidol University (Thonburian Whisper) on Thai speech; 6.6 % WER on Common Voice."),
         EmbeddedModel(
+            id: "nb-whisper-verbatim", displayName: "Norsk · Norwegian, Bokmål and Nynorsk (National Library)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "NbAiLab_nb-whisper-large-verbatim",
+            languages: .only(["no", "nn"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "NB-Whisper large (verbatim) by the National Library of Norway. Writes Bokmål for Norwegian; set the language to Nynorsk for Nynorsk spelling. Lower-case, no punctuation — the notes are unaffected. (The non-verbatim NB-Whisper dropped most speech under WhisperKit.)"),
+        EmbeddedModel(
             id: "vasista-ta-large", displayName: "தமிழ் · Tamil (IIT Madras)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "vasista22_whisper-tamil-large-v2",
@@ -201,11 +207,9 @@ public enum EmbeddedModelCatalog {
         // cleanly and is more accurate on grammar than turbo, but on the bake-off it replaced a
         // whole passage with a run of invented numbers and writes no capitals or punctuation;
         // turbo stays on topic. Re-evaluate with a v3-based Icelandic fine-tune (#2129).
-        // Norwegian (NbAiLab/nb-whisper-large) is converted and published but NOT
-        // offered: on a real Nynorsk talk it emitted <|nocaptions|> for most
-        // windows and kept 141 of ~680 words (WhisperKit has no handling for
-        // NB-Whisper's no-captions training token; suppress-tokens did not
-        // help). Re-enable once decoding is fixed (Vikunja #2129).
+        LanguagePack(id: "norwegian", displayName: "Norwegian (Bokmål + Nynorsk)",
+                     models: ["no": "nb-whisper-verbatim", "nn": "nb-whisper-verbatim"],
+                     credit: "NB-Whisper verbatim, National Library of Norway — Apache-2.0"),
     ]
 
     public static func pack(id: String) -> LanguagePack? { languagePacks.first { $0.id == id } }

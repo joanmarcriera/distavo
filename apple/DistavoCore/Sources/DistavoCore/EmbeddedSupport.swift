@@ -175,12 +175,6 @@ public enum EmbeddedModelCatalog {
             whisperKitName: "language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h",
             languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
-        EmbeddedModel(
-            id: "vasista-ta", displayName: "தமிழ் · Tamil (IIT Madras)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "vasista22_whisper-tamil-medium",
-            languages: .only(["ta"]), downloadMB: 1500, ramGB: 2, minimumMemoryGB: 0,
-            detail: "Whisper medium fine-tuned at IIT Madras (Speech Lab) on Tamil; 7.0 % WER on FLEURS."),
     ]
 
     /// Every pack Distavo can offer. Order = Settings order.
@@ -196,9 +190,10 @@ public enum EmbeddedModelCatalog {
         // repetition loop, a stray "[música]" token, garbled proper names. Turbo
         // already handles Tagalog–English code-switching well; no pack (#2128).
         // Gujarati: withdrawn — its medium decoder converts at 31.9 dB PSNR (below the converter's 35 dB gate) and the Core ML output is garbage — 165 Gujarati characters in 2,951 (#2128). Stock turbo handles the language; no pack.
-        LanguagePack(id: "tamil", displayName: "Tamil",
-                     models: ["ta": "vasista-ta"],
-                     credit: "Speech Lab, IIT Madras — Apache-2.0"),
+        // Tamil: withdrawn — vasista22/whisper-tamil-medium converts cleanly (44 dB) and
+        // has tidier orthography than turbo, but on the bake-off it hallucinated a
+        // fluent off-topic passage (COVID deaths, hospitals) the speaker never said;
+        // turbo's defects are visible glyph bleed, not plausible fabrication (#2128).
         // Malayalam: withdrawn — its decoder fails conversion outright (10 dB PSNR; argmax's decoder disagrees with the checkpoint even in torch) (#2128). Stock turbo handles the language; no pack.
         LanguagePack(id: "welsh", displayName: "Welsh",
                      models: ["cy": "techiaith-cy"],

@@ -126,7 +126,7 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
   config predating it** (the original take is gone once compacted) and on only for fresh installs via
   `Config.recommendedForThisMac()` — the same migration rule as `transcribe.backend`.
 - **Language packs are opt-in (Vikunja #2124):** `EmbeddedModelCatalog.languagePacks` lists community Whisper
-  fine-tunes (Hebrew, Thai, Tamil, Welsh, Icelandic) hosted in Marc's
+  fine-tunes (Hebrew, Thai, Welsh, Icelandic) hosted in Marc's
   `Joanmarcriera/distavo-whisperkit-coreml` repo. `transcribe.language_packs` names the enabled ones; a config
   predating the key decodes to `[]`, so nothing routes differently until the user switches a pack on in Settings.
   The router sends any confident pack language to the pack (never Parakeet) after the unconditional Catalan/

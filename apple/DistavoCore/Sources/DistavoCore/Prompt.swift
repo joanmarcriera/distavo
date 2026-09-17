@@ -62,6 +62,8 @@ public enum Prompt {
     - The suggested email is written BY the note owner TO the other party. Do not invent the other party's name; if their name was not spoken, open with "Hi," and mention no name.
     - Do not add calendar years unless spoken.
 
+    Output ONLY the notes below, starting with the line "# Meeting notes"; the speaker identification and the ledger go into their sections inside the notes, never as "Step" headings before it.
+
     Return Markdown using exactly these sections:
 
     # Meeting notes

@@ -54,6 +54,21 @@ final class PromptTests: XCTestCase {
                        Prompt.build(transcript: "t", noteOwner: "M", userSpeaker: "u"))
     }
 
+    /// Vikunja #2203: gemma4:26b sometimes emitted its "Step 1/2/3" working
+    /// notes before the actual note. The template now explicitly forbids it.
+    func testFactsFirstForbidsLeakingStepHeadingsBeforeTheNote() {
+        XCTAssertTrue(Prompt.factsFirstTemplate.contains(
+            "Output ONLY the notes below, starting with the line \"# Meeting notes\"; " +
+            "the speaker identification and the ledger go into their sections inside the notes, " +
+            "never as \"Step\" headings before it."))
+        // The rule sits after Step 3 and before the section list hand-off.
+        let steps = Prompt.factsFirstTemplate.range(of: "## Step 3")!
+        let rule = Prompt.factsFirstTemplate.range(of: "Output ONLY the notes below")!
+        let sections = Prompt.factsFirstTemplate.range(of: "Return Markdown using exactly these sections:")!
+        XCTAssertTrue(steps.upperBound < rule.lowerBound)
+        XCTAssertTrue(rule.upperBound < sections.lowerBound)
+    }
+
     func testTemplateHasRequiredSections() {
 
         for header in ["# Meeting notes", "## Action items", "## Highest-ROI follow-up",

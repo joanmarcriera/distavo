@@ -102,18 +102,27 @@ public struct NoteContext: Equatable, Sendable {
     /// When the recording started, when known (recorder filename or file date).
     public var meetingDate: Date?
     public var promptStyle: Prompt.Style
+    /// ISO code of the meeting's dominant detected language ("ca"/"es"/…),
+    /// set only when `summarise.note_language` is "auto" (Vikunja #2147).
+    /// nil for the "en" setting (default for any config predating the key)
+    /// or when no detection is available — the prompt is then byte-identical
+    /// to before this feature. Ollama-only: the app layer never routes the
+    /// embedded (Foundation Models) path through this.
+    public var noteLanguage: String?
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
-                meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic) {
+                meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
+                noteLanguage: String? = nil) {
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
         self.participants = participants; self.meetingDate = meetingDate
-        self.promptStyle = promptStyle
+        self.promptStyle = promptStyle; self.noteLanguage = noteLanguage
     }
 
     /// The full prompt for the Ollama path.
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
-                     participants: participants, style: promptStyle, meetingDate: meetingDate)
+                     participants: participants, style: promptStyle, meetingDate: meetingDate,
+                     noteLanguage: noteLanguage)
     }
 }
 
@@ -344,10 +353,16 @@ public enum Pipeline {
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
 
             deps.onPhase?(.summarising)
+            // "auto" follows the meeting's dominant detected language for the
+            // Ollama prompt (Vikunja #2147); "en" (the default for any config
+            // predating the key) always leaves noteLanguage nil, so the
+            // prompt is unaffected regardless of what was detected.
+            let noteLanguage = config.summarise.noteLanguage == "auto"
+                ? dominantLanguageCode(from: result) : nil
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
-                promptStyle: config.summarise.promptStyle)
+                promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage)
             let summary = try await deps.summarise(clean, target, config.summarise.options, context)
             let noteText = summary + provenanceFooter(from: result)
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
@@ -462,6 +477,19 @@ public enum Pipeline {
                 return (code: code, probability: entry["probability"] as? Double ?? 0)
             }
         return NoteProvenance.detectedLanguages(detections)
+    }
+
+    /// The single highest-probability detected language code (e.g. "ca"),
+    /// or nil when the transcribe result carries no detections (the server
+    /// path, or the built-in engine outside Automatic mode). Feeds
+    /// `NoteContext.noteLanguage` when `summarise.note_language` is "auto".
+    static func dominantLanguageCode(from transcribeResult: [String: Any]) -> String? {
+        let detections: [(code: String, probability: Double)] =
+            (transcribeResult["detections"] as? [[String: Any]] ?? []).compactMap { entry in
+                guard let code = entry["code"] as? String else { return nil }
+                return (code: code, probability: entry["probability"] as? Double ?? 0)
+            }
+        return detections.max(by: { $0.probability < $1.probability })?.code
     }
 
     /// Builds the note's provenance footer from the transcribe result's

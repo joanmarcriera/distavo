@@ -61,4 +61,64 @@ final class PromptTests: XCTestCase {
             XCTAssertTrue(Prompt.template.contains(header), "missing \(header)")
         }
     }
+
+    // MARK: Note language (Vikunja #2147)
+
+    /// nil and "en" must be byte-identical to the prompt with no language
+    /// argument at all — the feature is invisible unless "ca"/"es" is asked
+    /// for, for both the classic and facts-first templates.
+    func testNilAndEnglishAreByteIdenticalToPreFeatureOutput() {
+        let baseline = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown")
+        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: nil))
+        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "en"))
+
+        let factsBaseline = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", style: .factsFirst)
+        XCTAssertEqual(factsBaseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown",
+                                                    style: .factsFirst, noteLanguage: nil))
+        XCTAssertEqual(factsBaseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown",
+                                                    style: .factsFirst, noteLanguage: "en"))
+    }
+
+    /// An unrecognised code (e.g. a WhisperKit detection that isn't Catalan or
+    /// Spanish) leaves the prompt untouched too — only "ca"/"es" change it.
+    func testUnrecognisedCodeLeavesPromptUnchanged() {
+        let baseline = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown")
+        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "fr"))
+    }
+
+    func testCatalanReplacesBritishEnglishRuleAndKeepsEnglishHeadings() {
+        let out = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "ca")
+        XCTAssertFalse(out.contains("Use British English."))
+        XCTAssertTrue(out.contains("Escriu les notes en català; mantén els encapçalaments de secció en anglès."))
+        XCTAssertTrue(out.contains("Conserva textualment, en la llengua parlada, els fragments citats."))
+        // Section headings stay in English — SummaryValidator and downstream
+        // tools key on the heading text, not the note's prose language.
+        for header in ["# Meeting notes", "## Action items", "## Highest-ROI follow-up",
+                       "## Suggested follow-up email"] {
+            XCTAssertTrue(out.contains(header), "missing \(header)")
+        }
+    }
+
+    func testSpanishReplacesBritishEnglishRuleAndKeepsEnglishHeadings() {
+        let out = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "es")
+        XCTAssertFalse(out.contains("Use British English."))
+        XCTAssertTrue(out.contains("Escribe las notas en español; mantén los encabezados de sección en inglés."))
+        XCTAssertTrue(out.contains("Conserva textualmente, en el idioma hablado, los fragmentos citados."))
+        for header in ["# Meeting notes", "## Action items", "## Highest-ROI follow-up",
+                       "## Suggested follow-up email"] {
+            XCTAssertTrue(out.contains(header), "missing \(header)")
+        }
+    }
+
+    /// Facts-first mixes the language rule into a bullet with "Be concise…" —
+    /// the replacement must keep that half of the sentence intact.
+    func testCatalanFactsFirstKeepsRestOfBulletIntact() {
+        let out = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown",
+                               style: .factsFirst, noteLanguage: "ca")
+        XCTAssertFalse(out.contains("Use British English."))
+        XCTAssertTrue(out.contains("Escriu les notes en català"))
+        XCTAssertTrue(out.contains("Be concise; no repeated wording; no long transcript quotes."))
+        XCTAssertTrue(out.contains("## Facts ledger"))
+        XCTAssertTrue(out.contains("## Speakers"))
+    }
 }

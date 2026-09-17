@@ -155,22 +155,33 @@ public struct SummariseConfig: Codable, Equatable {
     /// with it — so facts-first is paired with the gemma default for fresh
     /// installs (`recommendedForThisMac`) and offered in Settings.
     public var promptStyle: Prompt.Style
+    /// "auto" (follow the meeting's dominant detected language for the note
+    /// prose — Catalan/Spanish get their own instruction, everything else is
+    /// unaffected) or "en" (always British English, today's behaviour). Same
+    /// migration rule as `transcribe.backend`: a config file predating this
+    /// key decodes to "en" so no existing user's notes change language
+    /// silently; only fresh installs get "auto" via `recommendedForThisMac()`.
+    /// Ollama-only — the on-device Foundation Models path never sees it.
+    public var noteLanguage: String
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", options
         case promptStyle = "prompt_style"
+        case noteLanguage = "note_language"
     }
 
     public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
                 embeddedEnabled: Bool = false,
                 options: SummariseOptions = .init(),
-                promptStyle: Prompt.Style = .classic) {
+                promptStyle: Prompt.Style = .classic,
+                noteLanguage: String = "en") {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.options = options
         self.promptStyle = promptStyle
+        self.noteLanguage = noteLanguage
     }
 
     public init(from decoder: Decoder) throws {
@@ -186,6 +197,7 @@ public struct SummariseConfig: Codable, Equatable {
         // rather than failing the whole config.
         promptStyle = (try? c.decodeIfPresent(String.self, forKey: .promptStyle))
             .flatMap { $0.flatMap(Prompt.Style.init(rawValue:)) } ?? d.promptStyle
+        noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage) ?? d.noteLanguage
     }
 }
 
@@ -328,6 +340,8 @@ public struct Config: Codable, Equatable {
         cfg.compactRecordingsAfterNote = true
         // Fresh installs pair the gemma4:26b default with the facts-first prompt (#2063).
         cfg.summarise.promptStyle = .factsFirst
+        // Fresh installs follow the meeting's language for the note prose too (#2147).
+        cfg.summarise.noteLanguage = "auto"
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

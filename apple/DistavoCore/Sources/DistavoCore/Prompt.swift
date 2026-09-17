@@ -233,14 +233,40 @@ public enum Prompt {
         return "\(f.string(from: date)) (\(timeZone.identifier))"
     }
 
+    /// Replacement for the "Use British English." rule when the meeting's
+    /// dominant language is Catalan or Spanish (Vikunja #2147, epic note
+    /// language). Section headings stay in English on purpose — the
+    /// `SummaryValidator` and downstream tooling key on the heading text, not
+    /// on the note's prose language — and quoted excerpts must stay verbatim
+    /// in whatever language was actually spoken. Every other code (including
+    /// nil, "en", or anything unrecognised) returns nil and the prompt is
+    /// untouched.
+    static func languageInstruction(for code: String?) -> String? {
+        switch code {
+        case "ca":
+            return "Escriu les notes en català; mantén els encapçalaments de secció en anglès. " +
+                   "Conserva textualment, en la llengua parlada, els fragments citats."
+        case "es":
+            return "Escribe las notas en español; mantén los encabezados de sección en inglés. " +
+                   "Conserva textualmente, en el idioma hablado, los fragmentos citados."
+        default:
+            return nil
+        }
+    }
+
     public static func build(transcript: String, noteOwner: String, userSpeaker: String,
                              participants: String? = nil, style: Style = .classic,
-                             meetingDate: Date? = nil) -> String {
+                             meetingDate: Date? = nil, noteLanguage: String? = nil) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let block = hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint)
-        let base = style == .factsFirst
+        var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : template
+        // Only "ca"/"es" change anything — nil, "en", or any other code
+        // leaves the prompt byte-identical to before this feature.
+        if let instruction = languageInstruction(for: noteLanguage) {
+            base = base.replacingOccurrences(of: "Use British English.", with: instruction)
+        }
         return base
             .replacingOccurrences(of: "{note_owner}", with: noteOwner)
             .replacingOccurrences(of: "Known speaker label for the note owner: {user_speaker}.\n",

@@ -352,6 +352,47 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(plain.detectedLanguages)
     }
 
+    // MARK: Note language (Vikunja #2147)
+
+    /// With `summarise.note_language == "auto"`, a detected "ca" reaches the
+    /// prompt built for the summariser (via `NoteContext.noteLanguage`).
+    func testDetectedCatalanReachesPromptWhenNoteLanguageIsAuto() async throws {
+        var (cfg, input) = try makeEnv()
+        cfg.summarise.noteLanguage = "auto"
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                ["segments": [["speaker": "SPEAKER_00", "text": "hola"]],
+                 "detections": [["code": "ca", "probability": 0.92], ["code": "en", "probability": 0.2]]]
+            }, summarise: { _, _, _, context in
+                XCTAssertEqual(context.noteLanguage, "ca")
+                XCTAssertTrue(context.prompt(transcript: "hola").contains("Escriu les notes en català"))
+                return "# Meeting notes\n\nA clean, valid summary."
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+    }
+
+    /// With `summarise.note_language == "en"` (the default for any config
+    /// predating the key), the same Catalan detection does NOT reach the
+    /// prompt — notes stay English regardless of what was detected.
+    func testDetectedCatalanIsIgnoredWhenNoteLanguageIsEnglish() async throws {
+        var (cfg, input) = try makeEnv()
+        cfg.summarise.noteLanguage = "en"
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                ["segments": [["speaker": "SPEAKER_00", "text": "hola"]],
+                 "detections": [["code": "ca", "probability": 0.92]]]
+            }, summarise: { _, _, _, context in
+                XCTAssertNil(context.noteLanguage)
+                XCTAssertFalse(context.prompt(transcript: "hola").contains("Escriu les notes en català"))
+                return "# Meeting notes\n\nA clean, valid summary."
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+    }
+
     func testSuccessWritesNoteAndMarksDone() async throws {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(

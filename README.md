@@ -14,7 +14,7 @@ meeting note. It converts the file locally with **AVFoundation**, transcribes it
 with a **built-in on-device engine** (Whisper, a Fast engine for 25 European
 languages, two Catalan/Spanish models from the Barcelona Supercomputing
 Center, or an opt-in **language pack** — community Whisper fine-tunes for
-Hebrew, Thai and Welsh) — or on **your own WhisperX server** if you prefer — summarises the
+Hebrew, Thai, Tamil and Welsh) — or on **your own WhisperX server** if you prefer — summarises the
 transcript with **your own Ollama server**, validates the result, and writes
 a note to your notes folder.
 
@@ -36,7 +36,7 @@ The native menu and settings window:
   deployment target).
 - **Apple Silicon Mac** for the built-in transcription engines — Intel Macs
   use a WhisperX server instead (see below). The two Catalan/Spanish models
-  and the large-v3-based language packs (Thai, Welsh)
+  and the large-v3-based language packs (Thai, Tamil, Welsh)
   additionally need **16 GB of memory or more**; the Hebrew pack runs on any Apple Silicon Mac.
 - **Ollama for summaries** — a reachable Ollama HTTP endpoint with a model
   pulled (for example `llama3.1:8b`), see [Ollama](https://ollama.com).

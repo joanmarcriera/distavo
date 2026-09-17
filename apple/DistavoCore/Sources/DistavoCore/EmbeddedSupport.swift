@@ -164,6 +164,12 @@ public enum EmbeddedModelCatalog {
             languages: .only(["th"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large-v3 fine-tuned by Mahidol University (Thonburian Whisper) on Thai speech; 6.6 % WER on Common Voice."),
         EmbeddedModel(
+            id: "vasista-ta-large", displayName: "தமிழ் · Tamil (IIT Madras)",
+            engine: .whisperKit, whisperKitRepo: customRepo,
+            whisperKitName: "vasista22_whisper-tamil-large-v2",
+            languages: .only(["ta"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
+            detail: "Whisper large-v2 fine-tuned at IIT Madras (Speech Lab) on Tamil; 7.5 % WER on FLEURS. Cleaner Tamil script than the stock model, but writes no punctuation."),
+        EmbeddedModel(
             id: "techiaith-cy", displayName: "Cymraeg · Welsh (Bangor University)",
             engine: .whisperKit, whisperKitRepo: customRepo,
             whisperKitName: "techiaith_whisper-large-ft-cy-en",
@@ -184,10 +190,9 @@ public enum EmbeddedModelCatalog {
         // repetition loop, a stray "[música]" token, garbled proper names. Turbo
         // already handles Tagalog–English code-switching well; no pack (#2128).
         // Gujarati: withdrawn — its medium decoder converts at 31.9 dB PSNR (below the converter's 35 dB gate) and the Core ML output is garbage — 165 Gujarati characters in 2,951 (#2128). Stock turbo handles the language; no pack.
-        // Tamil: withdrawn — vasista22/whisper-tamil-medium converts cleanly (44 dB) and
-        // has tidier orthography than turbo, but on the bake-off it hallucinated a
-        // fluent off-topic passage (COVID deaths, hospitals) the speaker never said;
-        // turbo's defects are visible glyph bleed, not plausible fabrication (#2128).
+        LanguagePack(id: "tamil", displayName: "Tamil",
+                     models: ["ta": "vasista-ta-large"],
+                     credit: "Speech Lab, IIT Madras — Apache-2.0"),
         // Malayalam: withdrawn — its decoder fails conversion outright (10 dB PSNR; argmax's decoder disagrees with the checkpoint even in torch) (#2128). Stock turbo handles the language; no pack.
         LanguagePack(id: "welsh", displayName: "Welsh",
                      models: ["cy": "techiaith-cy"],

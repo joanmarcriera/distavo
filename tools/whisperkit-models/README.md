@@ -37,6 +37,7 @@ Shipped in 1.13 (each beat stock large-v3-turbo on a 5-minute real interview):
 |---|---|---|---|---|
 | `ivrit-ai_whisper-large-v3-turbo` | `ivrit-ai/whisper-large-v3-turbo` (Hebrew) | `f33172a8c3c6` | 1.56 GB | turbo base, no memory floor |
 | `biodatlab_whisper-th-large-v3-combined` | `biodatlab/whisper-th-large-v3-combined` (Thai) | `ba7197f61840` | 2.96 GB | |
+| `vasista22_whisper-tamil-large-v2` | `vasista22/whisper-tamil-large-v2` (Tamil) | `3a873037a83d` | 2.96 GB | large-v2 base; 1.14 — pack wins (no fabrication), no punctuation |
 | `techiaith_whisper-large-ft-cy-en` | `techiaith/whisper-large-ft-cy-en` (Welsh) | `ef20f81bcee7` | 2.96 GB | large-v2 base |
 
 Converted and published but **not offered** by the app (see the comments in `EmbeddedSupport.swift`):

@@ -18,7 +18,13 @@ import urllib.request
 d = sys.argv[1]
 gc_path = f"{d}/generation_config.json"
 gc = json.load(open(gc_path))
+# A config re-saved by transformers carries `_from_model_config: true`, and a
+# model loaded with that flag REBUILDS its generation config from config.json,
+# silently dropping alignment_heads (seen 2026-09-17). Strip the flag.
+was_derived = gc.pop("_from_model_config", None)
 if "alignment_heads" in gc:
+    if was_derived:
+        json.dump(gc, open(gc_path, "w"), indent=2)
     sys.exit(0)
 cfg = json.load(open(f"{d}/config.json"))
 if len(sys.argv) > 2:

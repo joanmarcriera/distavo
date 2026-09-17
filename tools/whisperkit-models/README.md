@@ -38,13 +38,13 @@ Shipped in 1.13 (each beat stock large-v3-turbo on a 5-minute real interview):
 | `ivrit-ai_whisper-large-v3-turbo` | `ivrit-ai/whisper-large-v3-turbo` (Hebrew) | `f33172a8c3c6` | 1.56 GB | turbo base, no memory floor |
 | `biodatlab_whisper-th-large-v3-combined` | `biodatlab/whisper-th-large-v3-combined` (Thai) | `ba7197f61840` | 2.96 GB | |
 | `techiaith_whisper-large-ft-cy-en` | `techiaith/whisper-large-ft-cy-en` (Welsh) | `ef20f81bcee7` | 2.96 GB | large-v2 base |
-| `language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h` | Icelandic (Reykjavík University) | `bd2179612248` | 2.96 GB | large v1 base, `ALIGNMENT_BASE=large` |
 
 Converted and published but **not offered** by the app (see the comments in `EmbeddedSupport.swift`):
 
 | Folder | Why not |
 |---|---|
 | `NbAiLab_nb-whisper-large` | emits `<|nocaptions|>` for most windows under WhisperKit; kept 141 of ~680 words |
+| `language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h` | converts cleanly (v1 base, `ALIGNMENT_BASE=large`) but replaced a passage with invented numbers; no capitals/punctuation |
 | `vasista22_whisper-tamil-medium` | converts cleanly (44 dB) but hallucinated a fluent off-topic passage on the bake-off |
 | `LWobole_whisper-small-tagalog` | lost the bake-off to stock turbo (repetition loop, garbled names) |
 | `vasista22_whisper-gujarati-medium` | decoder converts at 31.9 dB PSNR and transcribes garbage |

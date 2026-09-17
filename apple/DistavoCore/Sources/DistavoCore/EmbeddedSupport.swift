@@ -169,12 +169,6 @@ public enum EmbeddedModelCatalog {
             whisperKitName: "techiaith_whisper-large-ft-cy-en",
             languages: .only(["cy"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
             detail: "Whisper large fine-tuned by Bangor University's Language Technologies Unit on Welsh and Welsh–English speech."),
-        EmbeddedModel(
-            id: "lvl-is", displayName: "Íslenska · Icelandic (Reykjavík University)",
-            engine: .whisperKit, whisperKitRepo: customRepo,
-            whisperKitName: "language-and-voice-lab_whisper-large-icelandic-30k-steps-1000h",
-            languages: .only(["is"]), downloadMB: 3100, ramGB: 4, minimumMemoryGB: 16,
-            detail: "Whisper large fine-tuned by Reykjavík University's Language and Voice Lab on 1,000 hours of Icelandic."),
     ]
 
     /// Every pack Distavo can offer. Order = Settings order.
@@ -198,9 +192,10 @@ public enum EmbeddedModelCatalog {
         LanguagePack(id: "welsh", displayName: "Welsh",
                      models: ["cy": "techiaith-cy"],
                      credit: "Uned Technolegau Iaith, Bangor University — Apache-2.0"),
-        LanguagePack(id: "icelandic", displayName: "Icelandic",
-                     models: ["is": "lvl-is"],
-                     credit: "Language and Voice Lab, Reykjavík University — CC BY 4.0"),
+        // Icelandic: withdrawn — the Reykjavík 1000 h model (whisper-large v1 base) converts
+        // cleanly and is more accurate on grammar than turbo, but on the bake-off it replaced a
+        // whole passage with a run of invented numbers and writes no capitals or punctuation;
+        // turbo stays on topic. Re-evaluate with a v3-based Icelandic fine-tune (#2129).
         // Norwegian (NbAiLab/nb-whisper-large) is converted and published but NOT
         // offered: on a real Nynorsk talk it emitted <|nocaptions|> for most
         // windows and kept 141 of ~680 words (WhisperKit has no handling for

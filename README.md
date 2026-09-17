@@ -14,7 +14,7 @@ meeting note. It converts the file locally with **AVFoundation**, transcribes it
 with a **built-in on-device engine** (Whisper, a Fast engine for 25 European
 languages, two Catalan/Spanish models from the Barcelona Supercomputing
 Center, or an opt-in **language pack** — community Whisper fine-tunes for
-Hebrew, Thai, Welsh, and Icelandic) — or on **your own WhisperX server** if you prefer — summarises the
+Hebrew, Thai and Welsh) — or on **your own WhisperX server** if you prefer — summarises the
 transcript with **your own Ollama server**, validates the result, and writes
 a note to your notes folder.
 

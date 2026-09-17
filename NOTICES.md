@@ -54,9 +54,6 @@ Nothing is downloaded until the pack is switched on in Settings.
   © Biomedical and Data Lab, Mahidol University (Thonburian Whisper).
 - **Welsh** — https://huggingface.co/techiaith/whisper-large-ft-cy-en — License: Apache-2.0 —
   © Uned Technolegau Iaith (Language Technologies Unit), Bangor University.
-- **Icelandic** — https://huggingface.co/language-and-voice-lab/whisper-large-icelandic-30k-steps-1000h —
-  License: CC BY 4.0 — © Language and Voice Lab, Reykjavík University. Attribution: "whisper-large-icelandic
-  by the Language and Voice Lab, Reykjavík University".
 
 ## Models downloaded at runtime (with your consent, on first use)
 

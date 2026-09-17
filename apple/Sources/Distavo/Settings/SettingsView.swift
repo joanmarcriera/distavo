@@ -427,25 +427,71 @@ struct SettingsView: View {
                 Button("Check for updates now…") { controller.updater?.checkForUpdates() }
             }
             #endif
+        }
+        .formStyle(.grouped)
+        .safeAreaInset(edge: .bottom) { bottomBar }
+        .frame(width: 520, height: 640)
+        .sheet(isPresented: $showingPermissions) { PermissionsView(config: draft) }
+        .onAppear {
+            // A reused window (SettingsWindowController keeps one instance
+            // alive across opens) must never show a confirmation left over
+            // from the previous visit.
+            saved = false
+            #if EDITION_DIRECT
+            autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true
+            #endif
+        }
+        .onDisappear {
+            // The window closing (titlebar close, Cmd-W, quit) must not lose
+            // edits the user forgot to click Save for — persist them silently
+            // and note it in the activity log since there's no window left to
+            // show a confirmation in.
+            if draft != controller.config {
+                controller.applyConfigOnClose(draft)
+            }
+        }
+    }
 
+    /// True while the draft (or the login-item toggle, applied immediately
+    /// but tracked here too) differs from what's actually active — drives the
+    /// "Unsaved changes" label and enables/disables Revert and Save.
+    private var hasUnsavedChanges: Bool {
+        draft != controller.config || openAtLogin != controller.openAtLogin
+    }
+
+    /// Pinned bottom bar (`.safeAreaInset`) so Save is always visible without
+    /// scrolling the Form to the bottom — the trigger for this fix was a
+    /// missed Save after changing Language further up the form.
+    private var bottomBar: some View {
+        VStack(spacing: 0) {
+            Divider()
             HStack {
-                if saved {
+                if hasUnsavedChanges {
+                    Text("Unsaved changes").font(.callout).foregroundStyle(.secondary)
+                } else if saved {
                     Text("Saved — applied immediately.").foregroundStyle(.green).font(.callout)
                 }
                 Spacer()
+                Button("Revert") {
+                    draft = controller.config
+                    openAtLogin = controller.openAtLogin
+                }
+                .disabled(!hasUnsavedChanges)
                 Button("Save") {
                     controller.applyConfig(draft)
                     saved = true
+                    Task {
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        saved = false
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
+                .disabled(!hasUnsavedChanges)
             }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
         }
-        .formStyle(.grouped)
-        .frame(width: 520, height: 640)
-        .sheet(isPresented: $showingPermissions) { PermissionsView(config: draft) }
-        #if EDITION_DIRECT
-        .onAppear { autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true }
-        #endif
+        .background(.regularMaterial)
     }
 
     /// Shown after a failed Test Connections when the unreachable server is on the

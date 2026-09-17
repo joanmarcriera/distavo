@@ -699,6 +699,14 @@ final class WatcherController: ObservableObject {
          Config.resolvePath(config.workDir).path)
     }
 
+    /// Persist + apply a config the Settings window auto-saved because it was
+    /// closed with unsaved edits still in the draft — same as a Save click,
+    /// plus one activity line since there's no window left to show a banner in.
+    func applyConfigOnClose(_ newConfig: Config) {
+        applyConfig(newConfig)
+        log("Settings saved on close")
+    }
+
     /// Persist + apply a full config from the settings window.
     func applyConfig(_ newConfig: Config) {
         let wasAllowed = config.summarise.allowLocalFallback

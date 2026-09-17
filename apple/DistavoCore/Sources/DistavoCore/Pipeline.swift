@@ -363,11 +363,35 @@ public enum Pipeline {
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage)
-            let summary = try await deps.summarise(clean, target, config.summarise.options, context)
-            let noteText = summary + provenanceFooter(from: result)
+            // One summarise attempt: run the model, strip a leaked
+            // facts-first working preamble (Vikunja #2203), append the
+            // footer, and validate.
+            func summariseAttempt() async throws -> (text: String, failures: [String]) {
+                let raw = try await deps.summarise(clean, target, config.summarise.options, context)
+                // A rare edge case (the ledger only existed in the discarded
+                // preamble): print rather than writing to the real
+                // ActivityLog file, so a unit test exercising it never
+                // touches disk outside its own temp dirs.
+                let cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { message in
+                    print("[Distavo] \(message)")
+                }
+                let noteText = cleaned + provenanceFooter(from: result)
+                return (noteText, SummaryValidator.validate(noteText))
+            }
+
+            var (noteText, failures) = try await summariseAttempt()
+            // A truncated/empty response gets one retry with the same
+            // prompt — Ollama occasionally cuts a response short with no
+            // thrown error (a genuinely-thrown empty response already fails
+            // via the catch clause below and is unaffected by this). A
+            // structurally broken response (repetition collapse, overlong)
+            // is very unlikely to be fixed by asking again, so those kinds
+            // keep failing immediately as before.
+            if isRetryableTruncation(failures) {
+                (noteText, failures) = try await summariseAttempt()
+            }
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
 
-            let failures = SummaryValidator.validate(noteText)
             if !failures.isEmpty {
                 let message = failures.joined(separator: "; ")
                 state.markFailed(base, message)
@@ -506,6 +530,20 @@ public enum Pipeline {
                 return (code: code, probability: entry["probability"] as? Double ?? 0)
             }
         return NoteProvenance.footer(engine: engine, detections: detections)
+    }
+
+    /// Only "summary is empty" and "summary is truncated" failures (Vikunja
+    /// #2203) are worth retrying the summarise call once. If overlong or
+    /// repetition-collapse also fired (a structurally different, unlikely-
+    /// to-self-heal problem), that failure kind wins and there is no retry —
+    /// unchanged from before this change.
+    static func isRetryableTruncation(_ failures: [String]) -> Bool {
+        guard !failures.isEmpty else { return false }
+        let hasNonRetryable = failures.contains {
+            $0.contains("repetition collapse") || $0.contains("unusually long")
+        }
+        guard !hasNonRetryable else { return false }
+        return failures.contains { $0.hasPrefix("summary is empty") || $0.hasPrefix("summary is truncated") }
     }
 
     /// Prefer a typed error's human message over the default struct description.

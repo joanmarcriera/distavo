@@ -19,6 +19,17 @@ private final class TargetRecorder: @unchecked Sendable {
 
 final class PipelineTests: XCTestCase {
 
+    /// A note shape that passes `SummaryValidator` on its own (a heading
+    /// beyond the title, well over the minimum word count) — for tests with
+    /// a custom `summarise` stub that just need a clean, valid note
+    /// (Vikunja #2203 tightened the validator against truncated responses).
+    /// `static` so it can also serve as a default parameter value below.
+    static let validNote =
+        "# Meeting notes\n\n## Executive summary\nThe meeting covered project timelines, budget " +
+        "considerations, staffing needs, and next steps for the team going forward into the coming " +
+        "quarter, with clear ownership assigned to each action item and deadline, plus a short recap " +
+        "of decisions made and outstanding risks that require follow-up before the next session."
+
     private func tempDir() -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("distavo-pipe-\(UUID().uuidString)")
@@ -47,7 +58,7 @@ final class PipelineTests: XCTestCase {
         },
         reachable: @escaping (String) async -> Bool = { _ in true },
         summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String = { _, _, _, _ in
-            "# Meeting notes\n\nA clean, valid summary."
+            PipelineTests.validNote
         },
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
         duration: @escaping (URL) async -> Double? = { _ in nil }
@@ -164,7 +175,7 @@ final class PipelineTests: XCTestCase {
                     XCTAssertEqual(context.promptStyle, .classic)
                     XCTAssertEqual(context.participants, "Edward (Cambridge) — interviewer; Marc (me) — interviewee")
                     seen.set(target)
-                    return "# Meeting notes\n\nA clean, valid summary."
+                    return PipelineTests.validNote
                 }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
@@ -179,7 +190,7 @@ final class PipelineTests: XCTestCase {
             path: input, config: cfg,
             deps: deps(summarise: { _, _, _, context in
                 XCTAssertNil(context.participants)
-                return "# Meeting notes\n\nA clean, valid summary."
+                return PipelineTests.validNote
             }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
@@ -325,7 +336,7 @@ final class PipelineTests: XCTestCase {
             deps: deps(summarise: { _, _, _, context in
                 XCTAssertEqual(context.promptStyle, .classic)
                 XCTAssertNotNil(context.meetingDate)
-                return "# Meeting notes\n\nA clean, valid summary."
+                return PipelineTests.validNote
             }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
@@ -367,7 +378,7 @@ final class PipelineTests: XCTestCase {
             }, summarise: { _, _, _, context in
                 XCTAssertEqual(context.noteLanguage, "ca")
                 XCTAssertTrue(context.prompt(transcript: "hola").contains("Escriu les notes en català"))
-                return "# Meeting notes\n\nA clean, valid summary."
+                return PipelineTests.validNote
             }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
@@ -387,7 +398,7 @@ final class PipelineTests: XCTestCase {
             }, summarise: { _, _, _, context in
                 XCTAssertNil(context.noteLanguage)
                 XCTAssertFalse(context.prompt(transcript: "hola").contains("Escriu les notes en català"))
-                return "# Meeting notes\n\nA clean, valid summary."
+                return PipelineTests.validNote
             }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
@@ -478,6 +489,83 @@ final class PipelineTests: XCTestCase {
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .failed)
         XCTAssertTrue(result.message.contains("repetition collapse"))
+    }
+
+    // MARK: Truncated-note retry (Vikunja #2203)
+
+    private var fullLengthGoodNote: String {
+        "# Meeting notes\n\n## Executive summary\n" + (1...45).map { "point\($0)" }.joined(separator: " ")
+    }
+
+    /// A first response that stops mid-way (the live bug's shape) gets one
+    /// retry through the same `PipelineDeps.summarise` seam; a good second
+    /// response succeeds and `summarise` is called exactly twice.
+    func testTruncatedFirstResponseIsRetriedOnceAndSucceeds() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let truncated = "# Meeting notes\n\n## Speakers\n* **Marat"
+        let good = fullLengthGoodNote
+        let summariseStub: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String = { _, _, _, _ in
+            calls.increment()
+            if calls.count == 1 { return truncated }
+            return good
+        }
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: summariseStub),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 2)
+        let note = try String(contentsOf: XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertTrue(note.hasPrefix(good))
+    }
+
+    /// Two bad responses in a row: still fails, with the truncated message,
+    /// after exactly one retry (not an unbounded loop).
+    func testTruncatedResponseTwiceStillFails() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let truncated = "# Meeting notes\n\n## Speakers\n* **Marat"
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, _, _ in calls.increment(); return truncated }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(calls.count, 2)
+        XCTAssertTrue(result.message.contains("summary is truncated"), result.message)
+    }
+
+    /// A fully-empty response is the other retryable kind (Ollama occasionally
+    /// returns an empty string with no thrown error) — also retried once.
+    func testEmptyResponseIsRetriedOnceThenSucceeds() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let good = fullLengthGoodNote
+        let summariseStub: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String = { _, _, _, _ in
+            calls.increment()
+            if calls.count == 1 { return "" }
+            return good
+        }
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: summariseStub),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 2)
+    }
+
+    /// Repetition collapse and overlong failures are NOT retried — they keep
+    /// failing after exactly one summarise call, same as before this change.
+    func testRepetitionCollapseIsNotRetried() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, _, _ in calls.increment(); return repeated }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertEqual(calls.count, 1)
     }
 
     // MARK: Summariser selection
@@ -633,7 +721,7 @@ final class PipelineTests: XCTestCase {
             deps: deps(reachable: { _ in false },
                        summarise: { _, target, _, _ in
                            seen.set(target)
-                           return "# Meeting notes\n\nA clean, valid summary."
+                           return PipelineTests.validNote
                        }),
             stableChecks: 1, stableDelay: 0)
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Distavo** (v1.13.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
+**Distavo** (v1.14.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
 recordings and turns each new one into a structured Markdown meeting note. The pipeline is:
 **AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
 Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the

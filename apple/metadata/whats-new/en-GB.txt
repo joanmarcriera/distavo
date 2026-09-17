@@ -1,7 +1,4 @@
-• Language packs: switch on Hebrew, Thai or Welsh in Settings → Transcription, and meetings in that language are transcribed by a model trained for it — community fine-tunes of Whisper from ivrit.ai, Mahidol University and Bangor University, all running on your Mac. Off by default; nothing changes for languages you have not switched on.
-• When the meeting-audio channel of a recording turns out to be silent, Distavo now downmixes the microphone channel to mono and evens out its loudness before transcribing, so a quiet remote party is no longer lost.
-• The "Facts first" prompt keeps the inside/outside IR35 status wherever it appears and adds a set-up action when a contract requires your own limited company.
-• On-device summaries (the optional Apple Intelligence path) now give each action its own deadline instead of stamping every row "post-engagement", list transcription corrections as "heard X, probably Y", and no longer repeat a paragraph across sections. The same rules sharpen the classic Ollama prompt.
-• Built-in Whisper transcription now runs its decoder on the GPU: two to three times faster, and it no longer cuts a passage short when the Neural Engine is busy (seen on the Catalan models).
-• Notes in the meeting's language: Catalan and Spanish meetings get their notes written in Catalan or Spanish (Settings → Summarisation → "Write notes in"; on for new installs, unchanged for existing ones).
-• "When a recording finishes" (Settings → Recordings): open the note or the transcript automatically as soon as it is saved.
+• Two more language packs (Settings → Transcription): Tamil, from IIT Madras's Speech Lab, and Norwegian — Bokmål and Nynorsk — from the National Library of Norway. Off by default, downloaded once when you switch them on. Both write without punctuation; the notes are unaffected.
+• Settings now keeps Save in view at all times, shows "Unsaved changes" until you save, and saves pending changes when you close the window.
+• A note that comes back cut short is no longer saved as finished: Distavo asks the summariser again, and only then reports a failure.
+• The "Facts first" prompt no longer leaks its working steps ("Step 1…") into the note.

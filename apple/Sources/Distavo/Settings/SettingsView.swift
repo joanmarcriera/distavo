@@ -197,6 +197,14 @@ struct SettingsView: View {
                            isOn: $draft.compactRecordingsAfterNote)
                     HelpButton(text: "The built-in recorder keeps a 48 kHz stereo take (about 1.4 GB per hour). Once the note is written, Distavo replaces WAV recordings with the 16 kHz mono copy the transcriber used — about 20x smaller. Other formats are left alone.")
                 }
+                HStack {
+                    Picker("When a recording finishes", selection: $draft.openWhenDone) {
+                        Text("Off").tag(OpenWhenDone.off)
+                        Text("Open the note").tag(OpenWhenDone.note)
+                        Text("Open the transcript").tag(OpenWhenDone.transcript)
+                    }
+                    HelpButton(text: "Automatically open the finished note (or its cleaned transcript) as soon as a recording is processed, instead of waiting to open it from the menu.")
+                }
             }
 
             Section("Transcription") {

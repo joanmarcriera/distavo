@@ -69,6 +69,29 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"prompt_style\" : \"classic\""))
     }
 
+    /// `open_when_done` (Vikunja #2199) decodes to `.off` when absent or
+    /// unrecognised — same fallback pattern as `prompt_style` — and round-trips
+    /// once set.
+    func testOpenWhenDoneDecodesAndDefaultsToOff() throws {
+        XCTAssertEqual(Config().openWhenDone, .off)
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).openWhenDone, .off, "missing key decodes to off")
+        try #"{"open_when_done": "note"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).openWhenDone, .note)
+        try #"{"open_when_done": "transcript"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).openWhenDone, .transcript)
+        try #"{"open_when_done": "bogus"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).openWhenDone, .off, "unknown value falls back to off")
+
+        var saved = Config(); saved.openWhenDone = .transcript
+        try Config.save(saved, to: url)
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"open_when_done\" : \"transcript\""))
+        XCTAssertEqual(try Config.load(from: url).openWhenDone, .transcript)
+    }
+
     /// The 1.12 keys are absent from every existing config file and must
     /// decode to their defaults, and round-trip once written.
     func testNewKeysDefaultWhenAbsentAndRoundTrip() throws {

@@ -189,6 +189,14 @@ public struct SummariseConfig: Codable, Equatable {
     }
 }
 
+/// What to open (if anything) once a recording finishes processing (Vikunja
+/// #2199, part a). An unrecognised or missing value falls back to `.off` — the
+/// same fallback pattern as `Prompt.Style` in `SummariseConfig` — so a config
+/// file written before this key existed never starts opening things unasked.
+public enum OpenWhenDone: String, Codable, Equatable, Sendable {
+    case off, note, transcript
+}
+
 public struct Config: Codable, Equatable {
     public var watchIntervalSeconds: Int
     public var recordingsDir: String
@@ -217,6 +225,10 @@ public struct Config: Codable, Equatable {
     public var askSpeakersOnStop: Bool
     /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
     public var benchmark: [BenchmarkResult]
+    /// Open the note or transcript once a recording finishes (Vikunja #2199,
+    /// part a). Defaults to `.off`; a config predating the key decodes to
+    /// `.off` too, so upgrading never starts opening files unasked.
+    public var openWhenDone: OpenWhenDone
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -227,6 +239,7 @@ public struct Config: Codable, Equatable {
         case compactRecordingsAfterNote = "compact_recordings_after_note"
         case askSpeakersOnStop = "ask_speakers_on_stop"
         case benchmark
+        case openWhenDone = "open_when_done"
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -240,7 +253,8 @@ public struct Config: Codable, Equatable {
                 minRecordingSeconds: Int = 15,
                 compactRecordingsAfterNote: Bool = false,
                 askSpeakersOnStop: Bool = true,
-                benchmark: [BenchmarkResult] = []) {
+                benchmark: [BenchmarkResult] = [],
+                openWhenDone: OpenWhenDone = .off) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -249,6 +263,7 @@ public struct Config: Codable, Equatable {
         self.compactRecordingsAfterNote = compactRecordingsAfterNote
         self.askSpeakersOnStop = askSpeakersOnStop
         self.benchmark = benchmark
+        self.openWhenDone = openWhenDone
     }
 
     public init(from decoder: Decoder) throws {
@@ -266,6 +281,10 @@ public struct Config: Codable, Equatable {
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
+        // An unknown string (or a missing key) falls back to the default
+        // rather than failing the whole config — same pattern as `prompt_style`.
+        openWhenDone = (try? c.decodeIfPresent(String.self, forKey: .openWhenDone))
+            .flatMap { $0.flatMap(OpenWhenDone.init(rawValue:)) } ?? d.openWhenDone
     }
 
     // MARK: Paths

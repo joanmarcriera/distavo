@@ -73,6 +73,13 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: true).transcribe.languagePacks.isEmpty)
     }
 
+    /// A config written before `open_when_done` existed (Vikunja #2199) decodes
+    /// to `.off`, so nothing opens automatically until the user opts in.
+    func testPreOpenWhenDoneConfigStaysOff() throws {
+        let cfg = try decode(#"{"transcribe": {"backend": "embedded", "embedded_model": "auto"}}"#)
+        XCTAssertEqual(cfg.openWhenDone, .off)
+    }
+
     func testLanguagePacksRoundTripAndDropUnknownIds() throws {
         let cfg = try decode(#"{"transcribe": {"language_packs": ["thai", "bogus", "hebrew"]}}"#)
         XCTAssertEqual(cfg.transcribe.languagePacks, ["thai", "bogus", "hebrew"])

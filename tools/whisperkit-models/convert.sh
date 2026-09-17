@@ -38,6 +38,10 @@ WhisperProcessor.from_pretrained("$model", revision="$src_rev").save_pretrained(
 print("saved safetensors to $local")
 PY
 fi
+# Community fine-tunes often lack generation_config.alignment_heads, and the
+# converter then skips the text decoder without failing (see alignment_heads.py).
+# ALIGNMENT_BASE=large forces the stock checkpoint to copy from (whisper-large v1).
+"$wvenv/bin/python" "$here/alignment_heads.py" "$local" ${ALIGNMENT_BASE:-}
 ( cd "$work/src" && MODEL_REPO_ID="$repo" whisperkit-generate-model --model-version "$model" --output-dir "$out" --upload-results )
 folder="$(echo "$model" | tr '/' '_')"
 python "$here/manifest.py" "$out/$folder" "$model" "$src_rev" "$tools_commit" > "$out/$folder/manifest.json"

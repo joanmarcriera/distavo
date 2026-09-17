@@ -133,10 +133,10 @@ public enum Prompt {
     - If something is unclear, write "unclear".
     - Separate explicit statements from reasonable inferences.
     - Extract action items only where there is evidence in the transcript.
-    - Identify likely transcription errors where useful.
+    - The "Possible transcription corrections" section is ONLY for words or names the transcript likely misheard (garbled names, acronyms, technical terms) — write each as `heard "X", probably "Y"`. Never paste a full sentence, a quote of what someone said, or general dialogue there; if nothing was likely mis-transcribed, write "none".
     - Use British English.
     - The output must be practical and decision-oriented.
-    - Keep the whole answer concise and avoid repeated wording.
+    - Keep the whole answer concise and avoid repeated wording. Each section must add information the earlier sections do not already contain — never paste the same sentence, or a near-identical paraphrase of it, into more than one section.
     - Do not copy long transcript passages. Evidence should be short speaker-specific excerpts.
     - If no useful evidence exists for a section, write "unclear" or "none stated".
     - The "Highest-ROI follow-up" and "30-minute post-meeting plan" sections must advise the note owner, not the other party.
@@ -145,13 +145,14 @@ public enum Prompt {
 
     Important anti-hallucination rules:
     - Do not assign real names to SPEAKER_00 or SPEAKER_01 unless the transcript explicitly identifies them.
+    - The transcript's speaker labels are written exactly as SPEAKER_00, SPEAKER_01 (all capitals, one underscore, two digits). Copy that exact spelling every single time you reference a speaker who was not otherwise named. Writing "Speaker_00", "Speaker 00", "Speaker 1", or any other capitalisation or spacing is wrong even if it looks more natural — do not reformat it.
     - If a person is mentioned by name, do not assume they are one of the speakers.
     - Do not add calendar years unless explicitly stated in the transcript.
     - For action items, distinguish:
       1. Explicit action items
       2. Implied next steps
       3. Possible future responsibilities
-    - If an action depends on hiring/onboarding, mark the deadline as "Post-engagement / not yet active".
+    - Give each action's own deadline from the transcript — a date, day, or cue such as "by Friday" or "next week". If none was said, write "none stated". Reserve "Post-engagement / not yet active" for the rare action that cannot start until a hire, contract or onboarding is complete: that is not most actions, and it must not appear on every row.
     - If a company/entity relationship is unclear, write "unclear" rather than resolving it.
 
     Return the output in Markdown using exactly these sections:

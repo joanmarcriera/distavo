@@ -216,7 +216,9 @@ public enum EmbeddedSummaryPrompt {
 
     Rules:
     - Do not invent facts. If a heading has nothing, write "none".
-    - Keep speaker labels exactly as written (SPEAKER_00 etc.).
+    - Copy each speaker label exactly as written in this part (SPEAKER_00, SPEAKER_01 — all capitals, one underscore, two digits). Do not reformat it to "Speaker 00" or similar.
+    - For each action's "when", use the transcript's own date/day/cue if one was stated, or write "none stated". Only write "post-engagement / not yet active" when this part says the action depends on being hired or onboarded first — that is rare, not the default.
+    - Do not repeat the same point under more than one heading.
     - Do not write an introduction, a conclusion, or a summary of the whole meeting.
     - Be brief. Use British English.
 

@@ -13,7 +13,22 @@ extension PipelineDeps {
         var deps = PipelineDeps.live()
 
         let serverTranscribe = deps.transcribe
-        deps.transcribe = { wavURL, transcribeConfig in
+        deps.transcribe = { wavURL, rawTranscribeConfig in
+            // Vikunja #2202: an explicit language the owner confirmed after
+            // Stop overrides whatever config/auto-detection would otherwise
+            // pick — read before anything else, for both backends (a fixed
+            // language is meaningful to the WhisperX server too). `wavURL` is
+            // `workDir/<base>.wav` (`Pipeline.processOne`); a variant's base
+            // is `<sourceBase>@<suffix>` and the sidecar is keyed by the
+            // plain recording, so split on the first "@" (never present in a
+            // real base — see `ProcessVariant.base(for:)`).
+            var transcribeConfig = rawTranscribeConfig
+            let workDir = wavURL.deletingLastPathComponent()
+            let base = wavURL.deletingPathExtension().lastPathComponent
+            let sourceBase = base.components(separatedBy: "@").first ?? base
+            if let override = LanguageOverride.load(workDir: workDir, base: sourceBase) {
+                transcribeConfig.language = override.code
+            }
             guard transcribeConfig.backend == "embedded" else {
                 return try await serverTranscribe(wavURL, transcribeConfig)
             }

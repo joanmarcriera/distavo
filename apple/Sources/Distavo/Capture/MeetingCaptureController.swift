@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import AVFoundation
 import DistavoCore
+import DistavoEmbedded
 
 /// UI-facing wrapper around `MeetingRecorder`: the one-time "what is going to
 /// happen" pre-flight, the two permission prompts, the elapsed-time label, and
@@ -9,10 +10,11 @@ import DistavoCore
 /// here's the permission to check"). The recording lands in the watched
 /// recordings folder, so the existing pipeline picks it up unchanged.
 ///
-/// Also owns the two post-1.11 capture affordances: "Stop and delete" for a
-/// take the owner never wanted (Vikunja #2068), and the optional "who was in
-/// this meeting?" question after stop, whose answer is saved beside the work
-/// files for the summariser (Vikunja #2182).
+/// Also owns the post-1.11 capture affordances: "Stop and delete" for a take
+/// the owner never wanted (Vikunja #2068); the optional "who was in this
+/// meeting?" question after stop, whose answer is saved beside the work files
+/// for the summariser (Vikunja #2182); and, in the same question, a detected
+/// meeting language the owner can confirm or override (Vikunja #2202).
 @MainActor
 final class MeetingCaptureController: ObservableObject {
     @Published private(set) var isRecording = false
@@ -150,8 +152,36 @@ final class MeetingCaptureController: ObservableObject {
                    "\(outcome.url.lastPathComponent) — Distavo will transcribe it shortly.")
         }
         if config.askSpeakersOnStop {
-            askSpeakers(for: outcome.url, config: config)
-            recorder.finalizeDeferred()
+            // Start detection on the still-`.part` file (deferred finalize
+            // means it isn't renamed/balanced yet) before the modal alert, so
+            // it can be already done — or close to it — by the time the
+            // owner reaches the language row. `askSpeakers` never blocks on
+            // it (Save must not wait for detection); this controller instead
+            // holds `finalizeDeferred()` back until detection has finished
+            // (or was skipped), so `StereoBalancer.balance` — which deletes
+            // the `.part` file — never races the detector reading it.
+            let detection = startLanguageDetection(partURL: outcome.url.appendingPathExtension("part"))
+            askSpeakers(for: outcome.url, config: config, detection: detection)
+            Task {
+                _ = await detection?.value
+                recorder.finalizeDeferred()
+            }
+        }
+    }
+
+    // MARK: Detected meeting language (Vikunja #2202)
+
+    /// Kicks off `LanguageDetector` on the raw recording, or nil when the
+    /// built-in engine isn't available on this Mac (Intel) — the language
+    /// row then stays on "Automatic" with no detection attempted, exactly as
+    /// if this feature didn't exist. Errors (including a corrupt/missing
+    /// file) are swallowed to an empty result, same durability rule as the
+    /// router's own detector call in `AppPipelineDeps`: losing the detector
+    /// must never block or fail the meeting-capture flow.
+    private func startLanguageDetection(partURL: URL) -> Task<[LanguageDetection], Never>? {
+        guard HardwareProbe.supportsEmbeddedTranscription else { return nil }
+        return Task.detached(priority: .userInitiated) {
+            (try? await LanguageDetector.shared.detect(wavURL: partURL)) ?? []
         }
     }
 
@@ -185,7 +215,7 @@ final class MeetingCaptureController: ObservableObject {
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
-    private func askSpeakers(for url: URL, config: Config) {
+    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?) {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -200,7 +230,20 @@ final class MeetingCaptureController: ObservableObject {
         others.lineBreakMode = .byWordWrapping
         others.maximumNumberOfLines = 3
 
-        func row(_ label: String, _ field: NSTextField, width: CGFloat) -> NSView {
+        // Language confirm/override (Vikunja #2202). Starts on "Automatic"
+        // (empty code, `WhisperLanguageCatalog.autoDetect`) — Save leaves it
+        // there unless detection pre-selects a result or the owner picks one
+        // themselves; either way, only a concrete selection at Save time
+        // writes the `LanguageOverride` sidecar (see below).
+        let languageCodes = WhisperLanguageCatalog.all.map(\.code)
+        let language = NSPopUpButton(frame: .zero, pullsDown: false)
+        for lang in WhisperLanguageCatalog.all { language.addItem(withTitle: lang.englishName) }
+        language.selectItem(at: 0)
+        let languageStatus = NSTextField(labelWithString: detection == nil ? "" : "Detecting…")
+        languageStatus.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        languageStatus.textColor = .secondaryLabelColor
+
+        func row(_ label: String, _ field: NSView, width: CGFloat) -> NSView {
             let text = NSTextField(labelWithString: label)
             text.alignment = .right
             text.widthAnchor.constraint(equalToConstant: 140).isActive = true
@@ -210,15 +253,43 @@ final class MeetingCaptureController: ObservableObject {
             stack.alignment = .firstBaseline
             return stack
         }
-        let form = NSStackView(views: [
+        var rows = [
             row("People who spoke:", count, width: 60),
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
-        ])
+        ]
+        if detection != nil {
+            rows.append(row("Meeting language:", language, width: 200))
+            let statusRow = NSStackView(views: [NSTextField(labelWithString: ""), languageStatus])
+            statusRow.orientation = .horizontal
+            rows.append(statusRow)
+        }
+        let form = NSStackView(views: rows)
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: 100)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 100 : 150)
+
+        // Update the status label and pre-select the popup as soon as
+        // detection finishes — even while the alert's modal loop is running,
+        // since `DispatchQueue.main`/`MainActor` work is still delivered
+        // during `runModal()`. If the owner has already clicked Save by
+        // then, this simply never runs (the Task is cancelled-in-spirit by
+        // there being no view left to update — updating a detached alert's
+        // views is harmless but the result is unused).
+        if let detection {
+            Task { [weak self] in
+                let detections = await detection.value
+                guard let top = detections.max(by: { $0.probability < $1.probability }) else {
+                    languageStatus.stringValue = "No language detected — leave on Automatic, or choose one."
+                    return
+                }
+                let name = WhisperLanguageCatalog.language(forCode: top.code)?.englishName ?? top.code
+                languageStatus.stringValue = "Detected: \(name) (\(Int((top.probability * 100).rounded()))%)"
+                if let idx = languageCodes.firstIndex(of: top.code) { language.selectItem(at: idx) }
+                self?.log("Detected meeting language: \(name) (\(Int((top.probability * 100).rounded()))%)")
+            }
+        }
 
         let alert = NSAlert()
         alert.messageText = "Who was in this meeting?"
@@ -230,6 +301,24 @@ final class MeetingCaptureController: ObservableObject {
         alert.window.initialFirstResponder = myRole
         guard alert.runModal() == .alertFirstButtonReturn else { return }
 
+        let recordingsDir = folderProvider()
+        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
+        let workDir = Config.resolvePath(config.workDir)
+
+        // A concrete (non-Automatic) selection at the moment Save was
+        // clicked — whether the owner typed it, accepted a detected
+        // suggestion, or a pre-existing selection carried over — is the
+        // "explicit override" that gets saved; Automatic saves nothing.
+        let selectedCode = languageCodes[max(0, language.indexOfSelectedItem)]
+        if !selectedCode.isEmpty {
+            do {
+                try LanguageOverride(code: selectedCode).save(workDir: workDir, base: base)
+                log("Meeting language confirmed for \(url.lastPathComponent): \(selectedCode)")
+            } catch {
+                log("Could not save the language override for \(url.lastPathComponent): \(error.localizedDescription)")
+            }
+        }
+
         var parts: [String] = []
         let role = myRole.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !role.isEmpty { parts.append("\(owner.isEmpty ? "The note owner" : owner) (\(ownerLabel)): \(role)") }
@@ -240,10 +329,8 @@ final class MeetingCaptureController: ObservableObject {
             participants: parts.isEmpty ? nil : parts.joined(separator: ". "))
         guard !hints.isEmpty else { return }
 
-        let recordingsDir = folderProvider()
-        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
         do {
-            try hints.save(workDir: Config.resolvePath(config.workDir), base: base)
+            try hints.save(workDir: workDir, base: base)
             log("Speakers noted for \(url.lastPathComponent): "
                 + [hints.count.map { "\($0) people" }, hints.participants].compactMap { $0 }.joined(separator: "; "))
         } catch {

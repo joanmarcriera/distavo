@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Distavo - private meeting notes on your Mac</title>
-  <meta name="description" content="Distavo records meetings on your Mac and turns them into clean Markdown notes. Transcription runs on-device; summaries come from an Ollama server you control.">
+  <title>Distavo - meeting notes in the languages other transcribers skip</title>
+  <meta name="description" content="Distavo transcribes meetings in Catalan, Basque, Welsh, Hebrew, Thai, Tamil, Norwegian and 100+ more languages, entirely on your Mac. No cloud, no telemetry.">
   <meta property="og:title" content="Distavo">
-  <meta property="og:description" content="Private meeting notes on your Mac. No telemetry. No bundled AI cloud.">
+  <meta property="og:description" content="Meeting notes in the languages other transcribers skip. Private, on your Mac. No telemetry.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://distavo.com/">
   <meta property="og:image" content="https://distavo.com/assets/settings.png">
@@ -19,6 +19,7 @@
     <nav class="nav" aria-label="Primary">
       <a class="brand" href="/"><span class="brand-mark"></span><span>Distavo</span></a>
       <div class="nav-links">
+        <a href="#lang-band">Languages</a>
         <a href="#how">How it works</a>
         <a href="#responsible-recording">Legalities</a>
         <a href="#recording-tools">Recording tools</a>
@@ -35,7 +36,7 @@
       <div class="hero-inner">
         <span class="eyebrow">macOS 14+ menu bar app</span>
         <h1>Distavo</h1>
-        <p class="lede">Private meeting notes on your Mac. Record a meeting from the menu bar — or drop a recording into a folder — and get a clean Markdown note back. Transcription runs on your Mac by default; summaries use the Ollama server you choose.</p>
+        <p class="lede">Meeting notes in the languages most transcription tools skip: Catalan, Basque, Welsh, Hebrew, Thai, Tamil, Norwegian and 100+ more. Record a meeting from the menu bar — or drop a recording into a folder — and get a clean Markdown note back, transcribed on your Mac by default.</p>
         <p class="hero-native" id="hero-native" hidden></p>
         <div class="hero-actions">
           <a class="appstore-badge" href="https://apps.apple.com/us/app/distavo/id6785437932" aria-label="Download Distavo on the Mac App Store">
@@ -50,6 +51,7 @@
           <span class="setapp-note">Coming to Setapp</span>
         </div>
         <div class="hero-meta" aria-label="Release status">
+          <span>100+ languages</span>
           <span>$29 once, every update included</span>
           <span>On-device transcription</span>
           <span>No telemetry</span>
@@ -59,7 +61,10 @@
 
     <section class="lang-band" id="lang-band" aria-labelledby="lang-band-heading">
       <div class="lang-band-inner">
-        <h2 class="visually-hidden" id="lang-band-heading">Languages Distavo transcribes on your Mac</h2>
+        <div class="section-title">
+          <h2 id="lang-band-heading">The languages other transcription tools skip.</h2>
+          <p>Most meeting-note apps stop at English and a handful of big European languages. Distavo's built-in engines cover 100+, including languages Apple's own dictation and Apple Intelligence don't touch.</p>
+        </div>
         <ul class="lang-list" id="lang-list">
           <li data-lang="ca">
             <span class="lang-name" lang="ca">Català</span>
@@ -85,6 +90,43 @@
       </div>
     </section>
 
+    <section id="language-packs" class="section tool-section">
+      <div class="section-title">
+        <h2>Five more languages, one click away.</h2>
+        <p>Beyond Catalan, Basque, Galego and the Fast engine's 25 languages, Distavo ships optional community fine-tunes for languages the stock Whisper model handles poorly. Free to download, off until you switch them on in Settings.</p>
+      </div>
+
+      <div class="tool-grid">
+        <article class="tool-card">
+          <span class="tool-platform">ivrit.ai · opt-in</span>
+          <h3 lang="he">עברית · Hebrew</h3>
+          <p>Whisper large-v3 turbo fine-tuned by ivrit.ai on thousands of hours of Knesset and crowd-sourced Hebrew speech.</p>
+        </article>
+        <article class="tool-card">
+          <span class="tool-platform">Mahidol University · opt-in</span>
+          <h3 lang="th">ไทย · Thai</h3>
+          <p>Thonburian Whisper, fine-tuned on Thai speech — 6.6% word error rate on Common Voice.</p>
+        </article>
+        <article class="tool-card">
+          <span class="tool-platform">IIT Madras · opt-in</span>
+          <h3 lang="ta">தமிழ் · Tamil</h3>
+          <p>Fine-tuned at IIT Madras's Speech Lab on Tamil speech, with cleaner script output than the stock model.</p>
+        </article>
+        <article class="tool-card">
+          <span class="tool-platform">Bangor University · opt-in</span>
+          <h3 lang="cy">Cymraeg · Welsh</h3>
+          <p>Fine-tuned by Bangor University's Language Technologies Unit on Welsh and Welsh–English speech.</p>
+        </article>
+        <article class="tool-card">
+          <span class="tool-platform">National Library of Norway · opt-in</span>
+          <h3 lang="no">Norsk · Norwegian, Bokmål and Nynorsk</h3>
+          <p>NB-Whisper (verbatim), from the National Library of Norway. Covers both written standards.</p>
+        </article>
+      </div>
+
+      <p class="lang-note">Every pack is Apache-2.0 or similarly open, hosted for free, and downloads only after you enable it in Settings → Transcription.</p>
+    </section>
+
     <section id="how" class="section">
       <div class="section-title">
         <h2>Meeting notes without handing meetings to someone else's cloud.</h2>
@@ -105,7 +147,7 @@
         <article class="card">
           <span class="tag rust">Transcribe</span>
           <h3>Transcription runs on your Mac.</h3>
-          <p>The built-in engines transcribe and separate speakers on-device (Apple Silicon): Catalan and Spanish via two Barcelona Supercomputing Center models, a Fast engine for 25 European languages, and Whisper for everything else — Automatic mode picks the right one for you. Prefer your own hardware? Point Distavo at your WhisperX server instead.</p>
+          <p>The built-in engines transcribe and separate speakers on-device (Apple Silicon): Catalan and Spanish via two Barcelona Supercomputing Center models, a Fast engine for 25 European languages, Whisper for everything else, and opt-in packs for Hebrew, Thai, Tamil, Welsh and Norwegian — Automatic mode picks the right one for you. Prefer your own hardware? Point Distavo at your WhisperX server instead.</p>
         </article>
         <article class="card">
           <span class="tag blue">Summarise</span>

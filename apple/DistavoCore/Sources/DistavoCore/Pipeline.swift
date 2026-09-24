@@ -57,13 +57,21 @@ public struct ProcessResult: Equatable {
     /// router's detections (the built-in engine in Automatic mode); nil
     /// otherwise. Same text as the note footer (Vikunja #2161).
     public var detectedLanguages: String?
+    /// The single highest-probability detected language code (e.g. "ca"),
+    /// when the transcribe result carried detections; nil otherwise (the
+    /// server path, or the built-in engine outside Automatic mode). Lets a
+    /// caller resolve "the language this recording was actually
+    /// transcribed in" for `EmbeddedModelCatalog.nextBigger` without
+    /// re-deriving it from `detectedLanguages`' display string (Vikunja #2205).
+    public var dominantLanguageCode: String?
 
     public init(status: ProcessStatus, base: String, message: String,
                 notePath: URL? = nil, transcriptPath: URL? = nil,
-                detectedLanguages: String? = nil) {
+                detectedLanguages: String? = nil, dominantLanguageCode: String? = nil) {
         self.status = status; self.base = base; self.message = message
         self.notePath = notePath; self.transcriptPath = transcriptPath
         self.detectedLanguages = detectedLanguages
+        self.dominantLanguageCode = dominantLanguageCode
     }
 }
 
@@ -194,10 +202,18 @@ public struct ProcessVariant: Equatable, Sendable {
     public let suffix: String
     /// The transcribe settings to use instead of the config's.
     public let transcribe: TranscribeConfig
+    /// An Ollama target to summarise with instead of the config's normal
+    /// selection (`Pipeline.chooseSummariser`) — used by the
+    /// `retrySummariseBigger` `WhenDoneAction` (Vikunja #2205) to force
+    /// `SummariseConfig.biggerModel` regardless of which backend/reachability
+    /// the automatic run picked. nil (every other caller) keeps the normal
+    /// selection untouched.
+    public let summariseOverride: OllamaTarget?
 
-    public init(suffix: String, transcribe: TranscribeConfig) {
+    public init(suffix: String, transcribe: TranscribeConfig, summariseOverride: OllamaTarget? = nil) {
         self.suffix = DistavoState.sanitizeJoined(suffix)
         self.transcribe = transcribe
+        self.summariseOverride = summariseOverride
     }
 
     /// "<model id>-<language code or auto>", sanitised for a filename.
@@ -295,17 +311,25 @@ public enum Pipeline {
         }
 
         let target: SummariseTarget
-        switch await chooseSummariser(config, reachable: deps.ollamaReachable,
-                                      embeddedReadiness: deps.embeddedReadiness) {
-        case .use(let chosen):
-            target = chosen
-        case .deferred(let why):
-            return ProcessResult(status: .deferredNeedLocal, base: base, message: why)
-        case .unavailable(let why):
-            // Permanent on this Mac — record it so the user sees a note-less
-            // recording explained, instead of it being retried every scan.
-            state.markFailed(base, why)
-            return ProcessResult(status: .failed, base: base, message: why)
+        if let override = variant?.summariseOverride {
+            // A forced re-summarise (retryTranscribeBigger passes no override;
+            // retrySummariseBigger does) bypasses reachability/deferral: the
+            // caller only queues this once the normal run has already
+            // succeeded, so there is nothing to defer back to.
+            target = .ollama(url: override.url, model: override.model)
+        } else {
+            switch await chooseSummariser(config, reachable: deps.ollamaReachable,
+                                          embeddedReadiness: deps.embeddedReadiness) {
+            case .use(let chosen):
+                target = chosen
+            case .deferred(let why):
+                return ProcessResult(status: .deferredNeedLocal, base: base, message: why)
+            case .unavailable(let why):
+                // Permanent on this Mac — record it so the user sees a note-less
+                // recording explained, instead of it being retried every scan.
+                state.markFailed(base, why)
+                return ProcessResult(status: .failed, base: base, message: why)
+            }
         }
 
         state.markProcessing(base)
@@ -343,6 +367,11 @@ public enum Pipeline {
             deps.onPhase?(.transcribing)
             let result = try await deps.transcribe(wavPath, transcribeConfig)
             let detectedLanguages = detectedLanguages(from: result)
+            // Computed unconditionally (unlike `noteLanguage` below, which
+            // only fires for `note_language == "auto"`) so `ProcessResult`
+            // always reports it when available — `retryTranscribeBigger`
+            // needs it regardless of the note-language setting (#2205).
+            let dominantCode = dominantLanguageCode(from: result)
 
             let clean = TranscriptCleaner.clean(TranscriptCleaner.segments(from: result))
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -357,8 +386,7 @@ public enum Pipeline {
             // Ollama prompt (Vikunja #2147); "en" (the default for any config
             // predating the key) always leaves noteLanguage nil, so the
             // prompt is unaffected regardless of what was detected.
-            let noteLanguage = config.summarise.noteLanguage == "auto"
-                ? dominantLanguageCode(from: result) : nil
+            let noteLanguage = config.summarise.noteLanguage == "auto" ? dominantCode : nil
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
@@ -397,7 +425,7 @@ public enum Pipeline {
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
                                      notePath: notePath, transcriptPath: transcriptPath,
-                                     detectedLanguages: detectedLanguages)
+                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
             state.markDone(base)
             var message = "note written"
@@ -407,7 +435,7 @@ public enum Pipeline {
             }
             return ProcessResult(status: .done, base: base, message: message,
                                  notePath: notePath, transcriptPath: transcriptPath,
-                                 detectedLanguages: detectedLanguages)
+                                 detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
         } catch let retry as RetryableDependencyError {
 
             // I2: grow the wait with each consecutive deferral (60 s, 120 s,

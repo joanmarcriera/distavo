@@ -39,6 +39,34 @@ struct SettingsView: View {
             + WhisperLanguageCatalog.all
     }
 
+    // MARK: When-done checkboxes (Vikunja #2205)
+
+    private func whenDoneBinding(_ action: WhenDoneAction) -> Binding<Bool> {
+        Binding(
+            get: { draft.whenDone.contains(action) },
+            set: { isOn in
+                if isOn {
+                    if !draft.whenDone.contains(action) { draft.whenDone.append(action) }
+                } else {
+                    draft.whenDone.removeAll { $0 == action }
+                }
+            })
+    }
+
+    /// Same requirement `WatcherController.queueRetryTranscribeBigger` enforces
+    /// at run time: a fixed (non-Automatic) built-in model with a bigger
+    /// option for its configured language.
+    private var canRetryTranscribeBigger: Bool {
+        embeddedSupported && draft.transcribe.backend == "embedded"
+            && !EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel)
+            && EmbeddedModelCatalog.nextBigger(for: draft.transcribe.embeddedModel,
+                                               language: draft.transcribe.language) != nil
+    }
+
+    private var canRetrySummariseBigger: Bool {
+        !(draft.summarise.biggerModel ?? "").isEmpty
+    }
+
     /// Models this Mac's memory can actually run (spec §6 gate), plus any the
     /// benchmark has shown to run here (Vikunja #2160).
     private var selectableIDs: Set<String> {
@@ -197,13 +225,26 @@ struct SettingsView: View {
                            isOn: $draft.compactRecordingsAfterNote)
                     HelpButton(text: "The built-in recorder keeps a 48 kHz stereo take (about 1.4 GB per hour). Once the note is written, Distavo replaces WAV recordings with the 16 kHz mono copy the transcriber used — about 20x smaller. Other formats are left alone.")
                 }
-                HStack {
-                    Picker("When a recording finishes", selection: $draft.openWhenDone) {
-                        Text("Off").tag(OpenWhenDone.off)
-                        Text("Open the note").tag(OpenWhenDone.note)
-                        Text("Open the transcript").tag(OpenWhenDone.transcript)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("When a recording finishes")
+                        HelpButton(text: "Run any of these automatically as soon as a recording is processed, instead of waiting to act from the menu. Tick as many as you like — the note/transcript actions just open a file; the re-run actions queue another pass in the background and save it alongside the original as its own note.")
+                        Spacer()
                     }
-                    HelpButton(text: "Automatically open the finished note (or its cleaned transcript) as soon as a recording is processed, instead of waiting to open it from the menu.")
+                    Toggle("Open the note", isOn: whenDoneBinding(.openNote))
+                    Toggle("Open the transcript", isOn: whenDoneBinding(.openTranscript))
+                    Toggle("Re-transcribe with a bigger model", isOn: whenDoneBinding(.retryTranscribeBigger))
+                        .disabled(!canRetryTranscribeBigger)
+                    if !canRetryTranscribeBigger {
+                        Text("Needs a specific built-in model chosen above (not Automatic) that has a bigger option for its language.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Toggle("Re-summarise with a bigger model", isOn: whenDoneBinding(.retrySummariseBigger))
+                        .disabled(!canRetrySummariseBigger)
+                    if !canRetrySummariseBigger {
+                        Text("Set a “Bigger model” under Summarisation below to enable this.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -360,6 +401,12 @@ struct SettingsView: View {
                     ServerHelpButton(kind: .ollama)
                 }
                 TextField("Server model", text: $draft.summarise.server.model)
+                HStack {
+                    TextField("Bigger model (optional)", text: Binding(
+                        get: { draft.summarise.biggerModel ?? "" },
+                        set: { draft.summarise.biggerModel = $0.isEmpty ? nil : $0 }))
+                    HelpButton(text: "A larger/more capable model on the Server Ollama URL above. Set this to enable “Re-summarise with a bigger model” under Recordings — leave blank to hide that option.")
+                }
                 HStack {
                     Picker("Prompt", selection: $draft.summarise.promptStyle) {
                         Text("Facts first (recommended)").tag(Prompt.Style.factsFirst)

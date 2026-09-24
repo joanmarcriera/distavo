@@ -46,6 +46,35 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertTrue(on16.contains("bsc-los") && on16.contains("bsc-ca-3370h"))
     }
 
+    // MARK: nextBigger (Vikunja #2205)
+
+    func testNextBiggerStepsUpWithinLanguageCoverage() {
+        // small (whisper, ramGB 1) -> large-v3-turbo (whisper, ramGB 2) for a
+        // plain Whisper language covered by both.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "small", language: "en")?.id, "large-v3-turbo")
+        // For Catalan, the BSC model (ramGB 4) is bigger still than turbo.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca")?.id, "bsc-los")
+    }
+
+    func testNextBiggerReturnsNilAtTheTop() {
+        // large-v3-turbo is the biggest model that covers English — no BSC/pack
+        // model covers "en", so there is nothing bigger to step up to.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "en"))
+    }
+
+    func testNextBiggerReturnsNilForTheHebrewPack() {
+        // The Hebrew pack model is the only catalog entry covering "he" —
+        // this is the case named explicitly in the Vikunja spec.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "ivrit-he", language: "he"))
+    }
+
+    func testNextBiggerStepsFromParakeetToWhisperForSharedLanguages() {
+        // Parakeet (ramGB 1.5) is not the biggest option for a language it
+        // shares with the Whisper-based models.
+        let bigger = EmbeddedModelCatalog.nextBigger(for: "parakeet-tdt-v3", language: "es")
+        XCTAssertEqual(bigger?.id, "large-v3-turbo", "the next step up by memory, not straight to the biggest")
+    }
+
     // MARK: Language packs (Vikunja #2124)
 
     func testEveryPackModelIsAConvertedCustomRepoWhisperEntry() {

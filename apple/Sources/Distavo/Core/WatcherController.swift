@@ -477,6 +477,36 @@ final class WatcherController: ObservableObject {
         Task { [weak self] in await self?.runVariant(variant, on: url) }
     }
 
+    /// "Compare…" (Vikunja #2201): pick a recording, list every note it has
+    /// on disk (the automatic run plus any "Process a recording with…"
+    /// variants) via `RecordingVariants.list`, and open the two-pane
+    /// compare window. A recording with fewer than two runs has nothing to
+    /// compare yet — the notification points at "Process a recording with…"
+    /// instead of opening an unhelpfully empty window.
+    func compareRecordings() {
+        let panel = NSOpenPanel()
+        panel.title = "Compare…"
+        panel.message = "Choose a recording that has been processed more than once (e.g. with different models)."
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = supportedExtensions.compactMap { UTType(filenameExtension: String($0.dropFirst())) }
+        panel.directoryURL = Config.resolvePath(config.recordingsDir)
+        NSApp.activate(ignoringOtherApps: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        let recordingsDir = Config.resolvePath(config.recordingsDir)
+        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
+        let variants = RecordingVariants.list(
+            base: base, notesDir: Config.resolvePath(config.notesDir), workDir: Config.resolvePath(config.workDir))
+        guard variants.count >= 2 else {
+            notifier.notify(title: "Nothing to compare yet",
+                            body: "\(url.lastPathComponent) has \(variants.isEmpty ? "no" : "only one") processed run. "
+                                + "Use “Process a recording with…” to add another model or language to compare.")
+            return
+        }
+        CompareWindowController.shared.show(recordingName: url.deletingPathExtension().lastPathComponent, variants: variants)
+    }
+
     /// The model + language sheet. Built-in engine: every catalog model plus
     /// Automatic; WhisperX server: its model sizes. Language: Automatic (the
     /// router picks) / Auto-detect within the model / a fixed language.

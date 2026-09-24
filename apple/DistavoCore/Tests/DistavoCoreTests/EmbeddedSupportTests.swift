@@ -75,6 +75,32 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertEqual(bigger?.id, "large-v3-turbo", "the next step up by memory, not straight to the biggest")
     }
 
+    // MARK: nextBigger gates (review finding, #2205) — memory floor + pack opt-in
+
+    func testNextBiggerRespectsMemoryFloor() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        // bsc-los needs 16 GB; on an 8 GB Mac it must not be offered even
+        // though it is otherwise the next step up from turbo for Catalan.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca", memoryBytes: 8 * gb))
+        // On a 16 GB Mac it's fine again.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca", memoryBytes: 16 * gb)?.id, "bsc-los")
+        // A `measuredOK` benchmark overrides the floor, same as `selectable`.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca",
+                                                        memoryBytes: 8 * gb, measuredOK: ["bsc-los"])?.id, "bsc-los")
+    }
+
+    func testNextBiggerRespectsLanguagePackOptIn() {
+        // th is only covered by the Thai pack model; with no packs enabled
+        // there is nothing bigger to step up to, even though the model
+        // itself would otherwise qualify (no memory floor issue here).
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th"))
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th", enabledLanguagePacks: ["hebrew"]))
+        // Enabling the Thai pack makes it available (and it clears the 16 GB
+        // floor too, since the default `memoryBytes: .max` imposes none).
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th",
+                                                        enabledLanguagePacks: ["thai"])?.id, "thonburian-th")
+    }
+
     // MARK: Language packs (Vikunja #2124)
 
     func testEveryPackModelIsAConvertedCustomRepoWhisperEntry() {

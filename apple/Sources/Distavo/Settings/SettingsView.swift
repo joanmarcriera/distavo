@@ -60,7 +60,10 @@ struct SettingsView: View {
         embeddedSupported && draft.transcribe.backend == "embedded"
             && !EmbeddedModelCatalog.isAutomatic(draft.transcribe.embeddedModel)
             && EmbeddedModelCatalog.nextBigger(for: draft.transcribe.embeddedModel,
-                                               language: draft.transcribe.language) != nil
+                                               language: draft.transcribe.language,
+                                               memoryBytes: HardwareProbe.physicalMemoryBytes,
+                                               measuredOK: Benchmark.measuredOK(controller.config.benchmark),
+                                               enabledLanguagePacks: draft.transcribe.languagePacks) != nil
     }
 
     private var canRetrySummariseBigger: Bool {

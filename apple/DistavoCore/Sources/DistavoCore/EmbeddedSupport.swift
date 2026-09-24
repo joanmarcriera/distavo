@@ -243,11 +243,38 @@ public enum EmbeddedModelCatalog {
     /// alternative engine ("Fast" in the picker), not a rung on the
     /// accuracy ladder this action climbs. It can still be a *source*: for a
     /// user on Parakeet, stepping up means moving to the Whisper family.
-    public static func nextBigger(for modelID: String, language: String) -> EmbeddedModel? {
+    ///
+    /// Applies the same two gates every other model-selection path applies
+    /// (review finding on #2205): the memory floor (`selectable`'s rule —
+    /// `minimumMemoryGB`, or a `measuredOK` benchmark override) and, for a
+    /// language-pack-only model, that its pack is actually enabled
+    /// (`enabledLanguagePacks`, i.e. `TranscribeConfig.languagePacks`) —
+    /// packs are opt-in and pack-only models stay hidden otherwise. The
+    /// defaults (`memoryBytes: .max`, empty `measuredOK`/`enabledLanguagePacks`)
+    /// impose no gate, matching this function's pre-#2205-review-fix
+    /// behaviour for callers (and tests) that don't pass real values —
+    /// callers that route to a Mac's actual pipeline must pass the real
+    /// physical memory, benchmark set and enabled packs, as
+    /// `WatcherController.queueRetryTranscribeBigger` and
+    /// `SettingsView` now do.
+    public static func nextBigger(
+        for modelID: String,
+        language: String,
+        memoryBytes: UInt64 = .max,
+        measuredOK: Set<String> = [],
+        enabledLanguagePacks: [String] = []
+    ) -> EmbeddedModel? {
         let current = model(id: modelID)
+        let gb = memoryBytes == .max ? Int.max : Int(memoryBytes / (1024 * 1024 * 1024))
+        let packIDs = packModelIDs
+        let enabledPackModelIDs = Set(enabledLanguagePacks.compactMap(pack(id:)).flatMap(\.modelIDs))
         return models
-            .filter { $0.id != current.id && $0.engine != .parakeet
-                && $0.languages.covers(language) && $0.ramGB > current.ramGB }
+            .filter { candidate in
+                candidate.id != current.id && candidate.engine != .parakeet
+                    && candidate.languages.covers(language) && candidate.ramGB > current.ramGB
+                    && (candidate.minimumMemoryGB <= gb || measuredOK.contains(candidate.id))
+                    && (!packIDs.contains(candidate.id) || enabledPackModelIDs.contains(candidate.id))
+            }
             .min { $0.ramGB < $1.ramGB }
     }
 

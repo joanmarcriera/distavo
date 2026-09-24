@@ -670,7 +670,11 @@ final class WatcherController: ObservableObject {
             return
         }
         let language = result.dominantLanguageCode ?? config.transcribe.language
-        guard let bigger = EmbeddedModelCatalog.nextBigger(for: config.transcribe.embeddedModel, language: language) else {
+        guard let bigger = EmbeddedModelCatalog.nextBigger(
+            for: config.transcribe.embeddedModel, language: language,
+            memoryBytes: HardwareProbe.physicalMemoryBytes,
+            measuredOK: Benchmark.measuredOK(config.benchmark),
+            enabledLanguagePacks: config.transcribe.languagePacks) else {
             log("No bigger model available for \(result.base) (\(language)) — skipping re-transcribe")
             return
         }

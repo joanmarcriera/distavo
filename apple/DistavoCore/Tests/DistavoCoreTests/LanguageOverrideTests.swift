@@ -50,4 +50,60 @@ final class LanguageOverrideTests: XCTestCase {
         XCTAssertEqual(LanguageOverride.load(workDir: workDir, base: "one")?.code, "ca")
         XCTAssertEqual(LanguageOverride.load(workDir: workDir, base: "two")?.code, "es")
     }
+
+    // MARK: sourceBase (variant base stripping)
+
+    func testSourceBaseStripsVariantSuffix() {
+        XCTAssertEqual(LanguageOverride.sourceBase(from: "Meeting_2026-09-24@large-v3-turbo-ca"), "Meeting_2026-09-24")
+        XCTAssertEqual(LanguageOverride.sourceBase(from: "Meeting_2026-09-24"), "Meeting_2026-09-24")
+    }
+
+    // MARK: applying (review finding — #2202/#2205 interaction, AppPipelineDeps)
+
+    func testApplyingUsesOverrideWhenConfigIsAutomatic() throws {
+        let workDir = tempDir()
+        try LanguageOverride(code: "ca").save(workDir: workDir, base: "meeting")
+        var config = TranscribeConfig()
+        config.language = EmbeddedModelCatalog.automaticID
+        let applied = LanguageOverride.applying(to: config, workDir: workDir, wavBase: "meeting")
+        XCTAssertEqual(applied.language, "ca", "the router should prefer the override over automatic")
+    }
+
+    func testApplyingLeavesAnExplicitLanguageAlone() throws {
+        // The #2205 retry-transcribe-bigger action (and any fixed Settings
+        // language) resolves its own language before calling the pipeline;
+        // the sidecar must not silently replace it.
+        let workDir = tempDir()
+        try LanguageOverride(code: "ca").save(workDir: workDir, base: "meeting")
+        var config = TranscribeConfig()
+        config.language = "es"
+        let applied = LanguageOverride.applying(to: config, workDir: workDir, wavBase: "meeting")
+        XCTAssertEqual(applied.language, "es")
+    }
+
+    func testApplyingFallsBackToDetectionWhenSidecarIsMissing() {
+        var config = TranscribeConfig()
+        config.language = EmbeddedModelCatalog.automaticID
+        let applied = LanguageOverride.applying(to: config, workDir: tempDir(), wavBase: "no-such-recording")
+        XCTAssertEqual(applied.language, EmbeddedModelCatalog.automaticID)
+    }
+
+    func testApplyingFallsBackToDetectionWhenSidecarIsCorrupt() throws {
+        let workDir = tempDir()
+        try "{not json".write(to: LanguageOverride.url(workDir: workDir, base: "meeting"),
+                              atomically: true, encoding: .utf8)
+        var config = TranscribeConfig()
+        config.language = EmbeddedModelCatalog.automaticID
+        let applied = LanguageOverride.applying(to: config, workDir: workDir, wavBase: "meeting")
+        XCTAssertEqual(applied.language, EmbeddedModelCatalog.automaticID)
+    }
+
+    func testApplyingResolvesAVariantsSourceBase() throws {
+        let workDir = tempDir()
+        try LanguageOverride(code: "ca").save(workDir: workDir, base: "meeting")
+        var config = TranscribeConfig()
+        config.language = EmbeddedModelCatalog.automaticID
+        let applied = LanguageOverride.applying(to: config, workDir: workDir, wavBase: "meeting@large-v3-turbo-en")
+        XCTAssertEqual(applied.language, "ca")
+    }
 }

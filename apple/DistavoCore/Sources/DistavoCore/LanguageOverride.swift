@@ -38,4 +38,34 @@ public struct LanguageOverride: Codable, Equatable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(self).write(to: Self.url(workDir: workDir, base: base), options: .atomic)
     }
+
+    /// The plain recording base a sidecar is keyed by, stripping a variant's
+    /// `@<suffix>` (see `ProcessVariant.base(for:)` for the forward
+    /// direction) — an override is saved once for the original recording and
+    /// must be found the same way whether the caller is processing the
+    /// recording itself or a `@variant` sibling of it.
+    public static func sourceBase(from base: String) -> String {
+        base.components(separatedBy: "@").first ?? base
+    }
+
+    /// Applies a saved sidecar to `config`, but only when `config.language`
+    /// is still Automatic. An explicit, already-resolved language —
+    /// whether set in Settings or by a variant such as the #2205
+    /// retry-transcribe-bigger action, which fixes the language it detected
+    /// the first time — is a deliberate choice for that run and must never
+    /// be silently replaced by an override saved for a *different* run of
+    /// the same recording (review finding on #2202: the override used to
+    /// apply unconditionally, including to variants, which both broke the
+    /// variant's requested language and made its `@<model>-<lang>` file name
+    /// lie about what it was transcribed in). A missing or corrupt sidecar
+    /// (`load` returning nil) leaves `config` untouched either way, falling
+    /// back to the pipeline's own automatic detection exactly as if #2202
+    /// didn't exist.
+    public static func applying(to config: TranscribeConfig, workDir: URL, wavBase: String) -> TranscribeConfig {
+        var config = config
+        guard EmbeddedModelCatalog.isAutomatic(config.language),
+              let override = load(workDir: workDir, base: sourceBase(from: wavBase)) else { return config }
+        config.language = override.code
+        return config
+    }
 }

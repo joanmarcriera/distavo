@@ -231,14 +231,28 @@ final class MeetingCaptureController: ObservableObject {
         others.maximumNumberOfLines = 3
 
         // Language confirm/override (Vikunja #2202). Starts on "Automatic"
-        // (empty code, `WhisperLanguageCatalog.autoDetect`) — Save leaves it
-        // there unless detection pre-selects a result or the owner picks one
-        // themselves; either way, only a concrete selection at Save time
-        // writes the `LanguageOverride` sidecar (see below).
+        // (empty code, `WhisperLanguageCatalog.autoDetect`) and STAYS there
+        // even once detection finishes — the "Detected: X" label shows the
+        // result, but the picker itself only moves when the owner touches
+        // it. `userChangedLanguage` (set only by the popup's own
+        // target/action, i.e. a real click — `selectItem(at:)` called from
+        // code below never fires it) is what makes a selection "explicit";
+        // Save checks it before writing the `LanguageOverride` sidecar, so
+        // clicking Save on an untouched "Automatic" row (even one showing a
+        // confident detection) leaves routing to the pipeline's own
+        // detection, exactly as if this feature didn't exist (review
+        // finding on #2202 — a silent auto-pin previously fixed the
+        // recording's language to whatever the detector's single top guess
+        // was, at any confidence, the moment detection happened to finish
+        // before Save was clicked).
         let languageCodes = WhisperLanguageCatalog.all.map(\.code)
         let language = NSPopUpButton(frame: .zero, pullsDown: false)
         for lang in WhisperLanguageCatalog.all { language.addItem(withTitle: lang.englishName) }
         language.selectItem(at: 0)
+        var userChangedLanguage = false
+        let languagePickerTarget = LanguagePickerActionTarget { userChangedLanguage = true }
+        language.target = languagePickerTarget
+        language.action = #selector(LanguagePickerActionTarget.picked)
         let languageStatus = NSTextField(labelWithString: detection == nil ? "" : "Detecting…")
         languageStatus.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         languageStatus.textColor = .secondaryLabelColor
@@ -285,8 +299,9 @@ final class MeetingCaptureController: ObservableObject {
                     return
                 }
                 let name = WhisperLanguageCatalog.language(forCode: top.code)?.englishName ?? top.code
+                // Label only — the picker itself stays on Automatic until the
+                // owner clicks it; see the comment above `languageCodes`.
                 languageStatus.stringValue = "Detected: \(name) (\(Int((top.probability * 100).rounded()))%)"
-                if let idx = languageCodes.firstIndex(of: top.code) { language.selectItem(at: idx) }
                 self?.log("Detected meeting language: \(name) (\(Int((top.probability * 100).rounded()))%)")
             }
         }
@@ -305,12 +320,12 @@ final class MeetingCaptureController: ObservableObject {
         let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
         let workDir = Config.resolvePath(config.workDir)
 
-        // A concrete (non-Automatic) selection at the moment Save was
-        // clicked — whether the owner typed it, accepted a detected
-        // suggestion, or a pre-existing selection carried over — is the
-        // "explicit override" that gets saved; Automatic saves nothing.
+        // Only a selection the owner actually clicked (`userChangedLanguage`)
+        // is the "explicit override" that gets saved; an untouched Automatic
+        // row — including one showing a "Detected: X" label — saves nothing,
+        // leaving routing to the pipeline's own detection.
         let selectedCode = languageCodes[max(0, language.indexOfSelectedItem)]
-        if !selectedCode.isEmpty {
+        if userChangedLanguage, !selectedCode.isEmpty {
             do {
                 try LanguageOverride(code: selectedCode).save(workDir: workDir, base: base)
                 log("Meeting language confirmed for \(url.lastPathComponent): \(selectedCode)")
@@ -395,4 +410,16 @@ final class MeetingCaptureController: ObservableObject {
             NSWorkspace.shared.open(url)
         }
     }
+}
+
+/// `NSControl.target`/`.action` needs an `NSObject`; this is the smallest one
+/// that turns "the owner clicked the language popup" into a plain callback
+/// (Vikunja #2202 review finding — see the comment above `languageCodes` in
+/// `askSpeakers`). `NSPopUpButton.selectItem(at:)` called from Swift code
+/// never invokes target/action, only a real click does, which is exactly the
+/// "explicit override" distinction this exists to capture.
+private final class LanguagePickerActionTarget: NSObject {
+    private let onPick: () -> Void
+    init(onPick: @escaping () -> Void) { self.onPick = onPick }
+    @objc func picked() { onPick() }
 }

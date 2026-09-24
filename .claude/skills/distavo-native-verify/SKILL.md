@@ -136,7 +136,7 @@ grep -rn "EDITION_APPSTORE\|EDITION_DIRECT\|EDITION_SETAPP\|DONATE_ENABLED\|impo
   is only listed as a dependency of the `Distavo` target. Never add it to `DistavoApp`'s shared
   template deps.
 - **No external-payment/donate link outside Direct**: the "Support Distavo…" menu item
-  (`Menu/StatusMenu.swift:90`) is `#if DONATE_ENABLED`, set only in `Direct.xcconfig`.
+  (`Menu/StatusMenu.swift:129`) is `#if DONATE_ENABLED`, set only in `Direct.xcconfig`.
   `AppStore.xcconfig` documents why in a comment (Guideline 3.1.1 — no steering to outside payment);
   Setapp excludes it by its own store rules.
 - **No sandbox-prohibited automation in App Store**: the "Run in Terminal" helper

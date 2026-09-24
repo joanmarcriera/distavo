@@ -13,7 +13,19 @@ extension PipelineDeps {
         var deps = PipelineDeps.live()
 
         let serverTranscribe = deps.transcribe
-        deps.transcribe = { wavURL, transcribeConfig in
+        deps.transcribe = { wavURL, rawTranscribeConfig in
+            // Vikunja #2202: an explicit language the owner confirmed after
+            // Stop overrides auto-detection — read before anything else, for
+            // both backends (a fixed language is meaningful to the WhisperX
+            // server too). `LanguageOverride.applying` only touches an
+            // Automatic `language`, so a variant that already fixed its own
+            // language (e.g. the #2205 retry-bigger action) is left alone,
+            // and it strips a variant's `@<suffix>` itself to find the
+            // plain recording's sidecar — pure DistavoCore logic, unit
+            // tested in LanguageOverrideTests.
+            let workDir = wavURL.deletingLastPathComponent()
+            let wavBase = wavURL.deletingPathExtension().lastPathComponent
+            let transcribeConfig = LanguageOverride.applying(to: rawTranscribeConfig, workDir: workDir, wavBase: wavBase)
             guard transcribeConfig.backend == "embedded" else {
                 return try await serverTranscribe(wavURL, transcribeConfig)
             }

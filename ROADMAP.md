@@ -27,13 +27,15 @@ and the Mac App Store. The detailed, copy-pasteable shipping steps live in
 - Link the Setapp Framework into the `-setapp` bundle (gated behind
   `EDITION_SETAPP`), upload the first build via the Setapp Web UI, pass review.
 
-## Phase 4 — Mac App Store
+## Phase 4 — Mac App Store (live since 2026-07-02, v1.4.0)
 
 - Sandboxed build (security-scoped bookmarks for the watched folders), Apple
   Distribution signing + provisioning profile, App Store Connect record, and
-  App Review.
+  App Review — done; current live version is 1.14.0 (id6785437932).
 - Donations on the App Store would require StoreKit In-App Purchase (consumable
   "tip" products) — the external donate link is Direct-only and must stay gated.
 
 Each phase's exact commands and credential prerequisites are in the
 distribution checklist.
+
+<!-- Reconciled 2026-09-24 by Claude: 12 tasks matched, 0 created, 2 marked done in Vikunja project 18 -->

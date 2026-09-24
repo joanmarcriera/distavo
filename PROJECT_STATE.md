@@ -1,5 +1,9 @@
 # Project State
 
+> **Stale snapshot (flagged 2026-09-24):** this file is a point-in-time handoff from the 1.9.1
+> build-11 review cycle. Current shipped version is 1.14.0 (live on the Mac App Store since
+> 2026-09-18) — see `HANDOFF-2026-09-06.md` and Vikunja project 18 for the current state.
+
 ## Current objective
 
 Await App Review's decision on Distavo 1.9.1 build 11, submitted as the
@@ -191,3 +195,5 @@ replacement for rejected version 1.9.0 build 10.
 
 Wait for App Review. If Apple raises another issue, inspect the new review
 message and live submission state before changing or uploading another build.
+
+<!-- Reconciled 2026-09-24 by Claude: 12 tasks matched, 0 created, 2 marked done in Vikunja project 18 -->

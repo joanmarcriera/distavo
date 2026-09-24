@@ -93,3 +93,25 @@ must be handled when the profile expires.
 
 Revisit when: Xcode automatic signing reliably embeds the profile in archived
 and exported Mac App Store packages under GitHub Actions.
+
+## 2026-09-16 - Setapp: Single App Distribution, not Membership
+
+Decision: List Distavo on Setapp via **Single App Distribution** (USD 29
+one-off, same price point as the Mac App Store), not Setapp Membership.
+
+Alternatives considered: Setapp Membership (revenue-share subscription
+model) — MacPaw (Anya, BD) declined this on 2026-09-07: Distavo's use case is
+already covered by existing Setapp apps.
+
+Rationale: Single App Distribution was the option MacPaw offered after
+declining Membership; it keeps pricing consistent with the App Store edition
+and requires no revenue-share negotiation.
+
+Consequences: Marc completed MacPaw's KYC form 2026-09-17; MacPaw is
+reviewing and has not yet opened the vendor dashboard (as of 2026-09-24 —
+see Vikunja `#222`/`#1958`).
+
+Revisit when: MacPaw opens the vendor account and the first build is
+uploaded through the Setapp Web UI.
+
+<!-- Reconciled 2026-09-24 by Claude: 12 tasks matched, 0 created, 2 marked done in Vikunja project 18 -->

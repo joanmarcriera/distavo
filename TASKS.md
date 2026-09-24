@@ -6,14 +6,22 @@
   Completion criteria: `submit-appstore-review.py` safely updates and resubmits
   the existing `UNRESOLVED_ISSUES` submission after attaching a replacement
   build, with tests covering stale/different-version safeguards.
+  Superseded 2026-09-24: the tool still deliberately stops on
+  `UNRESOLVED_ISSUES`; the actual workaround shipped is the external poller
+  `ops/submit-when-review-clears.sh`, used successfully 2026-09-17 for the
+  1.13.0/1.14.0 queue conflict. Not pursuing the original completion criteria
+  unless the poller proves insufficient.
 
 ## Blocked on Marc
 
 - [ ] Create or access the Setapp vendor account.
   Completion criteria: dashboard access at `https://developer.setapp.com`.
+  Status 2026-09-24: KYC submitted 2026-09-17; still waiting on MacPaw to open
+  the vendor account (Vikunja `#222`/`#1958`). Not done yet — do not check off.
 
-- [ ] Choose Setapp Membership or Single-App Distribution.
+- [x] Choose Setapp Membership or Single-App Distribution.
   Completion criteria: model recorded in `DECISIONS.md`.
+  Decided 2026-09-16: Single App Distribution ($29 one-off); see `DECISIONS.md`.
 
 - [ ] Download Setapp Framework and generate the app public key.
   Completion criteria: SDK and public key are available locally for integration.
@@ -72,3 +80,5 @@
 - [x] Deploy `ops/site` to `distavo.com`.
   Completion criteria: live `/`, `/privacy/`, `/support/`, `/feedback/`, CSS,
   and screenshot asset return 200 and show the new site.
+
+<!-- Reconciled 2026-09-24 by Claude: 12 tasks matched, 0 created, 2 marked done in Vikunja project 18 -->

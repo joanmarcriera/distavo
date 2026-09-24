@@ -305,6 +305,36 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(ProcessVariant(suffix: "a/b c", transcribe: .init()).suffix, "a_b_c")
     }
 
+    // MARK: "Re-summarise with a bigger model" (Vikunja #2205)
+
+    /// A variant's `summariseOverride` forces that Ollama target directly,
+    /// bypassing `chooseSummariser`'s reachability/deferral logic entirely —
+    /// a server that would otherwise defer the run is never even asked.
+    func testSummariseOverrideBypassesReachabilityAndForcesTarget() async throws {
+        var (cfg, _) = try makeEnv()
+        cfg.summarise.allowLocalFallback = false
+        let wav = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("demo.wav")
+        try Data(repeating: 4, count: 10).write(to: wav)
+        let recorder = TargetRecorder()
+        let variant = ProcessVariant(
+            suffix: ProcessVariant.suffix(model: "resummarise", language: "gemma4:70b"),
+            transcribe: cfg.transcribe,
+            summariseOverride: OllamaTarget(url: "http://10.0.0.9:11434", model: "gemma4:70b"))
+
+        let result = await Pipeline.processOne(
+            path: wav, config: cfg,
+            // `reachable` returning false would normally defer the run —
+            // the override must skip that check entirely.
+            deps: deps(reachable: { _ in false }, summarise: { _, target, _, _ in
+                recorder.set(target)
+                return Self.validNote
+            }),
+            stableChecks: 1, stableDelay: 0, variant: variant)
+
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(recorder.value, .ollama(url: "http://10.0.0.9:11434", model: "gemma4:70b"))
+    }
+
     // MARK: Meeting date for the prompt metadata (Vikunja #2063)
 
     func testMeetingDateFromRecorderFileNameElseCreationDate() throws {
@@ -357,10 +387,15 @@ final class PipelineTests: XCTestCase {
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(result.detectedLanguages, "Catalan 92%, English 71%")
+        // The single highest-probability code, for `retryTranscribeBigger` to
+        // resolve `EmbeddedModelCatalog.nextBigger(for:language:)` with
+        // (Vikunja #2205) — independent of `summarise.note_language`.
+        XCTAssertEqual(result.dominantLanguageCode, "ca")
 
         let plain = await Pipeline.processOne(
             path: try makeEnv().1, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
         XCTAssertNil(plain.detectedLanguages)
+        XCTAssertNil(plain.dominantLanguageCode)
     }
 
     // MARK: Note language (Vikunja #2147)

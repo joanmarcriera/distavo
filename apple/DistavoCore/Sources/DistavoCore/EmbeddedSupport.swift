@@ -229,6 +229,55 @@ public enum EmbeddedModelCatalog {
 
     public static func isAutomatic(_ id: String) -> Bool { id == automaticID }
 
+    /// The next larger/more-accurate catalog entry that still covers
+    /// `language`, or nil when `modelID` is already the biggest one that
+    /// does — e.g. a language-pack model with no bigger alternative (the
+    /// Hebrew pack: `ivrit-he` is the only entry covering "he"). Drives the
+    /// `retryTranscribeBigger` `WhenDoneAction` (Vikunja #2205): "bigger"
+    /// ranks by memory footprint while transcribing (`ramGB`), which tracks
+    /// model/decoder size within the Whisper/BSC family.
+    ///
+    /// Parakeet is never offered as a *destination*: it sits at 1.5 GB
+    /// between `small` and `large-v3-turbo` by footprint, but it is
+    /// `EmbeddedEngine.parakeet` — the deliberately fast, lighter-weight
+    /// alternative engine ("Fast" in the picker), not a rung on the
+    /// accuracy ladder this action climbs. It can still be a *source*: for a
+    /// user on Parakeet, stepping up means moving to the Whisper family.
+    ///
+    /// Applies the same two gates every other model-selection path applies
+    /// (review finding on #2205): the memory floor (`selectable`'s rule —
+    /// `minimumMemoryGB`, or a `measuredOK` benchmark override) and, for a
+    /// language-pack-only model, that its pack is actually enabled
+    /// (`enabledLanguagePacks`, i.e. `TranscribeConfig.languagePacks`) —
+    /// packs are opt-in and pack-only models stay hidden otherwise. The
+    /// defaults (`memoryBytes: .max`, empty `measuredOK`/`enabledLanguagePacks`)
+    /// impose no gate, matching this function's pre-#2205-review-fix
+    /// behaviour for callers (and tests) that don't pass real values —
+    /// callers that route to a Mac's actual pipeline must pass the real
+    /// physical memory, benchmark set and enabled packs, as
+    /// `WatcherController.queueRetryTranscribeBigger` and
+    /// `SettingsView` now do.
+    public static func nextBigger(
+        for modelID: String,
+        language: String,
+        memoryBytes: UInt64 = .max,
+        measuredOK: Set<String> = [],
+        enabledLanguagePacks: [String] = []
+    ) -> EmbeddedModel? {
+        let current = model(id: modelID)
+        let gb = memoryBytes == .max ? Int.max : Int(memoryBytes / (1024 * 1024 * 1024))
+        let packIDs = packModelIDs
+        let enabledPackModelIDs = Set(enabledLanguagePacks.compactMap(pack(id:)).flatMap(\.modelIDs))
+        return models
+            .filter { candidate in
+                candidate.id != current.id && candidate.engine != .parakeet
+                    && candidate.languages.covers(language) && candidate.ramGB > current.ramGB
+                    && (candidate.minimumMemoryGB <= gb || measuredOK.contains(candidate.id))
+                    && (!packIDs.contains(candidate.id) || enabledPackModelIDs.contains(candidate.id))
+            }
+            .min { $0.ramGB < $1.ramGB }
+    }
+
     /// Look up by config id, falling back to the default so an unknown value in
     /// a hand-edited config (or "auto", which is not a model) degrades gracefully.
     public static func model(id: String) -> EmbeddedModel {

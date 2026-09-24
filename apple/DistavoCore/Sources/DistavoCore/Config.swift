@@ -163,12 +163,19 @@ public struct SummariseConfig: Codable, Equatable {
     /// silently; only fresh installs get "auto" via `recommendedForThisMac()`.
     /// Ollama-only — the on-device Foundation Models path never sees it.
     public var noteLanguage: String
+    /// A larger/more capable Ollama model name for the "re-summarise with a
+    /// bigger model" `WhenDoneAction` (Vikunja #2205). Reuses `server.url` —
+    /// only the model differs. nil (the default, and for any config
+    /// predating the key) means the action has nothing to run, so Settings
+    /// hides its checkbox and `WatcherController` skips it.
+    public var biggerModel: String?
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", options
         case promptStyle = "prompt_style"
         case noteLanguage = "note_language"
+        case biggerModel = "bigger_model"
     }
 
     public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
@@ -176,12 +183,14 @@ public struct SummariseConfig: Codable, Equatable {
                 embeddedEnabled: Bool = false,
                 options: SummariseOptions = .init(),
                 promptStyle: Prompt.Style = .classic,
-                noteLanguage: String = "en") {
+                noteLanguage: String = "en",
+                biggerModel: String? = nil) {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.options = options
         self.promptStyle = promptStyle
         self.noteLanguage = noteLanguage
+        self.biggerModel = biggerModel
     }
 
     public init(from decoder: Decoder) throws {
@@ -198,15 +207,34 @@ public struct SummariseConfig: Codable, Equatable {
         promptStyle = (try? c.decodeIfPresent(String.self, forKey: .promptStyle))
             .flatMap { $0.flatMap(Prompt.Style.init(rawValue:)) } ?? d.promptStyle
         noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage) ?? d.noteLanguage
+        biggerModel = try c.decodeIfPresent(String.self, forKey: .biggerModel) ?? d.biggerModel
     }
 }
 
-/// What to open (if anything) once a recording finishes processing (Vikunja
-/// #2199, part a). An unrecognised or missing value falls back to `.off` — the
-/// same fallback pattern as `Prompt.Style` in `SummariseConfig` — so a config
-/// file written before this key existed never starts opening things unasked.
-public enum OpenWhenDone: String, Codable, Equatable, Sendable {
-    case off, note, transcript
+/// One action to take once a recording finishes processing (Vikunja #2205),
+/// replacing #2199's single `open_when_done` choice with a checklist so
+/// several can run together — e.g. open the note *and* queue a bigger-model
+/// re-transcribe. An unrecognised entry is dropped (`compactMap` at decode)
+/// rather than failing the whole config, the same fallback spirit as
+/// `Prompt.Style`.
+public enum WhenDoneAction: String, Codable, Equatable, Sendable, CaseIterable {
+    case openNote = "open_note"
+    case openTranscript = "open_transcript"
+    /// Re-run transcription via `EmbeddedModelCatalog.nextBigger(for:language:)`
+    /// (built-in engine only); a no-op when there is no bigger model for the
+    /// language transcribed.
+    case retryTranscribeBigger = "retry_transcribe_bigger"
+    /// Re-run summarisation against `SummariseConfig.biggerModel`; a no-op
+    /// when that is unset.
+    case retrySummariseBigger = "retry_summarise_bigger"
+}
+
+/// Reads only the legacy `open_when_done` scalar key, for migrating config
+/// files written before 1.15 dropped it in favour of `when_done` (an array).
+/// Kept separate from `Config.CodingKeys` so that enum doesn't need a case
+/// with no matching stored property (which would break `Encodable` synthesis).
+private enum LegacyWhenDoneKey: String, CodingKey {
+    case openWhenDone = "open_when_done"
 }
 
 public struct Config: Codable, Equatable {
@@ -237,10 +265,11 @@ public struct Config: Codable, Equatable {
     public var askSpeakersOnStop: Bool
     /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
     public var benchmark: [BenchmarkResult]
-    /// Open the note or transcript once a recording finishes (Vikunja #2199,
-    /// part a). Defaults to `.off`; a config predating the key decodes to
-    /// `.off` too, so upgrading never starts opening files unasked.
-    public var openWhenDone: OpenWhenDone
+    /// Actions to run once a recording finishes (Vikunja #2205, superseding
+    /// #2199's single-choice `open_when_done`). Defaults to `[]`; a config
+    /// predating either key decodes to `[]` too, so upgrading never starts
+    /// opening files or queueing re-runs unasked. See `WhenDoneAction`.
+    public var whenDone: [WhenDoneAction]
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -251,7 +280,7 @@ public struct Config: Codable, Equatable {
         case compactRecordingsAfterNote = "compact_recordings_after_note"
         case askSpeakersOnStop = "ask_speakers_on_stop"
         case benchmark
-        case openWhenDone = "open_when_done"
+        case whenDone = "when_done"
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -266,7 +295,7 @@ public struct Config: Codable, Equatable {
                 compactRecordingsAfterNote: Bool = false,
                 askSpeakersOnStop: Bool = true,
                 benchmark: [BenchmarkResult] = [],
-                openWhenDone: OpenWhenDone = .off) {
+                whenDone: [WhenDoneAction] = []) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -275,7 +304,7 @@ public struct Config: Codable, Equatable {
         self.compactRecordingsAfterNote = compactRecordingsAfterNote
         self.askSpeakersOnStop = askSpeakersOnStop
         self.benchmark = benchmark
-        self.openWhenDone = openWhenDone
+        self.whenDone = whenDone
     }
 
     public init(from decoder: Decoder) throws {
@@ -293,10 +322,22 @@ public struct Config: Codable, Equatable {
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
-        // An unknown string (or a missing key) falls back to the default
-        // rather than failing the whole config — same pattern as `prompt_style`.
-        openWhenDone = (try? c.decodeIfPresent(String.self, forKey: .openWhenDone))
-            .flatMap { $0.flatMap(OpenWhenDone.init(rawValue:)) } ?? d.openWhenDone
+        // `when_done` (an array); unknown entries are dropped rather than
+        // failing the whole config. A config predating it falls back to the
+        // legacy `open_when_done` scalar, migrated 1:1; either absent leaves `[]`.
+        let decodedWhenDone = (try? c.decodeIfPresent([String].self, forKey: .whenDone)).flatMap { $0 }
+        if let decodedWhenDone {
+            whenDone = decodedWhenDone.compactMap(WhenDoneAction.init(rawValue:))
+        } else {
+            let legacy = (try? decoder.container(keyedBy: LegacyWhenDoneKey.self))
+                .flatMap { try? $0.decodeIfPresent(String.self, forKey: .openWhenDone) }
+                .flatMap { $0 }
+            switch legacy {
+            case "note": whenDone = [.openNote]
+            case "transcript": whenDone = [.openTranscript]
+            default: whenDone = d.whenDone
+            }
+        }
     }
 
     // MARK: Paths

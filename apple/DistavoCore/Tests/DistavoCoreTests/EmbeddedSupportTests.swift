@@ -46,6 +46,61 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertTrue(on16.contains("bsc-los") && on16.contains("bsc-ca-3370h"))
     }
 
+    // MARK: nextBigger (Vikunja #2205)
+
+    func testNextBiggerStepsUpWithinLanguageCoverage() {
+        // small (whisper, ramGB 1) -> large-v3-turbo (whisper, ramGB 2) for a
+        // plain Whisper language covered by both.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "small", language: "en")?.id, "large-v3-turbo")
+        // For Catalan, the BSC model (ramGB 4) is bigger still than turbo.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca")?.id, "bsc-los")
+    }
+
+    func testNextBiggerReturnsNilAtTheTop() {
+        // large-v3-turbo is the biggest model that covers English — no BSC/pack
+        // model covers "en", so there is nothing bigger to step up to.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "en"))
+    }
+
+    func testNextBiggerReturnsNilForTheHebrewPack() {
+        // The Hebrew pack model is the only catalog entry covering "he" —
+        // this is the case named explicitly in the Vikunja spec.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "ivrit-he", language: "he"))
+    }
+
+    func testNextBiggerStepsFromParakeetToWhisperForSharedLanguages() {
+        // Parakeet (ramGB 1.5) is not the biggest option for a language it
+        // shares with the Whisper-based models.
+        let bigger = EmbeddedModelCatalog.nextBigger(for: "parakeet-tdt-v3", language: "es")
+        XCTAssertEqual(bigger?.id, "large-v3-turbo", "the next step up by memory, not straight to the biggest")
+    }
+
+    // MARK: nextBigger gates (review finding, #2205) — memory floor + pack opt-in
+
+    func testNextBiggerRespectsMemoryFloor() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        // bsc-los needs 16 GB; on an 8 GB Mac it must not be offered even
+        // though it is otherwise the next step up from turbo for Catalan.
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca", memoryBytes: 8 * gb))
+        // On a 16 GB Mac it's fine again.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca", memoryBytes: 16 * gb)?.id, "bsc-los")
+        // A `measuredOK` benchmark overrides the floor, same as `selectable`.
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "ca",
+                                                        memoryBytes: 8 * gb, measuredOK: ["bsc-los"])?.id, "bsc-los")
+    }
+
+    func testNextBiggerRespectsLanguagePackOptIn() {
+        // th is only covered by the Thai pack model; with no packs enabled
+        // there is nothing bigger to step up to, even though the model
+        // itself would otherwise qualify (no memory floor issue here).
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th"))
+        XCTAssertNil(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th", enabledLanguagePacks: ["hebrew"]))
+        // Enabling the Thai pack makes it available (and it clears the 16 GB
+        // floor too, since the default `memoryBytes: .max` imposes none).
+        XCTAssertEqual(EmbeddedModelCatalog.nextBigger(for: "large-v3-turbo", language: "th",
+                                                        enabledLanguagePacks: ["thai"])?.id, "thonburian-th")
+    }
+
     // MARK: Language packs (Vikunja #2124)
 
     func testEveryPackModelIsAConvertedCustomRepoWhisperEntry() {

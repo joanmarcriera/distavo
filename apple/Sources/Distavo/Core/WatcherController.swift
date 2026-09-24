@@ -391,14 +391,19 @@ final class WatcherController: ObservableObject {
             status = "Processing \(path.lastPathComponent)…"
             log("Processing \(path.lastPathComponent)")
             let result = await Pipeline.processOne(path: path, config: cfg, deps: deps)
-            handle(result)
+            handle(result, sourcePath: path)
         }
         processingActive = false
         refreshFailedRecordings()
         refreshActivity()
     }
 
-    private func handle(_ result: ProcessResult) {
+    /// `sourcePath` is the original recording, needed to queue a `WhenDoneAction`
+    /// retry through `runVariant`. It is nil for a variant run's own result
+    /// (`runVariant` below) so a retry action's re-run never re-triggers
+    /// itself — `runWhenDoneActions` also guards on `result.base` containing
+    /// "@" for the same reason, belt and braces.
+    private func handle(_ result: ProcessResult, sourcePath: URL? = nil) {
         switch result.status {
         case .done:
             status = "Last note: \(result.base)"
@@ -420,7 +425,7 @@ final class WatcherController: ObservableObject {
             }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
-            openWhenDoneIfNeeded(result)
+            if let sourcePath { runWhenDoneActions(result, sourcePath: sourcePath) }
         case .tooShort:
             status = "Too short: \(result.base)"
             log("Too short to transcribe — \(result.message): \(result.base)")
@@ -627,19 +632,75 @@ final class WatcherController: ObservableObject {
         acknowledgeNote()
     }
 
-    /// "When a recording finishes" (Vikunja #2199): opens the note or the
-    /// transcript in the default app once processing succeeds, per
-    /// `config.openWhenDone`. Only called for `.done` — a deferred, too-short,
-    /// or failed recording has nothing ready to open.
-    private func openWhenDoneIfNeeded(_ result: ProcessResult) {
-        let url: URL?
-        switch config.openWhenDone {
-        case .off: return
-        case .note: url = result.notePath
-        case .transcript: url = result.transcriptPath
+    /// "When a recording finishes" (Vikunja #2199, extended to a checklist by
+    /// #2205): runs every action in `config.whenDone` once processing
+    /// succeeds — opening the note/transcript, and/or queueing a bigger-model
+    /// re-run. Only called for `.done` (a deferred, too-short, or failed
+    /// recording has nothing ready to open or improve on), and never for a
+    /// variant's own result (`result.base` would contain "@" — see `handle`).
+    private func runWhenDoneActions(_ result: ProcessResult, sourcePath: URL) {
+        guard !result.base.contains("@") else { return }
+        for action in config.whenDone {
+            switch action {
+            case .openNote:
+                if let url = result.notePath { NSWorkspace.shared.open(url) }
+            case .openTranscript:
+                if let url = result.transcriptPath { NSWorkspace.shared.open(url) }
+            case .retryTranscribeBigger:
+                queueRetryTranscribeBigger(result, sourcePath: sourcePath)
+            case .retrySummariseBigger:
+                queueRetrySummariseBigger(result, sourcePath: sourcePath)
+            }
         }
-        guard let url else { return }
-        NSWorkspace.shared.open(url)
+    }
+
+    /// Re-run transcription (and summarisation) through
+    /// `EmbeddedModelCatalog.nextBigger`, landing beside the normal note as
+    /// `<base>@<model>-<lang>.md` — the same sibling-file pattern as
+    /// "Process a recording with…" (#2159). Built-in-engine only; a no-op
+    /// when the backend is the WhisperX server (no catalog to step up in) or
+    /// the automatic router chose the model (the actually-used catalog id
+    /// isn't surfaced past the pipeline, so there's nothing safe to compare
+    /// "bigger" against — a fixed model in Settings is required), or when
+    /// `nextBigger` finds nothing larger for the language.
+    private func queueRetryTranscribeBigger(_ result: ProcessResult, sourcePath: URL) {
+        guard config.transcribe.backend == "embedded",
+              !EmbeddedModelCatalog.isAutomatic(config.transcribe.embeddedModel) else {
+            log("Skipped re-transcribe with a bigger model for \(result.base): needs a fixed built-in model in Settings")
+            return
+        }
+        let language = result.dominantLanguageCode ?? config.transcribe.language
+        guard let bigger = EmbeddedModelCatalog.nextBigger(
+            for: config.transcribe.embeddedModel, language: language,
+            memoryBytes: HardwareProbe.physicalMemoryBytes,
+            measuredOK: Benchmark.measuredOK(config.benchmark),
+            enabledLanguagePacks: config.transcribe.languagePacks) else {
+            log("No bigger model available for \(result.base) (\(language)) — skipping re-transcribe")
+            return
+        }
+        var transcribeConfig = config.transcribe
+        transcribeConfig.embeddedModel = bigger.id
+        transcribeConfig.language = language
+        let variant = ProcessVariant(suffix: ProcessVariant.suffix(model: bigger.id, language: language),
+                                     transcribe: transcribeConfig)
+        log("Queueing re-transcribe of \(result.base) with \(bigger.displayName)")
+        Task { [weak self] in await self?.runVariant(variant, on: sourcePath) }
+    }
+
+    /// Re-run summarisation against `SummariseConfig.biggerModel`, using the
+    /// same transcribe settings as the normal run (no need to re-transcribe
+    /// just to try a bigger summariser). A no-op when no bigger model is
+    /// configured — Settings only offers the checkbox once one is set.
+    private func queueRetrySummariseBigger(_ result: ProcessResult, sourcePath: URL) {
+        guard let biggerModel = config.summarise.biggerModel, !biggerModel.isEmpty else {
+            log("Skipped re-summarise with a bigger model for \(result.base): no bigger model configured")
+            return
+        }
+        let override = OllamaTarget(url: config.summarise.server.url, model: biggerModel)
+        let variant = ProcessVariant(suffix: ProcessVariant.suffix(model: "resummarise", language: biggerModel),
+                                     transcribe: config.transcribe, summariseOverride: override)
+        log("Queueing re-summarise of \(result.base) with \(biggerModel)")
+        Task { [weak self] in await self?.runVariant(variant, on: sourcePath) }
     }
 
     func openLastNote() {

@@ -69,27 +69,63 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"prompt_style\" : \"classic\""))
     }
 
-    /// `open_when_done` (Vikunja #2199) decodes to `.off` when absent or
-    /// unrecognised — same fallback pattern as `prompt_style` — and round-trips
-    /// once set.
-    func testOpenWhenDoneDecodesAndDefaultsToOff() throws {
-        XCTAssertEqual(Config().openWhenDone, .off)
+    /// `when_done` (Vikunja #2205, superseding #2199's single `open_when_done`
+    /// scalar) decodes to `[]` when absent, drops unrecognised entries rather
+    /// than failing the load, and round-trips once set.
+    func testWhenDoneDecodesAndDefaultsToEmpty() throws {
+        XCTAssertEqual(Config().whenDone, [])
         let url = tempFile()
         try FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try #"{}"#.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertEqual(try Config.load(from: url).openWhenDone, .off, "missing key decodes to off")
-        try #"{"open_when_done": "note"}"#.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertEqual(try Config.load(from: url).openWhenDone, .note)
-        try #"{"open_when_done": "transcript"}"#.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertEqual(try Config.load(from: url).openWhenDone, .transcript)
-        try #"{"open_when_done": "bogus"}"#.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertEqual(try Config.load(from: url).openWhenDone, .off, "unknown value falls back to off")
+        XCTAssertEqual(try Config.load(from: url).whenDone, [], "missing key decodes to empty")
+        try #"{"when_done": ["open_note", "retry_transcribe_bigger"]}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openNote, .retryTranscribeBigger])
+        try #"{"when_done": ["open_note", "bogus"]}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openNote], "unknown entries are dropped, not fatal")
 
-        var saved = Config(); saved.openWhenDone = .transcript
+        var saved = Config(); saved.whenDone = [.openTranscript, .retrySummariseBigger]
         try Config.save(saved, to: url)
-        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"open_when_done\" : \"transcript\""))
-        XCTAssertEqual(try Config.load(from: url).openWhenDone, .transcript)
+        let json = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(json.contains("\"when_done\""))
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openTranscript, .retrySummariseBigger])
+    }
+
+    /// A config written before 1.15 stored a single `open_when_done` scalar
+    /// ("off"/"note"/"transcript"); it must migrate to the equivalent
+    /// `when_done` list rather than being silently dropped.
+    func testLegacyOpenWhenDoneScalarMigrates() throws {
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{"open_when_done": "note"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openNote])
+        try #"{"open_when_done": "transcript"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openTranscript])
+        try #"{"open_when_done": "off"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [], "\"off\" migrates to no actions")
+        try #"{"open_when_done": "bogus"}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [], "unrecognised legacy value falls back to none")
+        // `when_done` present takes priority over the legacy key when both exist.
+        try #"{"open_when_done": "note", "when_done": ["open_transcript"]}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(try Config.load(from: url).whenDone, [.openTranscript])
+    }
+
+    /// `summarise.bigger_model` (Vikunja #2205) is nil by default/when absent
+    /// — the "re-summarise with a bigger model" action stays disabled until
+    /// the user sets one — and round-trips once set.
+    func testBiggerModelDefaultsToNilAndRoundTrips() throws {
+        XCTAssertNil(Config().summarise.biggerModel)
+        let url = tempFile()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try #"{}"#.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertNil(try Config.load(from: url).summarise.biggerModel)
+
+        var saved = Config(); saved.summarise.biggerModel = "gemma4:70b"
+        try Config.save(saved, to: url)
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"bigger_model\" : \"gemma4:70b\""))
+        XCTAssertEqual(try Config.load(from: url).summarise.biggerModel, "gemma4:70b")
     }
 
     /// The 1.12 keys are absent from every existing config file and must

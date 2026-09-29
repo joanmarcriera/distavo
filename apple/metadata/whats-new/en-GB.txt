@@ -1,4 +1,7 @@
-• Two more language packs (Settings → Transcription): Tamil, from IIT Madras's Speech Lab, and Norwegian — Bokmål and Nynorsk — from the National Library of Norway. Off by default, downloaded once when you switch them on. Both write without punctuation; the notes are unaffected.
-• Settings now keeps Save in view at all times, shows "Unsaved changes" until you save, and saves pending changes when you close the window.
-• A note that comes back cut short is no longer saved as finished: Distavo asks the summariser again, and only then reports a failure.
-• The "Facts first" prompt no longer leaks its working steps ("Step 1…") into the note.
+• A recording that has gone quiet can now stop itself. Two optional settings (Settings → Recordings): suggest stopping after a few minutes of silence, and stop automatically after a few more. Both are off until you switch them on; the minutes are yours to set.
+• Pick a different transcription model and Distavo still listens first to work out the language. Catalan and Spanish meetings are no longer silently turned into English, and the note now says which language was used.
+• If Distavo spots Catalan while a non-Catalan model is chosen, the note suggests the Catalan model.
+• Compare two models on the same recording side by side, and confirm the detected language after you stop a recording.
+• Choose what happens when a recording finishes with simple checkboxes.
+• Local Gemma summaries no longer collapse into repetition, and a summary that fails its checks is kept out of your notes folder instead of appearing as a finished note.
+• Better handling of accented and non-Latin words when checking summaries, so Catalan, Spanish, Tamil and Thai notes aren't wrongly rejected.

@@ -7,12 +7,59 @@ public struct LanguageDetection: Equatable, Sendable {
     public init(code: String, probability: Float) { self.code = code; self.probability = probability }
 }
 
+/// Where the language hint came from (Vikunja #2667).
+public enum LanguageSource: Equatable, Sendable {
+    case fixed          // the user set a language in Settings
+    case detected       // the whisper-tiny detector found it above the confidence floor
+    case modelDetects   // no hint: the transcribing model must detect it itself
+}
+
 /// What the app should run: which catalog model, and the language to tell it
 /// (a real code or nil — never "auto"). `note` explains a fallback to the user.
 public struct RoutingDecision: Equatable, Sendable {
     public let model: EmbeddedModel
     public let languageHint: String?
     public let note: String?
+    /// True when the model was chosen explicitly in Settings (not by the router).
+    public let pinned: Bool
+    public let languageSource: LanguageSource
+    /// Highest window probability of `languageHint`; nil unless `.detected`.
+    public let confidence: Float?
+    /// A user-facing suggestion, set only for a pinned model (see `EngineRouter.recommendation`).
+    public let recommendation: String?
+
+    public init(model: EmbeddedModel, languageHint: String?, note: String?,
+                pinned: Bool = false, languageSource: LanguageSource = .modelDetects,
+                confidence: Float? = nil, recommendation: String? = nil) {
+        self.model = model; self.languageHint = languageHint; self.note = note
+        self.pinned = pinned; self.languageSource = languageSource
+        self.confidence = confidence; self.recommendation = recommendation
+    }
+
+    /// One activity-log line. Keeps the "Using " prefix — WatcherController's
+    /// icon logic looks for it.
+    public var logLine: String {
+        let language: String
+        switch languageSource {
+        case .fixed: language = "\(languageHint ?? "?") (set in Settings)"
+        case .detected:
+            let pct = confidence.map { ", \(Int(($0 * 100).rounded()))% confidence" } ?? ""
+            language = "\(languageHint ?? "?") (detected\(pct))"
+        case .modelDetects: language = "not detected; the model detects it itself"
+        }
+        return "Using \(model.id) (\(pinned ? "pinned" : "automatic")) \u{2014} language \(language)"
+    }
+}
+
+/// How to drive WhisperKit's language options for a router hint. Invariant:
+/// `language != nil || detectLanguage` — with both off, WhisperKit's prefill
+/// silently falls back to "en" and translates the audio (Vikunja #2667).
+public struct WhisperLanguagePlan: Equatable, Sendable {
+    public let language: String?
+    public let detectLanguage: Bool
+    public init(language: String?, detectLanguage: Bool) {
+        self.language = language; self.detectLanguage = detectLanguage
+    }
 }
 
 /// Spec §5.2. Pure: no I/O, no SDK types. The app layer feeds it detections
@@ -20,9 +67,44 @@ public struct RoutingDecision: Equatable, Sendable {
 public enum EngineRouter {
     public static let confidenceFloor: Float = 0.5
 
+    /// Detection is needed whenever the language is automatic — also with a
+    /// pinned model, whose language would otherwise fall to WhisperKit's "en"
+    /// prefill default. A fixed language still skips it.
     public static func needsDetection(_ config: TranscribeConfig) -> Bool {
-        EmbeddedModelCatalog.isAutomatic(config.embeddedModel)
-            && EmbeddedModelCatalog.isAutomatic(config.language)
+        EmbeddedModelCatalog.isAutomatic(config.language)
+    }
+
+    /// Whether a detector outage should defer the recording. With a pinned
+    /// model the detector is advisory only, so its failure must not defer.
+    public static func deferOnDetectorOutage(_ c: TranscribeConfig) -> Bool {
+        EmbeddedModelCatalog.isAutomatic(c.embeddedModel)
+    }
+
+    /// nil, "" and "auto" → let the model detect; a real code → fix it.
+    public static func whisperLanguagePlan(hint: String?) -> WhisperLanguagePlan {
+        guard let hint, !hint.isEmpty, !EmbeddedModelCatalog.isAutomatic(hint) else {
+            return WhisperLanguagePlan(language: nil, detectLanguage: true)
+        }
+        return WhisperLanguagePlan(language: hint, detectLanguage: false)
+    }
+
+    /// Advice for a PINNED model (nil otherwise): (a) Catalan/Galician/Basque
+    /// on a non-BSC model → use the BSC model; (b) a language the pinned model
+    /// does not cover → Automatic. The pinned model still runs either way.
+    static func recommendation(model: EmbeddedModel, confident hint: String?) -> String? {
+        guard let hint else { return nil }
+        let name = WhisperLanguageCatalog.language(forCode: hint)?.englishName ?? hint
+        // A Catalan-family language on a non-BSC model points at the BSC model
+        // (this wins over the coverage message, e.g. for Parakeet).
+        if EmbeddedModelCatalog.catalanFamily.contains(hint), !model.id.hasPrefix("bsc-") {
+            return "\(name) detected \u{2014} the BSC model is recommended."
+        }
+        // Coverage is checked before any bsc- shortcut, so a single-language BSC
+        // model (bsc-ca-3370h) still gets advice for Galician/Basque.
+        if !model.languages.covers(hint) {
+            return "\(name) detected \u{2014} \(model.displayName) does not cover it; Automatic is recommended."
+        }
+        return nil
     }
 
     public static func choose(detections: [LanguageDetection], config: TranscribeConfig,
@@ -33,16 +115,13 @@ public enum EngineRouter {
             ?? detections.filter { $0.probability >= confidenceFloor }.map(\.code)
         let set = Set(confident)
         let dominant = fixedLanguage ?? dominantCode(detections)
-
-        // Rule 1: an explicit model is always honoured.
-        if !EmbeddedModelCatalog.isAutomatic(config.embeddedModel) {
-            return RoutingDecision(model: EmbeddedModelCatalog.model(id: config.embeddedModel),
-                                   languageHint: dominant, note: nil)
-        }
+        let pinned = !EmbeddedModelCatalog.isAutomatic(config.embeddedModel)
 
         let fallback = EmbeddedModelCatalog.recommended(memoryBytes: memoryBytes)
         let catalan = set.intersection(EmbeddedModelCatalog.catalanFamily)
 
+        // The hint follows the automatic rules whether or not the model is
+        // pinned (a pinned model keeps itself but gets the same hint).
         var chosen: EmbeddedModel
         var hint: String? = dominant
         if !catalan.isEmpty {
@@ -69,14 +148,40 @@ public enum EngineRouter {
             hint = set.isEmpty ? nil : dominant
         }
 
+        // Where the hint came from, and how sure the detector was.
+        let source: LanguageSource = fixedLanguage != nil ? .fixed
+            : (hint == nil ? .modelDetects : .detected)
+        let confidence: Float? = source == .detected
+            ? detections.filter { $0.code == hint }.map(\.probability).max() : nil
+
+        // Rule 1: an explicit model is always honoured (no memory gate), but
+        // it now gets the detected hint plus a recommendation when another
+        // choice would serve the audio better.
+        if pinned {
+            let model = EmbeddedModelCatalog.model(id: config.embeddedModel)
+            let advice = source == .detected ? recommendation(model: model, confident: hint) : nil
+            // A detected language the pinned fine-tune does not cover is not
+            // forced onto it: drop the hint so WhisperKit detects for itself.
+            if source == .detected, let h = hint, !model.languages.covers(h) {
+                return RoutingDecision(model: model, languageHint: nil, note: nil, pinned: true,
+                                       languageSource: .modelDetects, confidence: nil,
+                                       recommendation: advice)
+            }
+            return RoutingDecision(
+                model: model, languageHint: hint, note: nil, pinned: true,
+                languageSource: source, confidence: confidence, recommendation: advice)
+        }
+
         // Rule 7: memory gate.
         let gb = Int(memoryBytes / (1024 * 1024 * 1024))
         if chosen.minimumMemoryGB > gb {
             return RoutingDecision(
                 model: fallback, languageHint: hint,
-                note: "\(chosen.displayName) needs \(chosen.minimumMemoryGB) GB of memory; using \(fallback.displayName) on this Mac.")
+                note: "\(chosen.displayName) needs \(chosen.minimumMemoryGB) GB of memory; using \(fallback.displayName) on this Mac.",
+                languageSource: source, confidence: confidence)
         }
-        return RoutingDecision(model: chosen, languageHint: hint, note: nil)
+        return RoutingDecision(model: chosen, languageHint: hint, note: nil,
+                               languageSource: source, confidence: confidence)
     }
 
     /// The first confident code (in detection order) that an enabled pack

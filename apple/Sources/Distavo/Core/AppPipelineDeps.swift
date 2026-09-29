@@ -29,11 +29,10 @@ extension PipelineDeps {
             guard transcribeConfig.backend == "embedded" else {
                 return try await serverTranscribe(wavURL, transcribeConfig)
             }
-            // Spec §5.2/§5.9: detect only when both model and language are
-            // automatic, route in DistavoCore, then dispatch on the engine.
-            // The "Using …" engine line is shown whenever the MODEL is
-            // automatic (even with a fixed language, so the user still sees
-            // which engine the router picked). Retryable conditions surface
+            // Spec §5.2/§5.9: detect whenever the language is automatic (also
+            // with a pinned model, #2667), route in DistavoCore, then dispatch
+            // on the engine. The "Using …" line is always shown, so the user
+            // sees the engine and language the router picked. Retryable conditions surface
             // as RetryableDependencyError and defer.
             // I4: the detector is not the router — losing it must not fail the
             // whole recording. A RetryableDependencyError (offline detector
@@ -52,21 +51,29 @@ extension PipelineDeps {
             if needsDetection {
                 do {
                     detections = try await LanguageDetector.shared.detect(wavURL: wavURL)
-                } catch let retry as RetryableDependencyError {
+                } catch let retry as RetryableDependencyError where EngineRouter.deferOnDetectorOutage(transcribeConfig) {
+                    // Automatic model: no detection means no routing, so defer.
                     throw retry
                 } catch {
+                    // With a pinned model the detector is advisory (#2667): even an
+                    // offline detector must not defer; the model detects itself.
                     let message = (error as? LocalizedError)?.errorDescription ?? "\(error)"
+                    let fallbackText = EngineRouter.deferOnDetectorOutage(transcribeConfig)
+                        ? "using the default engine"
+                        : "\(EmbeddedModelCatalog.model(id: transcribeConfig.embeddedModel).displayName) will detect the language itself"
                     await ModelCoordinator.shared.report(
-                        "Language detection failed (\(message)) — using the default engine")
+                        "Language detection failed (\(message)) — \(fallbackText)")
                 }
             }
             let decision = EngineRouter.choose(
                 detections: detections, config: transcribeConfig,
                 memoryBytes: HardwareProbe.physicalMemoryBytes)
             if let note = decision.note { await ModelCoordinator.shared.report(note) }
-            if EmbeddedModelCatalog.isAutomatic(transcribeConfig.embeddedModel) {
-                await ModelCoordinator.shared.report(
-                    "Using \(decision.model.displayName)" + (decision.languageHint.map { " (\($0))" } ?? ""))
+            // Always report the engine + language line (also for a pinned model),
+            // plus the recommendation when the router has one (#2667).
+            await ModelCoordinator.shared.report(decision.logLine)
+            if let recommendation = decision.recommendation {
+                await ModelCoordinator.shared.report(recommendation)
             }
             var result: [String: Any]
             switch decision.model.engine {
@@ -83,6 +90,8 @@ extension PipelineDeps {
             // language(s) it found. The server (WhisperX) path never sets
             // these, so it never gets a footer.
             result["engine"] = decision.model.displayName
+            result["language_used"] = NoteProvenance.languageUsed(decision)
+            if let recommendation = decision.recommendation { result["recommendation"] = recommendation }
             if needsDetection {
                 result["detections"] = detections.map { ["code": $0.code, "probability": Double($0.probability)] }
             }

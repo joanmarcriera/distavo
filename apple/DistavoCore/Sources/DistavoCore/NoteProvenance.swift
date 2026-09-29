@@ -16,11 +16,17 @@ public enum NoteProvenance {
     ///     the "Detected language" sentence entirely.
     /// - Returns: a footer block (leading blank line + `---` + one italic
     ///   line) ready to append verbatim to the note text.
-    public static func footer(engine: String, detections: [(code: String, probability: Double)]) -> String {
+    ///   - languageUsed: the language the transcriber was actually told (Vikunja
+    ///     #2667), e.g. "Catalan (detected, 92% confidence)"; nil omits it.
+    ///   - recommendation: advice for a pinned model; nil omits it.
+    public static func footer(engine: String, detections: [(code: String, probability: Double)],
+                              languageUsed: String? = nil, recommendation: String? = nil) -> String {
         var line = "_Transcribed on this Mac with \(engine)."
         if let summary = detectedLanguages(detections) {
             line += " Detected language: \(summary)."
         }
+        if let languageUsed { line += " Language used: \(languageUsed)." }
+        if let recommendation { line += " \(recommendation)" }
         line += "_"
         return "\n\n---\n\(line)"
     }
@@ -45,4 +51,15 @@ public enum NoteProvenance {
         }.joined(separator: ", ")
     }
 
+    /// Human wording for the language the router handed the transcriber.
+    public static func languageUsed(_ d: RoutingDecision) -> String {
+        let name = d.languageHint.map { WhisperLanguageCatalog.language(forCode: $0)?.englishName ?? $0 } ?? ""
+        switch d.languageSource {
+        case .fixed: return "\(name) (set in Settings)"
+        case .detected:
+            let pct = d.confidence.map { ", \(Int(($0 * 100).rounded()))% confidence" } ?? ""
+            return "\(name) (detected\(pct))"
+        case .modelDetects: return "detected by the model"
+        }
+    }
 }

@@ -66,4 +66,25 @@ final class NoteProvenanceTests: XCTestCase {
             footer,
             "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: Catalan 95%, English 70%._")
     }
+
+    func testLanguageUsedAndRecommendation() {
+        let footer = NoteProvenance.footer(
+            engine: "Best (Whisper large-v3 turbo)", detections: [(code: "ca", probability: 0.92)],
+            languageUsed: "Catalan (detected, 92% confidence)",
+            recommendation: "Catalan detected \u{2014} the BSC model is recommended.")
+        XCTAssertEqual(footer,
+            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92%. Language used: Catalan (detected, 92% confidence). Catalan detected \u{2014} the BSC model is recommended._")
+    }
+
+    func testLanguageUsedDescriptions() {
+        let cfg = { (m: String, l: String) in TranscribeConfig(backend: "embedded", embeddedModel: m, language: l) }
+        let mem: UInt64 = 16 << 30
+        let det = EngineRouter.choose(detections: [LanguageDetection(code: "ca", probability: 0.92)],
+                                      config: cfg("large-v3-turbo", "auto"), memoryBytes: mem)
+        XCTAssertEqual(NoteProvenance.languageUsed(det), "Catalan (detected, 92% confidence)")
+        let fixed = EngineRouter.choose(detections: [], config: cfg("small", "de"), memoryBytes: mem)
+        XCTAssertEqual(NoteProvenance.languageUsed(fixed), "German (set in Settings)")
+        let model = EngineRouter.choose(detections: [], config: cfg("small", "auto"), memoryBytes: mem)
+        XCTAssertEqual(NoteProvenance.languageUsed(model), "detected by the model")
+    }
 }

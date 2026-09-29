@@ -475,6 +475,25 @@ final class PipelineTests: XCTestCase {
             "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: Catalan 92%, English 71%._"))
     }
 
+    /// "language_used"/"recommendation" keys (Vikunja #2667) extend the footer.
+    func testNoteFooterCarriesLanguageUsedAndRecommendation() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]],
+                 "engine": "Best (Whisper large-v3 turbo)",
+                 "detections": [["code": "ca", "probability": 0.92]],
+                 "language_used": "Catalan (detected, 92% confidence)",
+                 "recommendation": "Catalan detected \u{2014} the BSC model is recommended."]
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let note = try String(contentsOf: XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertTrue(note.hasSuffix(
+            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92%. Language used: Catalan (detected, 92% confidence). Catalan detected \u{2014} the BSC model is recommended._"))
+    }
+
     /// A transcribe result without "engine" (the WhisperX server path, and
     /// every existing test's default fake) writes a note with no footer at all
     /// — the existing tests above already cover this by using the default fake.

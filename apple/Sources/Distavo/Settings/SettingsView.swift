@@ -217,6 +217,27 @@ struct SettingsView: View {
                                isOn: $draft.askSpeakersOnStop)
                         HelpButton(text: "After you stop the built-in recorder, Distavo asks how many people spoke, your role and who the others were, and hands that to the summariser so the notes name the speakers and the follow-up email is written from your side. Skip the question any time.")
                     }
+                    // Silence handling (Vikunja #2665). Both are off by default:
+                    // an unwanted stop loses audio for good.
+                    HStack {
+                        Toggle("Suggest stopping after silence", isOn: $draft.suggestStopOnSilence)
+                        Stepper("\(draft.suggestStopSilenceMinutes) min",
+                                value: $draft.suggestStopSilenceMinutes, in: Config.silenceMinutesRange)
+                            .disabled(!draft.suggestStopOnSilence)
+                        HelpButton(text: "When nothing has been heard on the microphone or the meeting audio for this long, Distavo shows a notification (and a menu item) offering to stop the recording or keep going. It never stops by itself.")
+                    }
+                    HStack {
+                        Toggle("Stop recording automatically after silence", isOn: $draft.autoStopOnSilence)
+                        Stepper("\(draft.autoStopSilenceMinutes) min",
+                                value: $draft.autoStopSilenceMinutes, in: Config.silenceMinutesRange)
+                            .disabled(!draft.autoStopOnSilence)
+                        HelpButton(text: "Ends the recording, saves it and processes it as usual after this many minutes of silence on both the microphone and the meeting audio. It only applies once something has been heard, so waiting in a silent lobby never stops it. A very quiet meeting or a long pause can trigger it; choose Keep recording on the suggestion to prevent that.")
+                    }
+                    if draft.suggestStopOnSilence, draft.autoStopOnSilence,
+                       draft.autoStopSilenceMinutes <= draft.suggestStopSilenceMinutes {
+                        Text("This stops the recording before the suggestion would appear.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 HStack {
                     Stepper("Ignore recordings shorter than \(draft.minRecordingSeconds) s",

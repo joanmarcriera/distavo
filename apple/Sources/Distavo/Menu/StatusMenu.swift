@@ -50,9 +50,14 @@ struct StatusMenu: View {
 
         if MeetingCaptureController.isSupported {
             Button(capture.isRecording
-                   ? "⏹ Stop recording (\(capture.elapsedLabel))"
+                   ? "⏹ Stop recording (\(capture.elapsedLabel)\(capture.silenceNotice.map { " · \($0)" } ?? ""))"
                    : "● Record meeting (system audio + mic)") {
                 capture.toggle()
+            }
+            if capture.isRecording, capture.silenceNotice != nil {
+                // Vikunja #2665: the menu-side answer to the silence suggestion
+                // (also the fallback when notifications are denied).
+                Button("Keep recording") { capture.keepRecording() }
             }
             if capture.isRecording {
                 // Vikunja #2068: a take started by mistake — stop, delete, never transcribe.

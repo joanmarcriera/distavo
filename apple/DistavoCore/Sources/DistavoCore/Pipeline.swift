@@ -418,15 +418,26 @@ public enum Pipeline {
             if isRetryableTruncation(failures) {
                 (noteText, failures) = try await summariseAttempt()
             }
-            try noteText.write(to: notePath, atomically: true, encoding: .utf8)
-
             if !failures.isEmpty {
-                let message = failures.joined(separator: "; ")
+                // Quarantine (Vikunja #2669): a summary that fails validation
+                // (repetition collapse, empty, overlong, cut short — after the
+                // one truncation retry above) is NOT a note. Keep it in the
+                // work dir for inspection rather than in the notes folder,
+                // where it looks real and "open when done" could show it.
+                // (A seed-based re-roll of a collapsed summary is deliberately
+                // out of scope here.) The `.failed` marker is unchanged, and
+                // `notePath` stays nil so nothing in the UI can open it.
+                let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
+                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                // The reason (validator text names it) is what the menu shows.
+                let message = "summary rejected: " + failures.joined(separator: "; ")
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
-                                     notePath: notePath, transcriptPath: transcriptPath,
+                                     transcriptPath: transcriptPath,
                                      detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
+            try noteText.write(to: notePath, atomically: true, encoding: .utf8)
             state.markDone(base)
             var message = "note written"
             if config.compactRecordingsAfterNote, variant == nil,

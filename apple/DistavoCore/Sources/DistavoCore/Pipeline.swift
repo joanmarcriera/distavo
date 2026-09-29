@@ -431,7 +431,9 @@ public enum Pipeline {
                 try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
                 try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
                 // The reason (validator text names it) is what the menu shows.
+                // Name the file so the reason in the menu/log says where the rejected text went.
                 let message = "summary rejected: " + failures.joined(separator: "; ")
+                    + " (kept at \(quarantine.path))"
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
                                      transcriptPath: transcriptPath,

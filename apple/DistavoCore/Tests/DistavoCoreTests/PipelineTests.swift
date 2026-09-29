@@ -553,9 +553,8 @@ final class PipelineTests: XCTestCase {
         let saved = try String(contentsOf: quarantined, encoding: .utf8)
         XCTAssertTrue(saved.contains("the cat sat on mat"))
         // Nothing the app could open as a note.
-        if let np = result.notePath {
-            XCTAssertFalse(np.path.hasPrefix(notesDir.path))
-        }
+        XCTAssertNil(result.notePath)
+        XCTAssertTrue(result.message.contains(quarantined.path), "message should say where the text was kept")
     }
 
     func testEmptySummaryMessageNamesReason() async throws {

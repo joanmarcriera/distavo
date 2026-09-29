@@ -94,10 +94,13 @@ public enum EngineRouter {
     static func recommendation(model: EmbeddedModel, confident hint: String?) -> String? {
         guard let hint else { return nil }
         let name = WhisperLanguageCatalog.language(forCode: hint)?.englishName ?? hint
-        if EmbeddedModelCatalog.catalanFamily.contains(hint) {
-            return model.id.hasPrefix("bsc-") ? nil
-                : "\(name) detected \u{2014} the BSC model is recommended."
+        // A Catalan-family language on a non-BSC model points at the BSC model
+        // (this wins over the coverage message, e.g. for Parakeet).
+        if EmbeddedModelCatalog.catalanFamily.contains(hint), !model.id.hasPrefix("bsc-") {
+            return "\(name) detected \u{2014} the BSC model is recommended."
         }
+        // Coverage is checked before any bsc- shortcut, so a single-language BSC
+        // model (bsc-ca-3370h) still gets advice for Galician/Basque.
         if !model.languages.covers(hint) {
             return "\(name) detected \u{2014} \(model.displayName) does not cover it; Automatic is recommended."
         }
@@ -156,10 +159,17 @@ public enum EngineRouter {
         // choice would serve the audio better.
         if pinned {
             let model = EmbeddedModelCatalog.model(id: config.embeddedModel)
+            let advice = source == .detected ? recommendation(model: model, confident: hint) : nil
+            // A detected language the pinned fine-tune does not cover is not
+            // forced onto it: drop the hint so WhisperKit detects for itself.
+            if source == .detected, let h = hint, !model.languages.covers(h) {
+                return RoutingDecision(model: model, languageHint: nil, note: nil, pinned: true,
+                                       languageSource: .modelDetects, confidence: nil,
+                                       recommendation: advice)
+            }
             return RoutingDecision(
                 model: model, languageHint: hint, note: nil, pinned: true,
-                languageSource: source, confidence: confidence,
-                recommendation: source == .detected ? recommendation(model: model, confident: hint) : nil)
+                languageSource: source, confidence: confidence, recommendation: advice)
         }
 
         // Rule 7: memory gate.

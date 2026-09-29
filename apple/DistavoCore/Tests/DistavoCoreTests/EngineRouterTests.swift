@@ -249,6 +249,29 @@ final class EngineRouterTests: XCTestCase {
             "Using large-v3-turbo (pinned) \u{2014} language not detected; the model detects it itself")
     }
 
+    /// A single-language fine-tune must not be forced into a language it was not
+    /// trained for: the hint drops so WhisperKit detects itself.
+    func testPinnedSingleLanguageModelDropsUncoveredHint() {
+        let w = EngineRouter.choose(detections: [d("en")], config: pin("techiaith-cy"), memoryBytes: gb16)
+        XCTAssertEqual(w.model.id, "techiaith-cy")
+        XCTAssertNil(w.languageHint)
+        XCTAssertEqual(w.languageSource, .modelDetects)
+        XCTAssertNil(w.confidence)
+        XCTAssertNotNil(w.recommendation)
+        let es = EngineRouter.choose(detections: [d("es")], config: pin("bsc-ca-3370h"), memoryBytes: gb16)
+        XCTAssertNil(es.languageHint)
+        XCTAssertEqual(es.languageSource, .modelDetects)
+    }
+
+    func testPinnedCatalanOnlyBSCModelStillAdvisesForGalician() {
+        let r = EngineRouter.choose(detections: [d("gl")], config: pin("bsc-ca-3370h"), memoryBytes: gb16)
+        XCTAssertNotNil(r.recommendation)
+        XCTAssertNil(r.languageHint)
+        let ok = EngineRouter.choose(detections: [d("ca")], config: pin("bsc-ca-3370h"), memoryBytes: gb16)
+        XCTAssertEqual(ok.languageHint, "ca")
+        XCTAssertNil(ok.recommendation)
+    }
+
     func testWhisperLanguagePlan() {
         XCTAssertEqual(EngineRouter.whisperLanguagePlan(hint: nil), WhisperLanguagePlan(language: nil, detectLanguage: true))
         XCTAssertEqual(EngineRouter.whisperLanguagePlan(hint: ""), WhisperLanguagePlan(language: nil, detectLanguage: true))

@@ -346,9 +346,6 @@ public actor EmbeddedTranscriber {
                               ?? error.localizedDescription)
     }
 
-    /// The error the pipeline should see: an offline download is a
-    /// `RetryableDependencyError` (the recording stays pending), everything
-    /// else keeps the typed, permanent `EmbeddedTranscriberError`.
     /// WhisperKit options for a router hint (Vikunja #2667). `usePrefillPrompt`
     /// stays on (WhisperKit's default) which makes `detectLanguage` false
     /// unless set explicitly, and prefill uses `options.language ?? "en"` — so
@@ -365,6 +362,9 @@ public actor EmbeddedTranscriber {
         return options
     }
 
+    /// The error the pipeline should see: an offline download is a
+    /// `RetryableDependencyError` (the recording stays pending), everything
+    /// else keeps the typed, permanent `EmbeddedTranscriberError`.
     static func pipelineError(_ error: Error, model: String) -> Error {
         let typed = modelError(error, model: model)
         if case let .modelUnavailable(_, offline, _) = typed, offline {

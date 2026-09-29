@@ -32,6 +32,29 @@ final class OllamaClientTests: XCTestCase {
         XCTAssertEqual(text, "# Meeting notes")
     }
 
+    /// #2666: gemma4 thinks by default on Ollama and degenerates; the request must opt out.
+    func testGenerateSendsThinkFalse() async throws {
+        var captured: [String: Any]?
+        let session = MockURLProtocol.session { req in
+            // URLProtocol receives the body as a stream, not httpBody.
+            var data = req.httpBody ?? Data()
+            if let stream = req.httpBodyStream {
+                stream.open(); defer { stream.close() }
+                var buf = [UInt8](repeating: 0, count: 4096)
+                while stream.hasBytesAvailable {
+                    let n = stream.read(&buf, maxLength: buf.count)
+                    if n <= 0 { break }
+                    data.append(buf, count: n)
+                }
+            }
+            captured = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return try MockURLProtocol.ok(req.url!, json: ["response": "ok"])
+        }
+        _ = try await OllamaClient(session: session).generate(
+            url: "http://host:11434", model: "gemma4:26b", prompt: "p", options: SummariseOptions())
+        XCTAssertEqual(captured?["think"] as? Bool, false)
+    }
+
     func testGenerateEmptyThrows() async {
         let session = MockURLProtocol.session { req in
             try MockURLProtocol.ok(req.url!, json: ["response": "   "])

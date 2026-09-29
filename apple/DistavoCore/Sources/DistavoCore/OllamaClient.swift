@@ -37,8 +37,12 @@ public struct OllamaClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        // "think": false — thinking models (gemma4) reason by default on Ollama, burn the
+        // token budget and degenerate into empty/looping notes (Vikunja #2666). Notes need
+        // the answer only, so always opt out.
         let body: [String: Any] = [
-            "model": model, "prompt": prompt, "stream": false, "options": options.asPayload,
+            "model": model, "prompt": prompt, "stream": false, "think": false,
+            "options": options.asPayload,
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 

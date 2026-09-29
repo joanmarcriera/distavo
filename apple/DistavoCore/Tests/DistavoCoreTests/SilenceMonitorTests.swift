@@ -163,6 +163,15 @@ final class SilenceMonitorTests: XCTestCase {
         XCTAssertEqual(m.ingest(mic: quiet, system: quiet, at: r.t + 1), .suggestStop(silentFor: 151))
     }
 
+    func test14bDisablingSuggestClearsPendingSuggestion() {
+        var m = armed(policy(suggest: 60))
+        let r = run(&m, from: 1, seconds: 70, mic: quiet, system: quiet)
+        XCTAssertEqual(r.events.count, 1)
+        XCTAssertTrue(m.suggestionActive)
+        m.policy = policy()
+        XCTAssertFalse(m.suggestionActive)
+    }
+
     func test15NothingAfterAutoStopUntilReset() {
         var m = armed(policy(auto: 60))
         var r = run(&m, from: 1, seconds: 100, mic: quiet, system: quiet)

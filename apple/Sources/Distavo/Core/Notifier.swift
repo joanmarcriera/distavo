@@ -72,7 +72,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Distavo is a menu-bar app that is always "foreground": show banners anyway.
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 willPresent notification: UNNotification) async
-        -> UNNotificationPresentationOptions { [.banner] }
+        -> UNNotificationPresentationOptions { [.banner, .list] }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
@@ -82,6 +82,11 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         case Self.keepActionID: action = .keep
         default: return   // a plain tap on the banner: nothing to do
         }
-        await MainActor.run { onSilenceAction?(action) }
+        // Deliver from a run-loop callout, not a main-queue job: "Stop" ends
+        // in a modal dialog, and AppKit does not service main-queue work
+        // while a modal loop started from a queued job is up.
+        RunLoop.main.perform(inModes: [.common]) { [weak self] in
+            MainActor.assumeIsolated { self?.onSilenceAction?(action) }
+        }
     }
 }

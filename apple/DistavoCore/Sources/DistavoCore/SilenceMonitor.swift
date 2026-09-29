@@ -54,7 +54,10 @@ public enum SilenceEvent: Equatable {
 
 public struct SilenceMonitor {
     /// Refreshed by the controller each tick so Settings changes apply live.
-    public var policy: SilencePolicy
+    /// Switching the suggestion off mid-spell withdraws a pending one.
+    public var policy: SilencePolicy {
+        didSet { if policy.suggestAfter == nil { suggestionActive = false } }
+    }
     /// Continuous silence so far in this episode.
     public private(set) var silentFor: TimeInterval = 0
     /// A suggestion has been sent this episode (drives the menu notice).

@@ -147,7 +147,10 @@ final class MeetingCaptureController: ObservableObject {
         silenceNotice = nil
         log("Meeting recording started → \(recorder.fileURL?.lastPathComponent ?? "?")")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickElapsed() }
+            // A Timer fires from the main run loop, so run the tick in place
+            // (not as a main-queue job): if it ends in a modal dialog (manual
+            // stop path), AppKit keeps servicing the rest of the app.
+            MainActor.assumeIsolated { self?.tickElapsed() }
         }
     }
 
@@ -184,9 +187,14 @@ final class MeetingCaptureController: ObservableObject {
         var silenceMinutes: Int?
         if case .silence(let m) = reason { silenceMinutes = m }
         let config = configProvider()
+        // An automatic silence stop never asks: nobody is at the Mac, and the
+        // blocking dialog would sit there (freezing other main-thread work)
+        // while the recording waited, untranscribed. It behaves exactly like
+        // answering Skip: no speakers sidecar, no language override.
+        let ask = config.askSpeakersOnStop && silenceMinutes == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
-        let outcome = recorder.stop(deferFinalize: config.askSpeakersOnStop)
+        let outcome = recorder.stop(deferFinalize: ask)
         self.recorder = nil
         isRecording = false
 
@@ -215,7 +223,7 @@ final class MeetingCaptureController: ObservableObject {
         if let silenceMinutes {
             log("Recording stopped automatically after \(silenceMinutes) min of silence")
         }
-        if config.askSpeakersOnStop {
+        if ask {
             // Start detection on the still-`.part` file (deferred finalize
             // means it isn't renamed/balanced yet) before the modal alert, so
             // it can be already done — or close to it — by the time the
@@ -225,10 +233,7 @@ final class MeetingCaptureController: ObservableObject {
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
             let detection = startLanguageDetection(partURL: outcome.url.appendingPathExtension("part"))
-            askSpeakers(for: outcome.url, config: config, detection: detection,
-                        extraInfo: silenceMinutes.map {
-                            "Distavo stopped this recording after \($0) min of silence."
-                        })
+            askSpeakers(for: outcome.url, config: config, detection: detection)
             Task {
                 _ = await detection?.value
                 recorder.finalizeDeferred()
@@ -316,8 +321,7 @@ final class MeetingCaptureController: ObservableObject {
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
-    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
-                             extraInfo: String? = nil) {
+    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?) {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -411,7 +415,6 @@ final class MeetingCaptureController: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "Who was in this meeting?"
         alert.informativeText = "Distavo uses this to name the speakers and write the notes and follow-up email from your side. Leave it blank to skip. (Turn this question off in Settings.)"
-        if let extraInfo { alert.informativeText = extraInfo + " " + alert.informativeText }
         alert.accessoryView = form
         alert.addButton(withTitle: "Save")
         alert.addButton(withTitle: "Skip")

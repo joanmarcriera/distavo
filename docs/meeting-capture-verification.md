@@ -74,10 +74,17 @@ defaults delete uk.co.riera.distavo distavo.didExplainCapture
      happens in that stretch of silence; after a sound and another silence the
      suggestion returns.
    - Repeat and ignore it: at 3 min the recording stops by itself, the
-     "Recording stopped after 3 min of silence" notification shows, the "Who was
-     in this meeting?" dialog opens with the extra sentence, and the WAV is
-     finalised and transcribed like a manual stop (no System Settings window
-     even if no system audio was captured).
+     "Recording stopped after 3 min of silence" notification shows, **no** "Who
+     was in this meeting?" dialog appears (nobody is there to answer), and the
+     WAV is finalised and transcribed straight away with no speaker hints and
+     no language override, as if Skip had been pressed (no System Settings
+     window even if no system audio was captured). While it stops, other
+     Distavo work (scans, progress) is not frozen.
+   - Choosing **Stop recording** on the notification (or the menu) is a manual
+     stop: the "Who was in this meeting?" dialog does appear, and the menu
+     keeps updating while it is open.
+   - Turn "Suggest stopping" off while a suggestion is showing: the notice,
+     the orange icon and the delivered notification go away.
    - **Notifications denied** (System Settings → Notifications → Distavo off):
      the menu notice, "Keep recording" item and orange icon still appear.
    - Start a recording in silence and never make a sound: auto-stop must NOT

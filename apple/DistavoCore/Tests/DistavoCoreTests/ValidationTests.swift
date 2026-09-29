@@ -99,11 +99,18 @@ final class ValidationTests: XCTestCase {
     }
 
     /// The truncation check counts real words: 30 accented words + 3 title/heading words (33) are too thin
-    /// for minWords 40 (the ASCII regex split each into two and counted 60).
+    /// for minWords 40. Uses mid-word accents ("línia"), which the ASCII regex split in two.
     func testValidateTruncationCountsAccentedWordsOnce() {
-        let text = "# Meeting notes\n\n## Resum\n" + Array(repeating: "reunió", count: 30).joined(separator: " ")
+        let text = "# Meeting notes\n\n## Resum\n" + Array(repeating: "línia", count: 30).joined(separator: " ")
         XCTAssertTrue(SummaryValidator.validate(text)
             .contains { $0.hasPrefix("summary is truncated (33 words)") })
+    }
+
+    /// Combining marks stay inside the word (Tamil, Thai, Hindi, NFD Catalan) — review of #2670.
+    func testWordsKeepCombiningMarksWhole() {
+        XCTAssertEqual(SummaryValidator.words(from: "தமிழ் கூட்டத்தில்").count, 2)
+        XCTAssertEqual(SummaryValidator.words(from: "การประชุมวันนี้").count, 1)
+        XCTAssertEqual(SummaryValidator.words(from: "bai\u{0308}xa li\u{0301}nia").count, 2)
     }
 
     /// A legitimately long accented Catalan note is not flagged.

@@ -5,12 +5,13 @@ import Foundation
 public enum SummaryValidator {
 
     /// Unicode-aware word: starts with a letter/digit, then continues with
-    /// letters/digits, straight or curly apostrophes (l'acord, d’aquesta),
-    /// hyphens, and the Catalan middle dot U+00B7 (col·laborar). An ASCII-only
-    /// class split "reunió" into "reuni"+"n" and skewed n-gram and word counts
-    /// (Vikunja #2670). ASCII text tokenises exactly as before.
+    /// letters/marks/digits, straight or curly apostrophes (l'acord, d’aquesta),
+    /// hyphens, and the Catalan middle dot U+00B7 (col·laborar). Combining marks
+    /// (\p{M}) keep Tamil/Thai/Hindi words and NFD-accented text whole. An
+    /// ASCII-only class split "línia" into "l"+"nia" and skewed n-gram and word
+    /// counts (Vikunja #2670). ASCII text tokenises exactly as before.
     private static let wordRegex = try! NSRegularExpression(
-        pattern: "[\\p{L}\\p{N}][\\p{L}\\p{N}'\u{2019}\u{00B7}-]*")
+        pattern: "[\\p{L}\\p{N}][\\p{L}\\p{M}\\p{N}'\u{2019}\u{00B7}-]*")
 
     public static func words(from text: String) -> [String] {
         let ns = text as NSString

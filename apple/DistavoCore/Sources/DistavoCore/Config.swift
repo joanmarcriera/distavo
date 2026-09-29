@@ -263,6 +263,16 @@ public struct Config: Codable, Equatable {
     /// the owner's role, the other participants) and hand that to the
     /// summariser as authoritative context (Vikunja #2182).
     public var askSpeakersOnStop: Bool
+    /// Silence handling for the built-in recorder (Vikunja #2665). Two
+    /// independent options, both **off** for any config predating them and
+    /// for fresh installs (an unwanted stop loses audio irrecoverably); the
+    /// minute values are only pre-filled defaults. Minutes clamp to 1...60.
+    /// "Suggest" posts a notification after N silent minutes and never stops.
+    public var suggestStopOnSilence: Bool
+    public var suggestStopSilenceMinutes: Int
+    /// "Auto-stop" ends the recording after M silent minutes (see `SilenceMonitor`).
+    public var autoStopOnSilence: Bool
+    public var autoStopSilenceMinutes: Int
     /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
     public var benchmark: [BenchmarkResult]
     /// Actions to run once a recording finishes (Vikunja #2205, superseding
@@ -279,6 +289,10 @@ public struct Config: Codable, Equatable {
         case minRecordingSeconds = "min_recording_seconds"
         case compactRecordingsAfterNote = "compact_recordings_after_note"
         case askSpeakersOnStop = "ask_speakers_on_stop"
+        case suggestStopOnSilence = "suggest_stop_on_silence"
+        case suggestStopSilenceMinutes = "suggest_stop_silence_minutes"
+        case autoStopOnSilence = "auto_stop_on_silence"
+        case autoStopSilenceMinutes = "auto_stop_silence_minutes"
         case benchmark
         case whenDone = "when_done"
     }
@@ -294,6 +308,10 @@ public struct Config: Codable, Equatable {
                 minRecordingSeconds: Int = 15,
                 compactRecordingsAfterNote: Bool = false,
                 askSpeakersOnStop: Bool = true,
+                suggestStopOnSilence: Bool = false,
+                suggestStopSilenceMinutes: Int = 2,
+                autoStopOnSilence: Bool = false,
+                autoStopSilenceMinutes: Int = 5,
                 benchmark: [BenchmarkResult] = [],
                 whenDone: [WhenDoneAction] = []) {
         self.watchIntervalSeconds = watchIntervalSeconds
@@ -303,6 +321,10 @@ public struct Config: Codable, Equatable {
         self.minRecordingSeconds = minRecordingSeconds
         self.compactRecordingsAfterNote = compactRecordingsAfterNote
         self.askSpeakersOnStop = askSpeakersOnStop
+        self.suggestStopOnSilence = suggestStopOnSilence
+        self.suggestStopSilenceMinutes = Config.clampSilenceMinutes(suggestStopSilenceMinutes)
+        self.autoStopOnSilence = autoStopOnSilence
+        self.autoStopSilenceMinutes = Config.clampSilenceMinutes(autoStopSilenceMinutes)
         self.benchmark = benchmark
         self.whenDone = whenDone
     }
@@ -321,6 +343,12 @@ public struct Config: Codable, Equatable {
         minRecordingSeconds = try c.decodeIfPresent(Int.self, forKey: .minRecordingSeconds) ?? d.minRecordingSeconds
         compactRecordingsAfterNote = try c.decodeIfPresent(Bool.self, forKey: .compactRecordingsAfterNote) ?? d.compactRecordingsAfterNote
         askSpeakersOnStop = try c.decodeIfPresent(Bool.self, forKey: .askSpeakersOnStop) ?? d.askSpeakersOnStop
+        // Silence options: `try?` so a wrong-typed value falls back to the
+        // default instead of failing the whole config; minutes are clamped.
+        suggestStopOnSilence = (try? c.decodeIfPresent(Bool.self, forKey: .suggestStopOnSilence)).flatMap { $0 } ?? d.suggestStopOnSilence
+        suggestStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .suggestStopSilenceMinutes)).flatMap { $0 } ?? d.suggestStopSilenceMinutes)
+        autoStopOnSilence = (try? c.decodeIfPresent(Bool.self, forKey: .autoStopOnSilence)).flatMap { $0 } ?? d.autoStopOnSilence
+        autoStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .autoStopSilenceMinutes)).flatMap { $0 } ?? d.autoStopSilenceMinutes)
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
         // `when_done` (an array); unknown entries are dropped rather than
         // failing the whole config. A config predating it falls back to the
@@ -338,6 +366,12 @@ public struct Config: Codable, Equatable {
             default: whenDone = d.whenDone
             }
         }
+    }
+
+    /// Valid range for the silence-minute settings.
+    public static let silenceMinutesRange = 1...60
+    static func clampSilenceMinutes(_ m: Int) -> Int {
+        min(max(m, silenceMinutesRange.lowerBound), silenceMinutesRange.upperBound)
     }
 
     // MARK: Paths

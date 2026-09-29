@@ -27,7 +27,7 @@ import Foundation
 public enum StereoBalancer {
 
     /// Ignore windows quieter than this when measuring loudness (~ -50 dBFS).
-    static let noiseGate: Float = 0.003
+    public static let noiseGate: Float = 0.003
     /// A channel whose peak never clears this is treated as silent.
     static let silenceFloor: Float = 0.001
     /// Never boost by more than +24 dB.

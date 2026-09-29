@@ -118,4 +118,45 @@ final class ConfigMigrationTests: XCTestCase {
         let intel = Config.recommendedForThisMac(embeddedSupported: false, memoryBytes: 16 << 30)
         XCTAssertEqual(intel.summarise.noteLanguage, "auto")
     }
+
+    // MARK: Silence auto-stop (Vikunja #2665)
+
+    func testOldConfigHasSilenceOptionsOffWithPrefilledMinutes() throws {
+        let cfg = try decode(#"{"transcribe": {"backend": "server"}}"#)
+        XCTAssertFalse(cfg.suggestStopOnSilence)
+        XCTAssertFalse(cfg.autoStopOnSilence)
+        XCTAssertEqual(cfg.suggestStopSilenceMinutes, 2)
+        XCTAssertEqual(cfg.autoStopSilenceMinutes, 5)
+    }
+
+    func testSilenceOptionsRoundTrip() throws {
+        var cfg = Config()
+        cfg.suggestStopOnSilence = true; cfg.suggestStopSilenceMinutes = 7
+        cfg.autoStopOnSilence = true; cfg.autoStopSilenceMinutes = 12
+        let again = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(cfg))
+        XCTAssertEqual(again, cfg)
+        XCTAssertTrue(again.suggestStopOnSilence)
+        XCTAssertEqual(again.autoStopSilenceMinutes, 12)
+    }
+
+    func testSilenceMinutesClampTo1Through60() throws {
+        let cfg = try decode(#"{"suggest_stop_silence_minutes": 0, "auto_stop_silence_minutes": 999}"#)
+        XCTAssertEqual(cfg.suggestStopSilenceMinutes, 1)
+        XCTAssertEqual(cfg.autoStopSilenceMinutes, 60)
+        let neg = try decode(#"{"suggest_stop_silence_minutes": -3}"#)
+        XCTAssertEqual(neg.suggestStopSilenceMinutes, 1)
+    }
+
+    func testWrongTypedSilenceKeyFallsBackAndRestDecodes() throws {
+        let cfg = try decode(#"{"auto_stop_silence_minutes": "5", "auto_stop_on_silence": "yes", "note_owner": "Ana"}"#)
+        XCTAssertEqual(cfg.autoStopSilenceMinutes, 5)
+        XCTAssertFalse(cfg.autoStopOnSilence)
+        XCTAssertEqual(cfg.noteOwner, "Ana")
+    }
+
+    func testFreshInstallLeavesSilenceOptionsOff() {
+        let cfg = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 16 << 30)
+        XCTAssertFalse(cfg.suggestStopOnSilence)
+        XCTAssertFalse(cfg.autoStopOnSilence)
+    }
 }

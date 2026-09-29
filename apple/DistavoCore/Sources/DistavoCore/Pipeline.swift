@@ -570,7 +570,10 @@ public enum Pipeline {
                 guard let code = entry["code"] as? String else { return nil }
                 return (code: code, probability: entry["probability"] as? Double ?? 0)
             }
-        return NoteProvenance.footer(engine: engine, detections: detections)
+        return NoteProvenance.footer(
+            engine: engine, detections: detections,
+            languageUsed: transcribeResult["language_used"] as? String,
+            recommendation: transcribeResult["recommendation"] as? String)
     }
 
     /// Only "summary is empty" and "summary is truncated" failures (Vikunja

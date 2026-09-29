@@ -230,10 +230,7 @@ public actor EmbeddedTranscriber {
                     try await Self.verifyManifest(model: model)
                 }
                 await self.report("Transcribing on this Mac…")
-                var options = DecodingOptions()
-                options.language = languageHint
-                options.wordTimestamps = true
-                options.chunkingStrategy = .vad
+                let options = Self.decodingOptions(languageHint: languageHint)
                 results = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
                 // `whisper` goes out of scope here: the 1–4 GB model is released
                 // before SpeakerKit loads (spec §6 peak-memory rule).
@@ -352,6 +349,22 @@ public actor EmbeddedTranscriber {
     /// The error the pipeline should see: an offline download is a
     /// `RetryableDependencyError` (the recording stays pending), everything
     /// else keeps the typed, permanent `EmbeddedTranscriberError`.
+    /// WhisperKit options for a router hint (Vikunja #2667). `usePrefillPrompt`
+    /// stays on (WhisperKit's default) which makes `detectLanguage` false
+    /// unless set explicitly, and prefill uses `options.language ?? "en"` — so
+    /// with no hint the model would translate to English. `whisperLanguagePlan`
+    /// guarantees a fixed language or explicit in-model detection, never neither.
+    static func decodingOptions(languageHint: String?) -> DecodingOptions {
+        let plan = EngineRouter.whisperLanguagePlan(hint: languageHint)
+        var options = DecodingOptions()
+        options.language = plan.language
+        options.detectLanguage = plan.detectLanguage
+        options.usePrefillPrompt = true
+        options.wordTimestamps = true
+        options.chunkingStrategy = .vad
+        return options
+    }
+
     static func pipelineError(_ error: Error, model: String) -> Error {
         let typed = modelError(error, model: model)
         if case let .modelUnavailable(_, offline, _) = typed, offline {

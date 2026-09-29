@@ -85,4 +85,46 @@ final class ValidationTests: XCTestCase {
         XCTAssertTrue(SummaryValidator.validate(text, minWords: 20)
             .contains { $0.hasPrefix("summary is truncated") })
     }
+
+    // MARK: - Unicode-aware tokenisation (Vikunja #2670)
+
+    /// Accented letters, apostrophes, the Catalan middle dot and ñ stay inside one word.
+    func testWordsKeepAccentedCatalanAndSpanishWordsWhole() {
+        XCTAssertEqual(SummaryValidator.words(from: "La reunió"), ["la", "reunió"])
+        XCTAssertEqual(SummaryValidator.words(from: "l'acord d'aquesta"),
+                       ["l'acord", "d'aquesta"])
+        XCTAssertEqual(SummaryValidator.words(from: "d\u{2019}aquesta"), ["d\u{2019}aquesta"])
+        XCTAssertEqual(SummaryValidator.words(from: "col·laborar"), ["col·laborar"])
+        XCTAssertEqual(SummaryValidator.words(from: "El año España"), ["el", "año", "españa"])
+    }
+
+    /// The truncation check counts real words: 30 accented words + 3 title/heading words (33) are too thin
+    /// for minWords 40 (the ASCII regex split each into two and counted 60).
+    func testValidateTruncationCountsAccentedWordsOnce() {
+        let text = "# Meeting notes\n\n## Resum\n" + Array(repeating: "reunió", count: 30).joined(separator: " ")
+        XCTAssertTrue(SummaryValidator.validate(text)
+            .contains { $0.hasPrefix("summary is truncated (33 words)") })
+    }
+
+    /// A legitimately long accented Catalan note is not flagged.
+    func testValidateLongAccentedCatalanNotePasses() {
+        let sentences = [
+            "Durant la reunió es va parlar de l'acord amb el proveïdor.",
+            "L'equip va decidir col·laborar amb d'altres departaments aquesta setmana.",
+            "També es va revisar el pressupost d'aquesta línia i el calendari del projecte.",
+            "El responsable presentarà les conclusions a la propera sessió de coordinació.",
+            "Mañana el año próximo España necesitará más soporte técnico.",
+        ]
+        let text = "# Meeting notes\n\n## Resum\n" + sentences.joined(separator: "\n")
+        XCTAssertGreaterThanOrEqual(SummaryValidator.words(from: text).count, 40)
+        XCTAssertEqual(SummaryValidator.validate(text), [])
+    }
+
+    /// A genuine repetition collapse in accented Catalan is still caught.
+    func testValidateFlagsRepetitionCollapseInCatalan() {
+        let text = "# Meeting notes\n\n## Resum\n"
+            + Array(repeating: "la reunió de la reunió de", count: 30).joined(separator: " ")
+        XCTAssertTrue(SummaryValidator.validate(text)
+            .contains { $0.hasPrefix("possible repetition collapse") })
+    }
 }

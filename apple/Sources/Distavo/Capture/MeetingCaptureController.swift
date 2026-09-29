@@ -15,10 +15,25 @@ import DistavoEmbedded
 /// meeting?" question after stop, whose answer is saved beside the work files
 /// for the summariser (Vikunja #2182); and, in the same question, a detected
 /// meeting language the owner can confirm or override (Vikunja #2202).
+///
+/// Silence handling (Vikunja #2665): once a second `tickElapsed()` drains the
+/// recorder's levels into a `SilenceMonitor` (pure, in DistavoCore). Its
+/// events either post a "still recording?" suggestion (notification + menu
+/// notice) or stop the recording through the same path as the menu's Stop.
 @MainActor
 final class MeetingCaptureController: ObservableObject {
     @Published private(set) var isRecording = false
     @Published private(set) var elapsedLabel = "0:00"
+    /// Non-nil while a silence suggestion is pending, e.g. "silent 2 min".
+    /// Drives the menu's Stop label, its "Keep recording" item and the icon.
+    @Published private(set) var silenceNotice: String?
+
+    /// Why a recording is being stopped.
+    private enum StopReason {
+        case manual
+        /// Stopped by the auto-stop option after this many silent minutes.
+        case silence(minutes: Int)
+    }
 
     /// The tap TCC category settled in macOS 14.4 — hide the feature below it.
     static var isSupported: Bool {
@@ -30,7 +45,12 @@ final class MeetingCaptureController: ObservableObject {
     private let configProvider: () -> Config
     private let notify: (String, String) -> Void
     private let log: (String) -> Void
+    /// Posts the actionable "silence" notification (Stop / Keep recording).
+    private let suggestSilence: (String, String) -> Void
+    /// Removes that notification (sound resumed, Keep, or any stop).
+    private let clearSilenceNotification: () -> Void
 
+    private var silenceMonitor: SilenceMonitor?
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
     private var timer: Timer?
     private var startedAt: Date?
@@ -43,7 +63,11 @@ final class MeetingCaptureController: ObservableObject {
     init(folderProvider: @escaping () -> URL,
          configProvider: @escaping () -> Config,
          notify: @escaping (String, String) -> Void,
-         log: @escaping (String) -> Void) {
+         log: @escaping (String) -> Void,
+         suggestSilence: @escaping (String, String) -> Void = { _, _ in },
+         clearSilenceNotification: @escaping () -> Void = {}) {
+        self.suggestSilence = suggestSilence
+        self.clearSilenceNotification = clearSilenceNotification
         self.folderProvider = folderProvider
         self.configProvider = configProvider
         self.notify = notify
@@ -68,7 +92,7 @@ final class MeetingCaptureController: ObservableObject {
     }
 
     func toggle() {
-        if isRecording { stop() } else { Task { await start() } }
+        if isRecording { stop(reason: .manual) } else { Task { await start() } }
     }
 
     /// Stop and throw the take away — nothing is saved or transcribed. Asks
@@ -89,6 +113,7 @@ final class MeetingCaptureController: ObservableObject {
         guard isRecording else { return }
         timer?.invalidate()
         timer = nil
+        endSilenceTracking()
         let name = recorder.discard()
         self.recorder = nil
         isRecording = false
@@ -117,20 +142,59 @@ final class MeetingCaptureController: ObservableObject {
         startedAt = Date()
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
+        silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
+                                        now: ProcessInfo.processInfo.systemUptime)
+        silenceNotice = nil
         log("Meeting recording started → \(recorder.fileURL?.lastPathComponent ?? "?")")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tickElapsed() }
+            // A Timer fires from the main run loop, so run the tick in place
+            // (not as a main-queue job): if it ends in a modal dialog (manual
+            // stop path), AppKit keeps servicing the rest of the app.
+            MainActor.assumeIsolated { self?.tickElapsed() }
         }
     }
 
-    private func stop() {
+    /// "Stop recording" chosen from the silence notification (the user's own
+    /// decision, so it behaves exactly like the menu's Stop). No-op if the
+    /// recording already ended.
+    func stopFromSilence() {
+        guard isRecording else { return }
+        log("Recording stopped from the silence notification")
+        stop(reason: .manual)
+    }
+
+    /// "Keep recording": cancel the suggestion and any auto-stop for the
+    /// current stretch of silence; the next sound starts a fresh episode.
+    func keepRecording() {
+        guard isRecording else { return }
+        silenceMonitor?.keepRecording()
+        silenceNotice = nil
+        clearSilenceNotification()
+        log("Silence suggestion dismissed - keeping the recording")
+    }
+
+    private func endSilenceTracking() {
+        silenceMonitor = nil
+        silenceNotice = nil
+        clearSilenceNotification()
+    }
+
+    private func stop(reason: StopReason) {
         guard #available(macOS 14.4, *), let recorder = recorder as? MeetingRecorder else { return }
         timer?.invalidate()
         timer = nil
+        endSilenceTracking()
+        var silenceMinutes: Int?
+        if case .silence(let m) = reason { silenceMinutes = m }
         let config = configProvider()
+        // An automatic silence stop never asks: nobody is at the Mac, and the
+        // blocking dialog would sit there (freezing other main-thread work)
+        // while the recording waited, untranscribed. It behaves exactly like
+        // answering Skip: no speakers sidecar, no language override.
+        let ask = config.askSpeakersOnStop && silenceMinutes == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
-        let outcome = recorder.stop(deferFinalize: config.askSpeakersOnStop)
+        let outcome = recorder.stop(deferFinalize: ask)
         self.recorder = nil
         isRecording = false
 
@@ -142,16 +206,24 @@ final class MeetingCaptureController: ObservableObject {
                    + "System Settings → Privacy & Security → Screen & System Audio Recording "
                    + "and record again.")
             log("Warning: recording contained no system audio (permission denied or nothing was playing)")
-            openPrivacyPane()
+            // A silence stop is expected to end a quiet recording; do not
+            // yank the user into System Settings for it.
+            if silenceMinutes == nil { openPrivacyPane() }
         } else if !outcome.microphoneHeard {
             notify("Recording saved — but the microphone was silent",
                    "Check the Microphone permission in System Settings → Privacy & Security, "
                    + "and your input device. The other participants were captured fine.")
+        } else if let silenceMinutes {
+            notify("Recording stopped after \(silenceMinutes) min of silence",
+                   "\(outcome.url.lastPathComponent) saved — Distavo will transcribe it shortly.")
         } else {
             notify("Meeting recording saved",
                    "\(outcome.url.lastPathComponent) — Distavo will transcribe it shortly.")
         }
-        if config.askSpeakersOnStop {
+        if let silenceMinutes {
+            log("Recording stopped automatically after \(silenceMinutes) min of silence")
+        }
+        if ask {
             // Start detection on the still-`.part` file (deferred finalize
             // means it isn't renamed/balanced yet) before the modal alert, so
             // it can be already done — or close to it — by the time the
@@ -190,6 +262,40 @@ final class MeetingCaptureController: ObservableObject {
         let seconds = Int(Date().timeIntervalSince(startedAt))
         elapsedLabel = String(format: "%d:%02d", seconds / 60, seconds % 60)
         warnIfSystemAudioSilent(after: seconds)
+        checkSilence()
+    }
+
+    /// Once a second: refresh the policy from Settings (changes apply live),
+    /// drain the recorder's levels and act on the monitor's verdict. The
+    /// monotonic clock plus the monitor's gap clamp mean a blocked main thread
+    /// (a modal alert) can never be counted as minutes of silence.
+    private func checkSilence() {
+        guard #available(macOS 14.4, *), var monitor = silenceMonitor,
+              let recorder = recorder as? MeetingRecorder else { return }
+        monitor.policy = SilencePolicy(config: configProvider())
+        let levels = recorder.drainLevels()
+        let event = monitor.ingest(mic: levels.mic, system: levels.system,
+                                   at: ProcessInfo.processInfo.systemUptime)
+        silenceMonitor = monitor
+
+        switch event {
+        case .autoStop(let silentFor):
+            stop(reason: .silence(minutes: max(1, Int((silentFor / 60).rounded()))))
+        case .suggestStop(let silentFor):
+            let minutes = max(1, Int((silentFor / 60).rounded()))
+            log("No sound for \(minutes) min - suggested stopping the recording")
+            silenceNotice = "silent \(minutes) min"
+            suggestSilence("Still recording — no sound for \(minutes) min",
+                           "Stop the recording, or keep going?")
+        case .none:
+            if monitor.suggestionActive {
+                silenceNotice = "silent \(max(1, Int(monitor.silentFor / 60))) min"
+            } else if silenceNotice != nil {
+                // Sound came back: withdraw the notice and the notification.
+                silenceNotice = nil
+                clearSilenceNotification()
+            }
+        }
     }
 
     /// Vikunja #2060: a denied permission (or a call that isn't actually

@@ -39,6 +39,13 @@ final class MeetingRecorder {
     private var micPeak: Float = 0
     private var tapPeak: Float = 0
 
+    // Level metering for silence handling (Vikunja #2665): sum of squares and
+    // frame count per output channel since the last `drainLevels()`. Touched
+    // only on `queue` (the IOProc runs there), so no locks in the callback.
+    private var micSumSq: Double = 0
+    private var tapSumSq: Double = 0
+    private var levelFrames = 0
+
     private(set) var isRecording = false
     private(set) var fileURL: URL?
 
@@ -140,6 +147,7 @@ final class MeetingRecorder {
             fileURL = url
             micPeak = 0
             tapPeak = 0
+            queue.sync { micSumSq = 0; tapSumSq = 0; levelFrames = 0 }
             let micChannels = micChannelCount
             let skipChannels = outputInputChannels
 
@@ -222,8 +230,21 @@ final class MeetingRecorder {
         queue.sync { tapPeak > 0.001 }
     }
 
-    /// Balance mic vs system-audio loudness and move `part` to its final
+    /// RMS of the mic (left) and system-audio (right) output channels since
+    /// the previous call, measured on the mixed-down samples before any
+    /// loudness balancing, then reset. `(0, 0)` when no frames arrived (a
+    /// stalled device counts as silence). Same `queue.sync` pattern as
+    /// `systemAudioHeardSoFar`; called once a second by the controller.
+    func drainLevels() -> (mic: Float, system: Float) {
+        queue.sync {
+            defer { micSumSq = 0; tapSumSq = 0; levelFrames = 0 }
+            guard levelFrames > 0 else { return (0, 0) }
+            let n = Double(levelFrames)
+            return (Float((micSumSq / n).squareRoot()), Float((tapSumSq / n).squareRoot()))
+        }
+    }
 
+    /// Balance mic vs system-audio loudness and move `part` to its final
     /// name. If balancing fails, deliver the raw recording — never lose a
     /// meeting to post-processing.
     private static func finalize(part: URL, to url: URL) {
@@ -334,6 +355,14 @@ final class MeetingRecorder {
         micPeak = max(micPeak, peak)
         vDSP_maxmgv(outData[1], 1, &peak, vDSP_Length(frames))
         tapPeak = max(tapPeak, peak)
+
+        // Sum of squares for the silence monitor (no allocation, on `queue`).
+        var sumSq: Float = 0
+        vDSP_svesq(outData[0], 1, &sumSq, vDSP_Length(frames))
+        micSumSq += Double(sumSq)
+        vDSP_svesq(outData[1], 1, &sumSq, vDSP_Length(frames))
+        tapSumSq += Double(sumSq)
+        levelFrames += frames
 
         try? file.write(from: out)
     }

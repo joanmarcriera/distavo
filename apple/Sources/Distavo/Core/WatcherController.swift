@@ -13,7 +13,8 @@ import DistavoEmbedded
 final class WatcherController: ObservableObject {
     /// Drives the menu-bar glyph. Precedence (high→low): a live recording wins,
     /// then the current processing phase, then an unread new note, then idle.
-    enum IconState { case idle, recording, loading, transcribing, done }
+    /// `recordingSilent` = recording, but a silence suggestion is pending (#2665).
+    enum IconState { case idle, recording, recordingSilent, loading, transcribing, done }
 
     @Published private(set) var status = "Idle"
     @Published private(set) var iconState: IconState = .idle
@@ -53,6 +54,7 @@ final class WatcherController: ObservableObject {
     private var deps: PipelineDeps
     private let notifier = Notifier()
     private var recordingCancellable: AnyCancellable?
+    private var silenceCancellable: AnyCancellable?
     /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
     /// store handles updates).
     let updater: AppUpdater? = AppUpdaterFactory.make()
@@ -66,7 +68,9 @@ final class WatcherController: ObservableObject {
         configProvider: { [weak self] in self?.config ?? Config() },
 
         notify: { [weak self] title, body in self?.notifier.notify(title: title, body: body) },
-        log: { [weak self] message in self?.log(message) })
+        log: { [weak self] message in self?.log(message) },
+        suggestSilence: { [weak self] title, body in self?.notifier.notifySilence(title: title, body: body) },
+        clearSilenceNotification: { [weak self] in self?.notifier.removeSilenceNotification() })
     private let needsOnboarding: Bool
     private let activityLog = ActivityLog()
 
@@ -118,6 +122,9 @@ final class WatcherController: ObservableObject {
         // A live recording flips the icon immediately (capture is a separate
         // ObservableObject, so observe it explicitly).
         recordingCancellable = capture.$isRecording
+            .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
+        // The pending-silence notice recolours the icon the same way.
+        silenceCancellable = capture.$silenceNotice
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
         wireEmbeddedProgress()
         start()
@@ -184,6 +191,15 @@ final class WatcherController: ObservableObject {
     // MARK: Lifecycle
 
     private func start() {
+        // Delegate + silence-notification actions (Vikunja #2665): route the
+        // buttons to the recorder; both no-op if the recording already ended.
+        notifier.configure()
+        notifier.onSilenceAction = { [weak self] action in
+            switch action {
+            case .stop: self?.capture.stopFromSilence()
+            case .keep: self?.capture.keepRecording()
+            }
+        }
         notifier.requestAuthorization()
         scanTask = Task { [weak self] in await self?.runAfterLaunch() }
     }
@@ -239,7 +255,9 @@ final class WatcherController: ObservableObject {
     }
 
     private func refreshActivity() {
-        if capture.isRecording { iconState = .recording }
+        if capture.isRecording {
+            iconState = capture.silenceNotice != nil ? .recordingSilent : .recording
+        }
         else if processingActive { iconState = processingPhase }
         else if unseenDone { iconState = .done }
         else { iconState = .idle }

@@ -15,6 +15,7 @@ struct MenuBarLabel: View {
         switch state {
         case .idle:         return "waveform"
         case .recording:    return "record.circle"
+        case .recordingSilent: return "record.circle"
         case .loading:      return "waveform.badge.plus"
         case .transcribing: return "waveform.badge.magnifyingglass"
         case .done:         return "waveform.badge.checkmark"
@@ -25,6 +26,7 @@ struct MenuBarLabel: View {
         switch state {
         case .idle:         return .primary
         case .recording:    return .red
+        case .recordingSilent: return .orange
         case .loading:      return .secondary
         case .transcribing: return .orange
         case .done:         return .green

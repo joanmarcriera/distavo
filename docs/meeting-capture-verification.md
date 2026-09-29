@@ -60,6 +60,37 @@ defaults delete uk.co.riera.distavo distavo.didExplainCapture
 9. **Cleanup** — after quitting Distavo: no aggregate devices in Audio MIDI
    Setup, no leftover processes; the only traces are the two toggles in
    System Settings → Privacy & Security.
+10. **Silence handling (Vikunja #2665)** — in Settings → Recordings turn on
+   "Suggest stopping after silence" (1 min) and "Stop recording automatically
+   after silence" (3 min); with a play-something-then-stop setup:
+   - Play audio for a few seconds, then stay silent with the mic quiet. After
+     ~1 min a notification "Still recording — no sound for 1 min" appears with
+     **Stop recording** / **Keep recording** actions; the menu Stop item reads
+     "Stop recording (m:ss · silent 1 min)", a "Keep recording" item appears and
+     the icon turns orange.
+   - Make a sound: the notification and the menu notice disappear, icon back
+     to red.
+   - Repeat, choose **Keep recording** (notification or menu): no auto-stop
+     happens in that stretch of silence; after a sound and another silence the
+     suggestion returns.
+   - Repeat and ignore it: at 3 min the recording stops by itself, the
+     "Recording stopped after 3 min of silence" notification shows, **no** "Who
+     was in this meeting?" dialog appears (nobody is there to answer), and the
+     WAV is finalised and transcribed straight away with no speaker hints and
+     no language override, as if Skip had been pressed (no System Settings
+     window even if no system audio was captured). While it stops, other
+     Distavo work (scans, progress) is not frozen.
+   - Choosing **Stop recording** on the notification (or the menu) is a manual
+     stop: the "Who was in this meeting?" dialog does appear, and the menu
+     keeps updating while it is open.
+   - Turn "Suggest stopping" off while a suggestion is showing: the notice,
+     the orange icon and the delivered notification go away.
+   - **Notifications denied** (System Settings → Notifications → Distavo off):
+     the menu notice, "Keep recording" item and orange icon still appear.
+   - Start a recording in silence and never make a sound: auto-stop must NOT
+     fire (nothing was heard yet); the suggestion still may.
+   - Mic muted but the call audio playing (and the reverse) is never "silence".
+   - The recorder cannot run in CI; this section is the only end-to-end check.
 
 ## Known caveats (documented, not bugs)
 

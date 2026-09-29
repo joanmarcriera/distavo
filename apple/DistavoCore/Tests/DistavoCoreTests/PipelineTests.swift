@@ -526,6 +526,59 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(result.message.contains("repetition collapse"))
     }
 
+    // MARK: Failed-summary quarantine (Vikunja #2669)
+
+    /// A summary that fails validation must never land in the notes folder
+    /// (where "open when done" / the user could mistake it for a real note):
+    /// it is quarantined in the work dir as `<base>.failed-summary.md`, and
+    /// the message says WHY.
+    func testFailedSummaryIsQuarantinedInWorkDir() async throws {
+        let (cfg, input) = try makeEnv()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, _, _ in repeated }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertTrue(result.message.hasPrefix("summary rejected"), result.message)
+        XCTAssertTrue(result.message.contains("repetition collapse"), result.message)
+
+        let fm = FileManager.default
+        let notesDir = URL(fileURLWithPath: cfg.notesDir)
+        let notes = ((try? fm.contentsOfDirectory(atPath: notesDir.path)) ?? []).filter { $0.hasSuffix(".md") }
+        XCTAssertTrue(notes.isEmpty, "failed summary leaked into notesDir: \(notes)")
+
+        let quarantined = URL(fileURLWithPath: cfg.workDir)
+            .appendingPathComponent("\(result.base).failed-summary.md")
+        let saved = try String(contentsOf: quarantined, encoding: .utf8)
+        XCTAssertTrue(saved.contains("the cat sat on mat"))
+        // Nothing the app could open as a note.
+        XCTAssertNil(result.notePath)
+        XCTAssertTrue(result.message.contains(quarantined.path), "message should say where the text was kept")
+    }
+
+    func testEmptySummaryMessageNamesReason() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, _, _ in "" }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .failed)
+        XCTAssertTrue(result.message.hasPrefix("summary rejected"), result.message)
+    }
+
+    func testGoodSummaryStillLandsInNotesDir() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(
+            path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let np = try XCTUnwrap(result.notePath)
+        XCTAssertTrue(np.path.hasPrefix(cfg.notesDir))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: np.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: URL(fileURLWithPath: cfg.workDir)
+            .appendingPathComponent("\(result.base).failed-summary.md").path))
+    }
+
     // MARK: Truncated-note retry (Vikunja #2203)
 
     private var fullLengthGoodNote: String {

@@ -58,8 +58,7 @@ Never commit these; never paste them in chat — add them yourself in the GitHub
 | `APPLE_TEAM_ID` | 10-char Team ID (developer.apple.com → Membership). |
 | `DEVELOPER_ID_CERT_P12_BASE64` | Export the **Developer ID Application** identity from Keychain Access as `.p12`, then `base64 -i cert.p12 \| pbcopy`. |
 | `DEVELOPER_ID_CERT_PASSWORD` | The password you set when exporting that `.p12`. |
-| `APPLE_ID` | Your Apple Account email (used by `notarytool`). |
-| `APPLE_NOTARY_PASSWORD` | App-specific password (account.apple.com → Sign-In & Security → App-Specific Passwords). |
+| `ASC_API_KEY_ID` / `ASC_API_ISSUER_ID` / `ASC_API_KEY_P8_BASE64` | App Store Connect API key — also used by `notarytool --key` in `release.yml` (the Apple ID + app-specific password path expired → HTTP 401 on v1.15.0). |
 
 ### `release-appstore.yml` (App Store upload)
 | Secret | What it is / how to make it |

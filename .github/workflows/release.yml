@@ -8,14 +8,20 @@ name: Release (Direct DMG)
 #   APPLE_TEAM_ID                  10-char Apple Developer Team ID
 #   DEVELOPER_ID_CERT_P12_BASE64   base64 of the exported "Developer ID Application" cert (.p12)
 #   DEVELOPER_ID_CERT_PASSWORD     password set when exporting that .p12
-#   APPLE_ID                       Apple Account email (for notarytool)
-#   APPLE_NOTARY_PASSWORD          app-specific password (account.apple.com → App-Specific Passwords)
+#   ASC_API_KEY_ID / ASC_API_ISSUER_ID / ASC_API_KEY_P8_BASE64
+#                                  App Store Connect API key, used by notarytool (--key). Replaced the
+#                                  Apple ID + app-specific password, which expired → HTTP 401 (v1.15.0).
 # See docs/release-automation.md for how to produce each one.
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Existing tag to build and publish (e.g. v1.15.0). Empty = dry run."
+        required: false
+        default: ""
 
 permissions:
   contents: write   # create the GitHub Release + upload the DMG
@@ -25,15 +31,19 @@ jobs:
     runs-on: macos-latest
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+      ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+      ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Preflight — required secrets present
         run: |
           missing=()
-          for s in APPLE_TEAM_ID DEVELOPER_ID_CERT_P12_BASE64 DEVELOPER_ID_CERT_PASSWORD APPLE_ID APPLE_NOTARY_PASSWORD; do
+          for s in APPLE_TEAM_ID DEVELOPER_ID_CERT_P12_BASE64 DEVELOPER_ID_CERT_PASSWORD ASC_API_KEY_ID ASC_API_ISSUER_ID ASC_API_KEY_P8_BASE64; do
             [ -n "${!s:-}" ] || missing+=("$s")
           done
           if [ ${#missing[@]} -ne 0 ]; then
@@ -103,19 +113,22 @@ jobs:
       - name: Notarize and staple the app
         run: |
           cd apple
+          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          NOTARY_AUTH=(--key "$RUNNER_TEMP/notary.p8" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
           APP="build/export/Distavo.app"
           ditto -c -k --keepParent "$APP" build/Distavo-app.zip
           xcrun notarytool submit build/Distavo-app.zip \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_NOTARY_PASSWORD" --wait
+            "${NOTARY_AUTH[@]}" --wait
           xcrun stapler staple "$APP"
 
       - name: Build, notarize and staple the DMG
         run: |
           cd apple
+          NOTARY_AUTH=(--key "$RUNNER_TEMP/notary.p8" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
           hdiutil create -volname "Distavo" -srcfolder build/export/Distavo.app \
             -ov -format UDZO build/Distavo.dmg
           xcrun notarytool submit build/Distavo.dmg \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_NOTARY_PASSWORD" --wait
+            "${NOTARY_AUTH[@]}" --wait
           xcrun stapler staple build/Distavo.dmg
           xcrun stapler validate build/Distavo.dmg
 
@@ -153,19 +166,19 @@ jobs:
           mkdir -p build/appcast && cp build/Distavo.dmg build/appcast/
           /tmp/sparkle/bin/generate_appcast \
             --ed-key-file "$KEYFILE" \
-            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/" \
+            --download-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/" \
             build/appcast
           echo "Generated appcast:"; cat build/appcast/appcast.xml
 
       - name: Upload DMG artifact (dry run)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && inputs.release_tag == '' }}
         uses: actions/upload-artifact@v4
         with:
           name: Distavo-dmg
           path: apple/build/Distavo.dmg
 
       - name: Publish GitHub Release
-        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -175,6 +188,6 @@ jobs:
           if [ -f apple/build/appcast/appcast.xml ]; then
             assets="$assets apple/build/appcast/appcast.xml"
           fi
-          gh release create "$GITHUB_REF_NAME" $assets \
-            --title "Distavo $GITHUB_REF_NAME" --generate-notes \
-          || gh release upload "$GITHUB_REF_NAME" $assets --clobber
+          gh release create "$RELEASE_TAG" $assets \
+            --title "Distavo $RELEASE_TAG" --generate-notes \
+          || gh release upload "$RELEASE_TAG" $assets --clobber

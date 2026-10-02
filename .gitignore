@@ -25,3 +25,6 @@ out/
 AGENTS.md
 skills-lock.json
 __pycache__/
+
+# local-only deploy key material (never commit)
+.secrets-local/

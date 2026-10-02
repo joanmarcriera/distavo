@@ -191,3 +191,27 @@ jobs:
           gh release create "$RELEASE_TAG" $assets \
             --title "Distavo $RELEASE_TAG" --generate-notes \
           || gh release upload "$RELEASE_TAG" $assets --clobber
+
+      # Host the signed appcast at the constant SUFeedURL (https://distavo.com/appcast.xml)
+      # by running ops/publish-appcast.sh — the same guarded script used by hand
+      # (refuses a wrong-version/unsigned feed, backs up, atomic rename, verifies).
+      # Like the Sparkle step it no-ops until its secret exists, so nothing breaks
+      # before the deploy key is set up. APPCAST_DEPLOY_SSH_KEY = private key whose
+      # public half is in marc@joanmarcriera.es authorized_keys (see docs/release-automation.md).
+      - name: Publish appcast to distavo.com
+        if: ${{ startsWith(github.ref, 'refs/tags/') || inputs.release_tag != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPCAST_DEPLOY_SSH_KEY: ${{ secrets.APPCAST_DEPLOY_SSH_KEY }}
+        run: |
+          if [ -z "${APPCAST_DEPLOY_SSH_KEY:-}" ]; then
+            echo "::warning::APPCAST_DEPLOY_SSH_KEY not set — appcast NOT published; run ./ops/publish-appcast.sh $RELEASE_TAG by hand."
+            exit 0
+          fi
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          (umask 077; printf '%s\n' "$APPCAST_DEPLOY_SSH_KEY" > ~/.ssh/appcast_deploy)
+          # Pinned host key (public) — no trust-on-first-use.
+          echo "joanmarcriera.es ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDADOLZ1tckioNFzGd/GZsoyEg7d80nZ+HBnWvPt6ufp" > ~/.ssh/known_hosts
+          printf 'Host joanmarcriera.es\n  IdentityFile ~/.ssh/appcast_deploy\n  IdentitiesOnly yes\n  StrictHostKeyChecking yes\n' > ~/.ssh/config
+          trap 'rm -f ~/.ssh/appcast_deploy' EXIT
+          ./ops/publish-appcast.sh "$RELEASE_TAG"

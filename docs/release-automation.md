@@ -132,3 +132,22 @@ python3 scripts/bump-minor-version.py
 - **Setapp first upload** — Setapp only accepts the first version via its Web UI
   (`setapp-submission.md`); later versions can be scripted via its REST API.
 - **Trademark clearance** on "Distavo" — a hard gate before any store submission.
+
+## Appcast hosting (Direct edition)
+
+`release.yml` signs `appcast.xml` and attaches it to the GitHub Release, then its last step
+(`Publish appcast to distavo.com`) runs `ops/publish-appcast.sh <tag>` to copy it to the constant
+`SUFeedURL` (`https://distavo.com/appcast.xml`). Without that copy, shipped Direct builds keep
+reading a stale feed and report "you're up to date".
+
+One-time setup — the step no-ops with a warning until the secret exists:
+
+```sh
+ssh-keygen -t ed25519 -N '' -C distavo-appcast-ci -f /tmp/appcast_deploy
+# append to marc@joanmarcriera.es ~/.ssh/authorized_keys, restricted:
+#   restrict ssh-ed25519 AAAA... distavo-appcast-ci
+gh secret set APPCAST_DEPLOY_SSH_KEY --repo joanmarcriera/distavo < /tmp/appcast_deploy
+shred -u /tmp/appcast_deploy 2>/dev/null || rm -P /tmp/appcast_deploy
+```
+
+Manual fallback: `./ops/publish-appcast.sh vX.Y.Z`.

@@ -29,6 +29,23 @@ transcription engine. Distavo itself is MIT-licensed; nothing here is GPL.
 - Used for: running NVIDIA Parakeet TDT 0.6B v3 on the Neural Engine (the "Fast"
   built-in engine). Linked without its text-normalisation binary.
 
+## mlx-swift, mlx-swift-lm, swift-transformers (local summary runtime)
+
+- Sources: https://github.com/ml-explore/mlx-swift,
+  https://github.com/ml-explore/mlx-swift-lm,
+  https://github.com/huggingface/swift-transformers
+- License: MIT (mlx-swift, mlx-swift-lm — Copyright © Apple Inc.) and Apache-2.0
+  (swift-transformers — Copyright © Hugging Face)
+- Used for: running Gemma on the GPU for the optional local summaries.
+
+## Gemma 4 e4b (model, downloaded at runtime, opt-in)
+
+- Source: https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit (MLX 4-bit
+  conversion of Google's Gemma 4; pinned revision in the app)
+- License: Apache-2.0 — Copyright © Google LLC
+- Used for: optional on-device meeting summaries, including Catalan and Spanish
+  notes. Not bundled; downloaded only when the user selects it.
+
 ## NVIDIA Parakeet TDT 0.6B v3 (model, downloaded at runtime)
 
 - Source: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3 (Core ML conversion:

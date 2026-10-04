@@ -1,0 +1,148 @@
+import XCTest
+import CryptoKit
+import DistavoCore
+@testable import DistavoEmbedded
+
+/// Download orchestration for the local summary model (Vikunja #2198 S5),
+/// driven through a fake fetch so nothing touches the network or the real
+/// models folder.
+final class SummaryModelManagerTests: XCTestCase {
+
+    private func tempRoot() -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-sum-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    private func sha(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// A tiny two-file model (one hashed, one size-only) with a fake repo.
+    private func tinyModel(weights: Data = Data("weights".utf8)) -> EmbeddedSummaryModel {
+        EmbeddedSummaryModel(
+            id: "tiny", displayName: "Tiny", engine: .mlx, repo: "x/tiny", revision: "abc",
+            downloadMB: 0, ramGB: 1, minimumMemoryGB: 0, contextCap: 1024, promptStyle: .classic,
+            detail: "", files: [
+                .init(path: "config.json", bytes: 2),
+                .init(path: "model.safetensors", bytes: Int64(weights.count), sha256: sha(weights)),
+            ])
+    }
+
+    private func fetching(_ payloads: [String: Data], calls: Box? = nil) -> SummaryFileFetch {
+        { url, dest, onBytes in
+            calls?.add(url.lastPathComponent)
+            let data = payloads[url.lastPathComponent] ?? Data()
+            try data.write(to: dest)
+            onBytes(Int64(data.count))
+        }
+    }
+
+    final class Box: @unchecked Sendable {
+        private let lock = NSLock(); private var items: [String] = []
+        func add(_ s: String) { lock.withLock { items.append(s) } }
+        var all: [String] { lock.withLock { items } }
+    }
+
+    func testSuccessfulDownloadIsVerifiedAndMovedIntoPlace() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let calls = Box()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: fetching(["config.json": Data("{}".utf8),
+                                                           "model.safetensors": Data("weights".utf8)], calls: calls))
+        var state = await manager.downloadState(model)
+        XCTAssertEqual(state, .notStarted)
+        try await manager.download(model)
+        state = await manager.downloadState(model)
+        XCTAssertEqual(state, .verified)
+        XCTAssertTrue(SummaryModelStore.isVerified(model, root: root))
+        XCTAssertEqual(calls.all.sorted(), ["config.json", "model.safetensors"])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: SummaryModelStore.stagingDirectory(for: model, root: root).path), "staging is gone")
+    }
+
+    func testFirstManifestMismatchIsRetryableSecondIsPermanent() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        // Right size, wrong bytes: only the SHA-256 notices.
+        let corrupt = fetching(["config.json": Data("{}".utf8), "model.safetensors": Data("WEIGHTS".utf8)])
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(), fetch: corrupt)
+
+        do { try await manager.download(model); XCTFail("expected a mismatch") } catch {}
+        var state = await manager.downloadState(model)
+        XCTAssertEqual(state, .manifestMismatch)            // -> temporarilyUnavailable, re-download
+        XCTAssertFalse(SummaryModelStore.isVerified(model, root: root))
+
+        do { try await manager.download(model); XCTFail("expected a mismatch") } catch {}
+        state = await manager.downloadState(model)
+        if case .failedPermanently = state {} else { XCTFail("two strikes must be permanent, got \(state)") }
+    }
+
+    func testPartialStagingFilesAreNotFetchedAgain() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let staging = SummaryModelStore.stagingDirectory(for: model, root: root)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: staging.appendingPathComponent("config.json"))
+        let calls = Box()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: fetching(["model.safetensors": Data("weights".utf8)], calls: calls))
+        try await manager.download(model)
+        XCTAssertEqual(calls.all, ["model.safetensors"])
+    }
+
+    func testFetchFailureIsRetryableNotPermanent() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: { _, _, _ in throw URLError(.notConnectedToInternet) })
+        do { try await manager.download(model); XCTFail("expected an error") } catch {
+            XCTAssertTrue(error is RetryableDependencyError)
+        }
+        let state = await manager.downloadState(model)
+        XCTAssertEqual(state, .notStarted)
+    }
+
+    func testUnverifiedFolderWithoutSentinelIsNotReady() throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let dir = SummaryModelStore.directory(for: model, root: root)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        for f in model.files { try Data().write(to: dir.appendingPathComponent(f.path)) }
+        XCTAssertFalse(SummaryModelStore.isVerified(model, root: root), "files without the sentinel are an interrupted download")
+    }
+
+    func testManifestAcceptsEntriesWithoutSha256() throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        try Data("ab".utf8).write(to: root.appendingPathComponent("config.json"))
+        try Data(#"{"files":{"config.json":{"bytes":2}}}"#.utf8).write(to: root.appendingPathComponent("manifest.json"))
+        XCTAssertNoThrow(try ModelManifestCheck.verify(folder: root, expectManifest: true))
+        try Data("abc".utf8).write(to: root.appendingPathComponent("config.json"))
+        XCTAssertThrowsError(try ModelManifestCheck.verify(folder: root, expectManifest: true))
+    }
+
+    func testReadinessForAppleModelNeverStartsADownload() async {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: { _, _, _ in XCTFail("no download for Apple's model") })
+        let r = await manager.readiness(modelID: "apple")
+        XCTAssertEqual(r, .ready)
+    }
+
+    func testGemmaSummariserDefersWhenWeightsAreMissing() async {
+        // The real store root has no summary model in a test environment.
+        do {
+            _ = try await GemmaSummariser.summarise(
+                transcript: "SPEAKER_00: hi", modelID: "gemma-4-e4b", noteOwner: "Marc",
+                userSpeaker: "SPEAKER_00", participants: nil, style: .classic, meetingDate: nil, noteLanguage: nil)
+            XCTFail("expected a deferral")
+        } catch {
+            // Either deferred (not downloaded) or, if a developer machine has
+            // the model, it ran; never a permanent failure for a missing model.
+            if !SummaryModelStore.isVerified(EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")) {
+                XCTAssertTrue(error is RetryableDependencyError)
+            }
+        }
+    }
+}

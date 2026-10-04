@@ -105,10 +105,16 @@ extension PipelineDeps {
         let ollamaSummarise = deps.summarise
         deps.summarise = { transcript, target, options, context in
             if case .embedded(let model) = target {
-                // Only Apple's model has an engine until the MLX generator lands
-                // (Vikunja #2198 S4-S6); readiness below already refuses the rest.
-                guard model == EmbeddedSummaryModelCatalog.appleID else {
-                    throw EmbeddedSummariserError.failed("the \(model) summary model is not available in this build")
+                // A downloaded model (local Gemma, Vikunja #2198) runs through the
+                // MLX generator, and unlike Apple's it follows the configured
+                // prompt style and note language: its window is big enough for
+                // facts-first and Catalan/Spanish notes.
+                if model != EmbeddedSummaryModelCatalog.appleID {
+                    return try await GemmaSummariser.summarise(
+                        transcript: transcript, modelID: model,
+                        noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
+                        participants: context.participants, style: context.promptStyle,
+                        meetingDate: context.meetingDate, noteLanguage: context.noteLanguage)
                 }
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
@@ -126,12 +132,11 @@ extension PipelineDeps {
         // stay failures, pointing the user back at Ollama.
         deps.embeddedReadiness = { model in
             guard model == EmbeddedSummaryModelCatalog.appleID else {
-                // No generator for downloaded models yet (S4-S6): can never
-                // resolve on this build, so fail once rather than defer forever.
-                // S5 MUST replace this stub: "weights downloading / download
-                // pending" has to return .temporarilyUnavailable (defer, never
-                // fail); only RAM below the floor or an Intel Mac is .unsupported.
-                return .unsupported("The \(model) summary model isn't available in this version — switch back to Apple Intelligence or Ollama in Settings.")
+                // A downloaded model: "download pending / in progress / failed
+                // its integrity check once" defer (never fail); RAM below the
+                // floor, an Intel Mac, or a download corrupt twice are the only
+                // failures. The manager also starts a missing download.
+                return await SummaryModelManager.shared.readiness(modelID: model)
             }
             guard let reason = EmbeddedSummariser.unavailableReason() else { return .ready }
             let why = reason.errorDescription ?? "On-device summarisation is unavailable."

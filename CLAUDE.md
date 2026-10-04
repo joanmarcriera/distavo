@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Distavo** (v1.14.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
+**Distavo** (v1.15.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
 recordings and turns each new one into a structured Markdown meeting note. The pipeline is:
 **AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
 Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the
@@ -67,6 +67,7 @@ of the original Python module (noted in its header).
   Ollama default since 1.12 via `summarise.prompt_style`). `NoteContext` carries owner/speaker/participants/date/style.
 - **`TranscriptCleaner.swift`** — turns raw WhisperX output into speaker-grouped, timestamp-free transcript.
   **`SummaryValidator.swift`** — post-summary sanity checks (repetition collapse / empty / overlong).
+- **`SilenceMonitor.swift`** — pure silence policy for the built-in recorder (Vikunja #2665): fed one mic+system RMS sample per second by `MeetingCaptureController`, it emits suggest-stop / auto-stop events (both opt-in via `Config`; auto-stop only after some sound was heard; `keepRecording()` cancels the episode).
 - **`ActivityLog.swift`** — append-only activity log at `~/Library/Logs/Distavo/distavo.log`.
 - **`EmbeddedSupport.swift`** — dependency-free pieces: `EmbeddedModelCatalog`, `HardwareProbe`,
   `Config.recommendedForThisMac()`.

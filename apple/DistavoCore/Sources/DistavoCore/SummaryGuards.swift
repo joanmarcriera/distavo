@@ -47,6 +47,39 @@ public enum LoopGuard {
     }
 }
 
+extension LoopGuard {
+    /// Drain a stream of text chunks, checking for a loop every
+    /// `checkEveryTokens` chunks (one chunk ~ one token); stops early on a trip.
+    public static func collect<S: AsyncSequence>(
+        _ chunks: S
+    ) async throws -> (text: String, looped: Bool) where S.Element == String {
+        var out = ""
+        var n = 0
+        for try await chunk in chunks {
+            out += chunk
+            n += 1
+            if n % checkEveryTokens == 0 && isLooping(out) { return (out, true) }
+        }
+        return (out, false)
+    }
+
+    /// Run `attempt` (one generation at the given temperature, returning its
+    /// text and whether the guard tripped). A trip is retried ONCE at
+    /// `retryTemperature`; a second trip throws `LocalSummaryError` — a
+    /// collapsed note must fail, not be saved.
+    public static func runWithRetry(
+        temperature: Double,
+        attempt: (Double) async throws -> (text: String, looped: Bool)
+    ) async throws -> String {
+        let first = try await attempt(temperature)
+        if !first.looped { return first.text }
+        let second = try await attempt(retryTemperature(after: temperature))
+        if !second.looped { return second.text }
+        throw LocalSummaryError(
+            LocalSummaryFailurePolicy.decideMessage(for: .repetitionCollapse))
+    }
+}
+
 // MARK: - Post-hoc cleanup
 
 public enum SummaryPostProcess {
@@ -234,11 +267,69 @@ public enum SummaryPostProcess {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func fold(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+    }
+
+    /// Drop bullets under "## Key people and organisations" whose name never
+    /// occurs in the transcript — the spike's biggest source of invented
+    /// organisations ("ChatGPT" becoming "OpenAI"). A name is kept when it
+    /// appears whole, or (multi-word) when more than half of its tokens of 3+
+    /// letters appear; matching ignores case and diacritics. Always kept:
+    /// placeholders ("none", "unclear"), `SPEAKER_nn` labels, and any name in
+    /// `alwaysKeep` (the note owner, who may be only implied). Other sections
+    /// are untouched.
+    public static func dropUnsupportedKeyPeople(
+        _ text: String, transcript: String, alwaysKeep: [String] = []
+    ) -> String {
+        let lines = text.components(separatedBy: "\n")
+        guard let start = lines.firstIndex(where: {
+            $0.hasPrefix("#") && normalisedHeading($0) == "key people and organisations"
+        }) else { return text }
+        let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
+
+        let haystack = fold(transcript)
+        let keepers = alwaysKeep.map(fold).filter { !$0.isEmpty }
+        let placeholders = ["none", "unclear", "not stated", "n/a", "ninguno", "cap", "no one"]
+
+        func supported(_ bullet: String) -> Bool {
+            var name = bullet.trimmingCharacters(in: .whitespaces)
+            name = String(name.drop { "-*•+ ".contains($0) })
+            name = name.replacingOccurrences(of: "**", with: "")
+            for separator in [":", " (", " – ", " — ", " - "] {
+                if let r = name.range(of: separator) { name = String(name[..<r.lowerBound]) }
+            }
+            name = name.trimmingCharacters(in: .whitespaces)
+            let f = fold(name)
+            if f.isEmpty || f.hasPrefix("speaker_") { return true }
+            if placeholders.contains(where: { f == $0 || f.hasPrefix($0 + " ") || f.hasPrefix($0 + ".") }) { return true }
+            if keepers.contains(where: { f.contains($0) || $0.contains(f) }) { return true }
+            if haystack.contains(f) { return true }
+            let tokens = f.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count >= 3 }
+            guard tokens.count > 1 else { return false }
+            let found = tokens.filter { haystack.contains($0) }.count
+            return found * 2 > tokens.count
+        }
+
+        var out = Array(lines[...start])
+        for line in lines[(start + 1)..<end] {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            let isBullet = t.hasPrefix("- ") || t.hasPrefix("* ") || t.hasPrefix("• ")
+            if isBullet && !supported(t) { continue }
+            out.append(line)
+        }
+        out.append(contentsOf: lines[end...])
+        return out.joined(separator: "\n")
+    }
+
     /// The whole cleanup in the order the spike recommends: strip meta, drop
-    /// ledger duplicates, repair headings.
-    public static func clean(_ text: String, style: Prompt.Style) -> String {
+    /// ledger duplicates, drop Key-people names the transcript does not
+    /// support (only when `transcript` is given), repair headings.
+    public static func clean(_ text: String, style: Prompt.Style,
+                             transcript: String? = nil, alwaysKeep: [String] = []) -> String {
         var out = stripTrailingMeta(text)
         if style == .factsFirst { out = dedupeLedgerRows(out) }
+        if let transcript { out = dropUnsupportedKeyPeople(out, transcript: transcript, alwaysKeep: alwaysKeep) }
         return ensureHeadings(out, style: style)
     }
 }

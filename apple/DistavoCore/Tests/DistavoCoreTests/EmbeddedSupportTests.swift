@@ -46,6 +46,46 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertTrue(on16.contains("bsc-los") && on16.contains("bsc-ca-3370h"))
     }
 
+    // MARK: Summary model catalogue (Vikunja #2198 S1)
+
+    func testSummaryCatalogLookupFallsBackToApple() {
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b").id, "gemma-4-e4b")
+        // Unknown ids resolve to Apple's model, never silently to a download.
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.model(id: "no-such").id, "apple")
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.model(id: "").id, "apple")
+    }
+
+    func testSummaryCatalogEntriesAreSane() {
+        let apple = EmbeddedSummaryModelCatalog.model(id: "apple")
+        XCTAssertEqual(apple.engine, .appleFoundationModels)
+        XCTAssertEqual(apple.downloadMB, 0)
+        XCTAssertEqual(apple.promptStyle, .classic)
+        XCTAssertNil(apple.contextCap)   // Apple reports its own window
+        let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
+        XCTAssertEqual(gemma.engine, .mlx)
+        XCTAssertEqual(gemma.minimumMemoryGB, 16)
+        XCTAssertEqual(gemma.contextCap, 16384)
+        XCTAssertEqual(gemma.promptStyle, .factsFirst)
+        XCTAssertNotNil(gemma.repo)
+        // Only e4b is offered in-app: 12B+ does not fit the 16 GB floor.
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.models.map(\.id), ["apple", "gemma-4-e4b"])
+    }
+
+    func testSummaryTierFilteringFollowsMemory() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(memoryBytes: 15 * gb).map(\.id), ["apple"])
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(memoryBytes: 16 * gb).map(\.id), ["apple", "gemma-4-e4b"])
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(memoryBytes: 24 * gb).map(\.id), ["apple", "gemma-4-e4b"])
+    }
+
+    func testSummaryModelMeetsMemoryFloor() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
+        XCTAssertFalse(gemma.fits(memoryBytes: 8 * gb))
+        XCTAssertTrue(gemma.fits(memoryBytes: 16 * gb))
+        XCTAssertTrue(EmbeddedSummaryModelCatalog.model(id: "apple").fits(memoryBytes: 8 * gb))
+    }
+
     // MARK: nextBigger (Vikunja #2205)
 
     func testNextBiggerStepsUpWithinLanguageCoverage() {

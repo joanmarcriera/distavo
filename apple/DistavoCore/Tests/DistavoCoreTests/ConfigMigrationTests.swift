@@ -154,6 +154,29 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertEqual(cfg.noteOwner, "Ana")
     }
 
+    // MARK: summarise.embedded_model (Vikunja #2198 S1)
+
+    /// A config predating the key must keep Apple's model: nothing may route to
+    /// Gemma until the user picks it.
+    func testMissingEmbeddedSummaryModelDecodesToApple() throws {
+        let cfg = try decode(#"{"summarise": {"backend": "embedded", "embedded_enabled": true}}"#)
+        XCTAssertEqual(cfg.summarise.embeddedModel, "apple")
+        XCTAssertEqual(try decode("{}").summarise.embeddedModel, "apple")
+    }
+
+    func testEmbeddedSummaryModelRoundTrips() throws {
+        let cfg = try decode(#"{"summarise": {"embedded_model": "gemma-4-e4b"}}"#)
+        XCTAssertEqual(cfg.summarise.embeddedModel, "gemma-4-e4b")
+        let again = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(cfg))
+        XCTAssertEqual(again.summarise.embeddedModel, "gemma-4-e4b")
+    }
+
+    func testRecommendedForThisMacKeepsAppleSummaryModel() {
+        let cfg = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 64 << 30)
+        XCTAssertEqual(cfg.summarise.embeddedModel, "apple")
+        XCTAssertFalse(cfg.summarise.embeddedEnabled)
+    }
+
     func testFreshInstallLeavesSilenceOptionsOff() {
         let cfg = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 16 << 30)
         XCTAssertFalse(cfg.suggestStopOnSilence)

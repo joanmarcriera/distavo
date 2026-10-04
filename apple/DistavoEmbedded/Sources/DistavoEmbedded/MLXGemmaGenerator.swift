@@ -112,12 +112,23 @@ public final class MLXGemmaGenerator: SummaryGenerator, @unchecked Sendable {
     /// Drop the weights and clear MLX's GPU cache so the menu-bar app holds no
     /// model between meetings.
     public func unload() {
-        lock.lock(); container = nil; lock.unlock()
-        MLX.Memory.clearCache()
+        // Only touch MLX when weights were actually loaded: with none, there is
+        // no GPU state to clear, and calling into MLX needs a compiled metallib
+        // (absent under plain `swift test`, where it aborts the process).
+        let hadModel = lock.withLock { () -> Bool in
+            let had = container != nil; container = nil; return had
+        }
+        if hadModel { MLX.Memory.clearCache() }
     }
 
     private func loadedContainer() async throws -> ModelContainer {
         if let existing = lock.withLock({ container }) { return existing }
+        // A missing folder is a plain load failure; check it before any MLX call
+        // (MLX aborts without a metallib, which also keeps non-live tests off MLX).
+        guard FileManager.default.fileExists(
+            atPath: modelDirectory.appendingPathComponent("config.json").path) else {
+            throw RetryableDependencyError("Model files not found at \(modelDirectory.path).")
+        }
         // Keep MLX's buffer cache small: the app is idle between meetings.
         MLX.Memory.cacheLimit = 256 * 1024 * 1024
         let fresh = try await loadModelContainer(

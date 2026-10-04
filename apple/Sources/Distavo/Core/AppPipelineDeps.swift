@@ -128,6 +128,9 @@ extension PipelineDeps {
             guard model == EmbeddedSummaryModelCatalog.appleID else {
                 // No generator for downloaded models yet (S4-S6): can never
                 // resolve on this build, so fail once rather than defer forever.
+                // S5 MUST replace this stub: "weights downloading / download
+                // pending" has to return .temporarilyUnavailable (defer, never
+                // fail); only RAM below the floor or an Intel Mac is .unsupported.
                 return .unsupported("The \(model) summary model isn't available in this version — switch back to Apple Intelligence or Ollama in Settings.")
             }
             guard let reason = EmbeddedSummariser.unavailableReason() else { return .ready }

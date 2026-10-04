@@ -143,6 +143,10 @@ public enum EmbeddedSummariser {
                 throw EmbeddedSummariserError.contextTooSmall
             case .emptyResult:
                 throw EmbeddedSummariserError.emptyResult
+            case .outputBudgetTooSmall(let available, let wanted):
+                throw EmbeddedSummariserError.failed(
+                    "a section of the recording left room for only \(available) of the "
+                    + "\(wanted) tokens the note needs")
             case .promptTooLong(let measured, let contextSize):
                 throw EmbeddedSummariserError.failed(
                     "a section of the recording was still too long after chunking "

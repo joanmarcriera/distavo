@@ -204,6 +204,49 @@ final class SummaryDriverTests: XCTestCase {
         XCTAssertTrue(gen.prompts.isEmpty, "no generation when the prompt cannot fit")
     }
 
+    // MARK: End-of-turn block budget (review finding)
+
+    /// A transcript that fits the final budget without the block must be
+    /// map-reduced once the block's tokens are counted.
+    func testEndOfTurnBlockTokensShrinkTheFinalBudget() {
+        let plain = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        let block = String(repeating: "reminder ", count: 200)   // ~1800 chars
+        let withBlock = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                                                    extraInstructions: block)
+        XCTAssertEqual(plain.transcriptTokens - withBlock.transcriptTokens, EmbeddedSummaryTokens.estimate(block))
+
+        let text = String(transcript(chars: 6000).prefix(Int(Double(plain.transcriptTokens) * 3.0) - 20))
+        XCTAssertEqual(EmbeddedSummaryPlanner.plan(transcript: text, contextSize: 4096, noteOwner: "Marc",
+                                                   userSpeaker: "SPEAKER_00"), .single)
+        if case .single = EmbeddedSummaryPlanner.plan(transcript: text, contextSize: 4096, noteOwner: "Marc",
+                                                      userSpeaker: "SPEAKER_00", extraInstructions: block) {
+            XCTFail("block tokens must push this transcript into map-reduce")
+        }
+    }
+
+    func testDriverCountsTheBlockWhenPlanning() async throws {
+        let plain = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        let block = String(repeating: "reminder ", count: 200)
+        let text = String(transcript(chars: 6000).prefix(Int(Double(plain.transcriptTokens) * 3.0) - 20))
+        let without = FakeGenerator(contextSize: 4096)
+        _ = try await SummaryDriver.run(request(text), generator: without)
+        XCTAssertEqual(without.prompts.count, 1)
+        let with = FakeGenerator(contextSize: 4096)
+        _ = try await SummaryDriver.run(request(text, block: block), generator: with)
+        XCTAssertGreaterThan(with.prompts.count, 1)
+    }
+
+    /// An output budget far below what was reserved is an error, not a
+    /// silently truncated note.
+    func testOutputBudgetFarBelowReserveThrows() async {
+        let gen = FakeGenerator(contextSize: 4096, tokenCount: { _ in 3500 })   // available 468 < 900
+        do {
+            _ = try await SummaryDriver.run(request("SPEAKER_00: hi"), generator: gen)
+            XCTFail("expected outputBudgetTooSmall")
+        } catch { XCTAssertEqual(error as? SummaryDriverError, .outputBudgetTooSmall(available: 468, wanted: 1800)) }
+        XCTAssertTrue(gen.prompts.isEmpty)
+    }
+
     // MARK: Errors
 
     func testContextTooSmallThrows() async {

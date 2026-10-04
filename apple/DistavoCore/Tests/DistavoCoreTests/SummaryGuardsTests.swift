@@ -137,7 +137,7 @@ final class SummaryGuardsTests: XCTestCase {
 
     func testStripsTrailingSelfCorrectionAndNote() {
         let text = "# Meeting notes\n\n## Suggested follow-up email\nHi,\n\nThanks.\n\n"
-            + "(Self-Correction: I misread the rate.)\n\nNote: this summary was generated."
+            + "(Self-Correction: I misread the rate.)\n\n---\n\nNote: this summary was generated."
         XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(text),
                        "# Meeting notes\n\n## Suggested follow-up email\nHi,\n\nThanks.")
     }
@@ -147,13 +147,55 @@ final class SummaryGuardsTests: XCTestCase {
         XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(text), "## Suggested follow-up email\nHi,")
     }
 
+    /// An email whose last line is a sign-off must survive (review finding).
+    func testKeepsEmailEndingLetMeKnow() {
+        let text = "## Suggested follow-up email\nHi,\n\nThanks for the call.\n\nLet me know if I've missed anything."
+        XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(text), text)
+    }
+
+    /// Inside the follow-up email, an unseparated "Note:" paragraph is content.
+    func testKeepsTrailingNoteParagraphInsideEmailButStripsItAfterRule() {
+        let email = "## Suggested follow-up email\nHi,\n\nThanks.\n\nNote: I am away Friday."
+        XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(email), email)
+        XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(email + "\n\n---\n\nNote: generated."), email)
+    }
+
+    /// Outside the email section a trailing "Note:" paragraph is meta.
+    func testStripsTrailingNoteAfterNonEmailSection() {
+        let text = "## Suggested follow-up email\nHi,\n\n## Risks and concerns\nSome risk.\n\nNote: generated."
+        XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(text),
+                       "## Suggested follow-up email\nHi,\n\n## Risks and concerns\nSome risk.")
+    }
+
+    func testBoldAndColonOnlyHeadingsCountAsPresent() {
+        let bold = note().replacingOccurrences(of: "## Action items", with: "**Action items**")
+        let colon = note().replacingOccurrences(of: "## Action items", with: "Action items:")
+        for text in [bold, colon] {
+            XCTAssertTrue(SummaryPostProcess.missingHeadings(in: text, style: .factsFirst).isEmpty)
+            XCTAssertEqual(SummaryPostProcess.ensureHeadings(text, style: .factsFirst), text,
+                           "no duplicate 'none stated' section")
+        }
+    }
+
+    func testPipeTableLedgerRowsDoNotCollapsePerSpeaker() {
+        let text = """
+        ## Facts ledger
+        | rate 600 | SPEAKER_01 | "six hundred a day" | rate |
+        | start March | SPEAKER_01 | "from March" | date |
+        | rate 600 | SPEAKER_01 | "six hundred a day" | rate |
+        """
+        let out = SummaryPostProcess.dedupeLedgerRows(text)
+        XCTAssertTrue(out.contains("start March"))
+        XCTAssertEqual(out.components(separatedBy: "\n").filter { $0.hasPrefix("|") }.count, 2)
+    }
+
     func testKeepsNoteInsideTheBody() {
         let text = "## Risks and concerns\nNote: the rate is unconfirmed.\n\n## Suggested follow-up email\nHi,\n\nThanks."
         XCTAssertEqual(SummaryPostProcess.stripTrailingMeta(text), text)
     }
 
     func testCleanRunsAllStepsInOrder() {
-        let broken = note(without: ["## Action items"]) + "\n\nNote: done."
+        let broken = note(without: ["## Action items"]) + "\n\n---\n\nNote: done."
         let cleaned = SummaryPostProcess.clean(broken, style: .factsFirst)
         XCTAssertFalse(cleaned.contains("Note: done."))
         XCTAssertTrue(SummaryPostProcess.missingHeadings(in: cleaned, style: .factsFirst).isEmpty)

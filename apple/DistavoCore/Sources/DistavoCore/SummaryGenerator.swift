@@ -37,6 +37,10 @@ public enum SummaryDriverError: Error, Equatable {
     /// A prompt measured with the real tokenizer leaves no room for an answer
     /// (`measured` tokens against a `contextSize`-token window).
     case promptTooLong(measured: Int, contextSize: Int)
+    /// The measured prompt leaves less than half the reserved output (`available`
+    /// vs `wanted` tokens): a note generated into that space would be silently
+    /// truncated, so it is refused instead.
+    case outputBudgetTooSmall(available: Int, wanted: Int)
 }
 
 /// Everything the driver needs besides the generator.
@@ -82,13 +86,14 @@ public enum SummaryDriver {
         let contextSize = generator.contextSize
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: request.noteOwner,
-            userSpeaker: request.userSpeaker, style: request.style)
+            userSpeaker: request.userSpeaker, style: request.style,
+            extraInstructions: request.endOfTurnBlock)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
             transcript: request.transcript, contextSize: contextSize,
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
-            style: request.style)
+            style: request.style, extraInstructions: request.endOfTurnBlock)
 
         switch plan {
         case .single:
@@ -150,7 +155,8 @@ public enum SummaryDriver {
         let contextSize = generator.contextSize
         let budget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: request.noteOwner,
-            userSpeaker: request.userSpeaker, style: request.style)
+            userSpeaker: request.userSpeaker, style: request.style,
+            extraInstructions: request.endOfTurnBlock)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
         var merged = EmbeddedSummaryPrompt.merge(partials: partials)
 
@@ -194,6 +200,9 @@ public enum SummaryDriver {
             guard available > 0 else {
                 throw SummaryDriverError.promptTooLong(
                     measured: measured, contextSize: generator.contextSize)
+            }
+            guard available * 2 >= maxOutputTokens else {
+                throw SummaryDriverError.outputBudgetTooSmall(available: available, wanted: maxOutputTokens)
             }
             outputTokens = min(maxOutputTokens, available)
         }

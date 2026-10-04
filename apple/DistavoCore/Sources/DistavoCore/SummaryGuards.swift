@@ -72,11 +72,21 @@ public enum SummaryPostProcess {
             .lowercased()
     }
 
+    /// Whether a line can stand as a section heading: a `#` heading, a
+    /// bold-only line (`**Action items**`) or a short colon-only line
+    /// (`Action items:`) — models drift to these.
+    private static func looksLikeHeading(_ line: String) -> Bool {
+        let t = line.trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("#") { return true }
+        if t.count > 2, t.hasPrefix("**"), t.hasSuffix("**") || t.hasSuffix("**:") || t.hasSuffix(":**") { return true }
+        return t.hasSuffix(":") && t.count < 60 && !t.hasPrefix("-") && !t.hasPrefix("|")
+    }
+
     /// Required headings that `text` does not contain. Case-insensitive and
-    /// tolerant of a trailing colon or bold markers.
+    /// tolerant of a trailing colon, bold-only and colon-only heading lines.
     public static func missingHeadings(in text: String, style: Prompt.Style) -> [String] {
         let present = Set(text.components(separatedBy: "\n")
-            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            .filter(looksLikeHeading)
             .map(normalisedHeading))
         return requiredHeadings(for: style).filter { !present.contains(normalisedHeading($0)) }
     }
@@ -97,7 +107,7 @@ public enum SummaryPostProcess {
             // First later-in-order heading that exists in the (growing) text.
             let anchorIndex = lines.firstIndex { line in
                 after.contains { normalisedHeading($0) == normalisedHeading(line) }
-                    && line.trimmingCharacters(in: .whitespaces).hasPrefix("#")
+                    && looksLikeHeading(line)
             }
             let block = [heading, "", "none stated", ""]
             if let i = anchorIndex {
@@ -144,7 +154,13 @@ public enum SummaryPostProcess {
     }
 
     private static func ledgerKey(_ row: String) -> String {
-        let fields = row.split(separator: "|", omittingEmptySubsequences: false)
+        // A pipe-table row starts with "|": drop the outer pipes first, or the
+        // leading empty field shifts the excerpt column onto "who said it" and
+        // every row by one speaker collapses into one.
+        var body = Substring(row)
+        if body.hasPrefix("|") { body = body.dropFirst() }
+        if body.hasSuffix("|") { body = body.dropLast() }
+        let fields = body.split(separator: "|", omittingEmptySubsequences: false)
             .map { String($0) }
         let basis = fields.count >= 3 ? fields[0] + "|" + fields[2] : row
         let folded = basis.lowercased().unicodeScalars
@@ -160,23 +176,59 @@ public enum SummaryPostProcess {
         "disclaimer:", "this summary was", "this note was",
     ]
 
+    /// Meta markers that never start a real email paragraph, so they are safe
+    /// to strip even at the end of the follow-up email section.
+    private static let strongMetaPrefixes = ["self-correction", "self correction", "(self-correction"]
+
     /// Remove trailing meta paragraphs ("(Self-Correction …)", "Note: …",
     /// "Let me know if …", a lone `---`). Only the END of the text is touched,
     /// and only whole paragraphs that begin with a meta marker, so a "Note:"
     /// inside a section is never removed.
+    ///
+    /// The last section is usually the follow-up email, whose own closing
+    /// ("Let me know if I've missed anything.") looks exactly like model chatter.
+    /// So when the text ends in that section, only what follows a `---`
+    /// separator is stripped, plus self-correction paragraphs; anywhere else the
+    /// full marker list applies.
     public static func stripTrailingMeta(_ text: String) -> String {
         var paragraphs = text.components(separatedBy: "\n\n")
-        func isMeta(_ paragraph: String) -> Bool {
+        func folded(_ paragraph: String) -> String {
             let first = paragraph.trimmingCharacters(in: .whitespacesAndNewlines)
                 .components(separatedBy: "\n").first ?? ""
-            let folded = first.trimmingCharacters(in: CharacterSet(charactersIn: " \t*_>#"))
-                .lowercased()
-            if folded.isEmpty { return true }
-            if folded.allSatisfy({ $0 == "-" || $0 == "*" || $0 == "_" }) && folded.count >= 3 { return true }
-            return metaPrefixes.contains { folded.hasPrefix($0) }
+            return first.trimmingCharacters(in: CharacterSet(charactersIn: " \t*_>#")).lowercased()
         }
-        while paragraphs.count > 1, let last = paragraphs.last, isMeta(last) {
-            paragraphs.removeLast()
+        func isRule(_ paragraph: String) -> Bool {
+            let f = folded(paragraph)
+            return f.count >= 3 && f.allSatisfy { $0 == "-" || $0 == "*" || $0 == "_" }
+        }
+        func isMeta(_ paragraph: String) -> Bool {
+            let f = folded(paragraph)
+            return f.isEmpty || isRule(paragraph) || metaPrefixes.contains { f.hasPrefix($0) }
+        }
+        func isStrongMeta(_ paragraph: String) -> Bool {
+            let f = folded(paragraph)
+            return f.isEmpty || isRule(paragraph) || strongMetaPrefixes.contains { f.hasPrefix($0) }
+        }
+
+        let lastHeading = paragraphs.lastIndex { p in
+            p.components(separatedBy: "\n").contains { $0.hasPrefix("#") }
+        }
+        let endsInEmail = lastHeading.map { index in
+            let heading = paragraphs[index].components(separatedBy: "\n").last { $0.hasPrefix("#") } ?? ""
+            return normalisedHeading(heading) == "suggested follow-up email"
+        } ?? false
+
+        if endsInEmail, let h = lastHeading {
+            if let rule = paragraphs.indices.last(where: { $0 > h && isRule(paragraphs[$0]) }) {
+                paragraphs.removeSubrange(rule...)
+            }
+            while paragraphs.count > 1, let last = paragraphs.last, isStrongMeta(last) {
+                paragraphs.removeLast()
+            }
+        } else {
+            while paragraphs.count > 1, let last = paragraphs.last, isMeta(last) {
+                paragraphs.removeLast()
+            }
         }
         return paragraphs.joined(separator: "\n\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)

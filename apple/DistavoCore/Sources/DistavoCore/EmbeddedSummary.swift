@@ -89,14 +89,18 @@ public struct EmbeddedSummaryBudget: Equatable {
     /// `reservedForOutput` is `finalOutputTokens(style:)` — 1800 for classic,
     /// which is what every pre-#2198 caller got.
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
-                             style: Prompt.Style = .classic)
+                             style: Prompt.Style = .classic, extraInstructions: String? = nil)
         -> EmbeddedSummaryBudget {
         let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
                                         userSpeaker: userSpeaker, style: style)
+        // The end-of-user-turn block rides in the final prompt, so its tokens
+        // come out of the transcript budget too.
+        let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return EmbeddedSummaryBudget(
             contextSize: contextSize,
             reservedForOutput: finalOutputTokens(style: style),
-            instructionTokens: EmbeddedSummaryTokens.estimate(instructions))
+            instructionTokens: EmbeddedSummaryTokens.estimate(instructions)
+                + EmbeddedSummaryTokens.estimate(extra))
     }
 }
 
@@ -192,10 +196,11 @@ public enum EmbeddedSummaryPlanner {
     /// Decide between one pass and map-reduce for this transcript.
     public static func plan(
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
-        style: Prompt.Style = .classic
+        style: Prompt.Style = .classic, extraInstructions: String? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
-            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style)
+            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
+            extraInstructions: extraInstructions)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

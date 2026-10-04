@@ -43,8 +43,11 @@ public enum ProcessingPhase: String, Equatable, Sendable {
 public enum SummariseTarget: Equatable, Sendable {
     /// A user-controlled Ollama endpoint (the `server` or `local` config target).
     case ollama(url: String, model: String)
-    /// Apple Foundation Models on this Mac — no network, no endpoint.
-    case embedded
+    /// An on-device model — no network, no endpoint. `model` is an
+    /// `EmbeddedSummaryModelCatalog` id ("apple" = Foundation Models); it is
+    /// carried here because the summarise closure never sees `Config`
+    /// (Vikunja #2198).
+    case embedded(model: String)
 }
 
 public struct ProcessResult: Equatable {
@@ -142,7 +145,9 @@ public struct PipelineDeps {
     /// cannot import DistavoEmbedded, so this comes in through the DI seam like
     /// `ollamaReachable`. Defaults to `.ready`, keeping every existing caller and
     /// test unchanged; the app layer wires it to `EmbeddedSummariser`.
-    public var embeddedReadiness: () async -> EmbeddedReadiness
+    /// Keyed by the `EmbeddedSummaryModelCatalog` id being asked about, so each
+    /// on-device model (Apple's, a downloaded Gemma) reports its own state.
+    public var embeddedReadiness: (_ model: String) async -> EmbeddedReadiness
     public var summarise: (_ transcript: String, _ target: SummariseTarget,
                            _ options: SummariseOptions, _ context: NoteContext) async throws -> String
     /// Seconds of audio in a file, or nil when unknown. Consulted before
@@ -159,7 +164,7 @@ public struct PipelineDeps {
         ollamaReachable: @escaping (String) async -> Bool,
         summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String,
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
-        embeddedReadiness: @escaping () async -> EmbeddedReadiness = { .ready },
+        embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) }
     ) {
         self.convertToWav = convertToWav
@@ -251,12 +256,15 @@ public enum Pipeline {
     /// normal Ollama selection rather than failing.
     static func chooseSummariser(
         _ config: Config, reachable: (String) async -> Bool,
-        embeddedReadiness: () async -> EmbeddedReadiness = { .ready }
+        embeddedReadiness: (String) async -> EmbeddedReadiness = { _ in .ready }
     ) async -> SummariserChoice {
         let s = config.summarise
         if s.backend == "embedded" && s.embeddedEnabled {
-            switch await embeddedReadiness() {
-            case .ready: return .use(.embedded)
+            // An unknown id resolves to Apple's model, so readiness is only ever
+            // asked about a catalogue entry.
+            let model = EmbeddedSummaryModelCatalog.model(id: s.embeddedModel).id
+            switch await embeddedReadiness(model) {
+            case .ready: return .use(.embedded(model: model))
             case .temporarilyUnavailable(let why): return .deferred(why)
             case .unsupported(let why): return .unavailable(why)
             }

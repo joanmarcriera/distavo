@@ -127,51 +127,31 @@ public enum EmbeddedSummariser {
         #if canImport(FoundationModels)
         guard #available(macOS 26, *) else { throw EmbeddedSummariserError.unsupportedOS }
 
-        let model = SystemLanguageModel.default
-        let contextSize = model.contextSize
-
-        let finalBudget = EmbeddedSummaryBudget.final(
-            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker)
-        let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
-
-        let plan = EmbeddedSummaryPlanner.plan(
-            transcript: transcript, contextSize: contextSize,
-            noteOwner: noteOwner, userSpeaker: userSpeaker)
-
-        switch plan {
-        case .single:
-            report("Summarising on this Mac…")
-            let prompt = Prompt.build(
-                transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
-                participants: participants)
-            return try await generate(prompt, maxOutputTokens: finalBudget.reservedForOutput)
-
-        case .contextTooSmall:
-            throw EmbeddedSummariserError.contextTooSmall
-
-        case .mapReduce(let chunks):
-            guard !chunks.isEmpty else { throw EmbeddedSummariserError.emptyResult }
-            var partials: [String] = []
-            partials.reserveCapacity(chunks.count)
-            for (i, chunk) in chunks.enumerated() {
-                report("Summarising part \(i + 1) of \(chunks.count) on this Mac…")
-                let text = try await generate(
-                    EmbeddedSummaryPrompt.map(chunk: chunk, index: i + 1, total: chunks.count),
-                    maxOutputTokens: mapBudget.reservedForOutput)
-                partials.append(text)
+        // The plan/map/reduce/final flow is engine-agnostic and lives in
+        // DistavoCore's `SummaryDriver` (Vikunja #2198 S3); this type is the
+        // Foundation Models adapter. Always the classic prompt on-device: the
+        // 4096-token window cannot afford facts-first (Vikunja #2063).
+        let request = SummaryRequest(
+            transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
+            participants: participants)
+        do {
+            return try await SummaryDriver.run(
+                request, generator: FoundationModelsGenerator(), onProgress: report)
+        } catch let error as SummaryDriverError {
+            switch error {
+            case .contextTooSmall:
+                throw EmbeddedSummariserError.contextTooSmall
+            case .emptyResult:
+                throw EmbeddedSummariserError.emptyResult
+            case .outputBudgetTooSmall(let available, let wanted):
+                throw EmbeddedSummariserError.failed(
+                    "a section of the recording left room for only \(available) of the "
+                    + "\(wanted) tokens the note needs")
+            case .promptTooLong(let measured, let contextSize):
+                throw EmbeddedSummariserError.failed(
+                    "a section of the recording was still too long after chunking "
+                    + "(\(measured) tokens vs a \(contextSize)-token window)")
             }
-            report("Writing the note…")
-            // The merged bullets stand in for the transcript in the normal prompt.
-            // They are far shorter than the original, but a very long meeting can
-            // still overflow, so fold them down until they fit.
-            let merged = try await reduceToFit(
-                partials: partials, contextSize: contextSize,
-                noteOwner: noteOwner, userSpeaker: userSpeaker, onProgress: report)
-            return try await generate(
-                Prompt.build(transcript: merged, noteOwner: noteOwner, userSpeaker: userSpeaker,
-                             participants: participants),
-                maxOutputTokens: finalBudget.reservedForOutput)
-
         }
         #else
         throw EmbeddedSummariserError.unsupportedOS
@@ -179,113 +159,58 @@ public enum EmbeddedSummariser {
     }
 
     #if canImport(FoundationModels)
-    /// Collapse partial notes until they fit the final prompt's budget.
-    ///
-    /// A meeting long enough to produce more bullet notes than the window can
-    /// hold gets another map pass over the notes themselves. Bounded to a few
-    /// rounds so a pathological transcript cannot loop forever.
+    /// Apple's on-device model as a `SummaryGenerator`: a fresh session per
+    /// call, Foundation Models' errors mapped onto Distavo's own error type.
     @available(macOS 26, *)
-    private static func reduceToFit(
-        partials: [String], contextSize: Int, noteOwner: String, userSpeaker: String,
-        onProgress: @Sendable (String) -> Void
-    ) async throws -> String {
-        let budget = EmbeddedSummaryBudget.final(
-            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker)
-        var merged = EmbeddedSummaryPrompt.merge(partials: partials)
+    private struct FoundationModelsGenerator: SummaryGenerator {
+        let contextSize: Int = SystemLanguageModel.default.contextSize
 
-        for round in 1...3 {
-            if EmbeddedSummaryTokens.estimate(merged) <= budget.transcriptTokens { return merged }
-            onProgress("Condensing notes (pass \(round))…")
-            let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
-            let chunks = EmbeddedSummaryPlanner.chunks(
-                transcript: merged, budgetTokens: mapBudget.transcriptTokens)
-            guard !chunks.isEmpty else { break }
-            var condensed: [String] = []
-            for (i, chunk) in chunks.enumerated() {
-                condensed.append(try await generate(
-                    EmbeddedSummaryPrompt.map(chunk: chunk, index: i + 1, total: chunks.count),
-                    maxOutputTokens: mapBudget.reservedForOutput))
-            }
-            let folded = EmbeddedSummaryPrompt.merge(partials: condensed)
-            // A single chunk still folds (the bullets get terser), but if a round
-            // stops shrinking, further rounds are wasted model calls. Keep the
-            // SMALLER of the two: adopting a folded result that grew would hand
-            // the truncation below a longer string and discard more real content
-            // than necessary.
-            guard folded.count < merged.count else { break }
-            merged = folded
+        /// The exact count (macOS 26.4+); nil on older systems, where the
+        /// driver falls back to its character heuristic.
+        func tokenCount(_ text: String) async -> Int? {
+            guard #available(macOS 26.4, *) else { return nil }
+            return try? await SystemLanguageModel.default.tokenCount(for: FoundationModels.Prompt(text))
         }
 
-        // Still too long after bounded folding — truncate on a line boundary so
-        // the final pass produces a note instead of throwing.
-        let maxChars = Int(Double(budget.transcriptTokens) * EmbeddedSummaryTokens.charsPerToken)
-        guard merged.count > maxChars else { return merged }
-        let cut = String(merged.prefix(maxChars))
-        return cut.contains("\n") ? String(cut[..<cut.lastIndex(of: "\n")!]) : cut
-    }
-
-    /// One generation call on a fresh session, with Foundation Models' errors
-    /// mapped onto Distavo's own error type.
-    ///
-    /// `maxOutputTokens` is passed through to `maximumResponseTokens` so the
-    /// answer cannot grow into the space the prompt already occupies — the
-    /// commonest cause of `exceededContextWindowSize`.
-    @available(macOS 26, *)
-    private static func generate(_ prompt: String, maxOutputTokens: Int) async throws -> String {
-        let model = SystemLanguageModel.default
-        // Clamp the answer against the REAL token count of this prompt. The
-        // character heuristic in DistavoCore is deliberately pessimistic but
-        // still only an estimate; asking for more output than the window can
-        // hold is what raises exceededContextWindowSize. Measuring here means a
-        // heuristic miss costs a shorter answer, not a failed recording.
-        var outputTokens = maxOutputTokens
-        if #available(macOS 26.4, *), let measured = try? await model.tokenCount(for: Prompt(prompt)) {
-            let available = model.contextSize - measured - EmbeddedSummaryBudget.defaultSafetyMargin
-            guard available > 0 else {
-                throw EmbeddedSummariserError.failed(
-                    "a section of the recording was still too long after chunking "
-                    + "(\(measured) tokens vs a \(model.contextSize)-token window)")
+        /// `maxOutputTokens` reaches `maximumResponseTokens` so the answer cannot
+        /// grow into the space the prompt already occupies — the commonest cause
+        /// of `exceededContextWindowSize`. The driver has already clamped it
+        /// against the measured prompt size.
+        func generate(_ prompt: String, maxOutputTokens: Int) async throws -> String {
+            let session = LanguageModelSession(model: SystemLanguageModel.default)
+            do {
+                // Temperature matches the Ollama path's 0.1 — meeting notes should be
+                // reproducible, not creative.
+                let response = try await session.respond(
+                    to: prompt,
+                    options: GenerationOptions(temperature: 0.1,
+                                               maximumResponseTokens: maxOutputTokens))
+                return response.content
+            } catch let error as LanguageModelSession.GenerationError {
+                switch error {
+                case .exceededContextWindowSize:
+                    // The planner budgets against an estimate; a miss should read as a
+                    // size problem, not a mystery.
+                    throw EmbeddedSummariserError.failed(
+                        "the recording was too long for the on-device model's context window")
+                case .guardrailViolation:
+                    throw EmbeddedSummariserError.refused("content guardrail")
+                case .refusal:
+                    // Refusal.explanation is itself an async model call that can
+                    // throw; not worth a second round-trip on a failed note.
+                    throw EmbeddedSummariserError.refused("model refusal")
+                case .unsupportedLanguageOrLocale:
+                    throw EmbeddedSummariserError.failed(
+                        "the on-device model doesn't support this recording's language")
+                case .assetsUnavailable:
+                    throw EmbeddedSummariserError.modelNotReady
+                default:
+                    throw EmbeddedSummariserError.failed(
+                        error.errorDescription ?? "\(error)")
+                }
+            } catch {
+                throw EmbeddedSummariserError.failed(error.localizedDescription)
             }
-            outputTokens = min(maxOutputTokens, available)
-        }
-
-        let session = LanguageModelSession(model: model)
-        do {
-            // Temperature matches the Ollama path's 0.1 — meeting notes should be
-            // reproducible, not creative.
-            let response = try await session.respond(
-                to: prompt,
-                options: GenerationOptions(temperature: 0.1,
-                                           maximumResponseTokens: outputTokens))
-            let text = response.content.trimmingCharacters(in: .whitespacesAndNewlines)
-            if text.isEmpty { throw EmbeddedSummariserError.emptyResult }
-            return text
-        } catch let error as EmbeddedSummariserError {
-            throw error
-        } catch let error as LanguageModelSession.GenerationError {
-            switch error {
-            case .exceededContextWindowSize:
-                // The planner budgets against an estimate; a miss should read as a
-                // size problem, not a mystery.
-                throw EmbeddedSummariserError.failed(
-                    "the recording was too long for the on-device model's context window")
-            case .guardrailViolation:
-                throw EmbeddedSummariserError.refused("content guardrail")
-            case .refusal:
-                // Refusal.explanation is itself an async model call that can
-                // throw; not worth a second round-trip on a failed note.
-                throw EmbeddedSummariserError.refused("model refusal")
-            case .unsupportedLanguageOrLocale:
-                throw EmbeddedSummariserError.failed(
-                    "the on-device model doesn't support this recording's language")
-            case .assetsUnavailable:
-                throw EmbeddedSummariserError.modelNotReady
-            default:
-                throw EmbeddedSummariserError.failed(
-                    error.errorDescription ?? "\(error)")
-            }
-        } catch {
-            throw EmbeddedSummariserError.failed(error.localizedDescription)
         }
     }
     #endif

@@ -145,6 +145,11 @@ public struct SummariseConfig: Codable, Equatable {
     /// real kill switch: with this false, `backend == "embedded"` falls back to
     /// the Ollama path rather than failing, and Settings does not offer it.
     public var embeddedEnabled: Bool
+    /// Which on-device summary model the "embedded" backend runs (Vikunja
+    /// #2198): an `EmbeddedSummaryModelCatalog` id. **"apple" for any config
+    /// predating the key**, so nothing routes to a downloaded model until the
+    /// user picks one. An unknown id is stored as-is and resolves to "apple".
+    public var embeddedModel: String
     public var options: SummariseOptions
     /// Which prompt the Ollama path uses (Vikunja #2063). The on-device
     /// Foundation Models path always uses `classic` (context budget).
@@ -172,7 +177,7 @@ public struct SummariseConfig: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
-        case embeddedEnabled = "embedded_enabled", options
+        case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
         case promptStyle = "prompt_style"
         case noteLanguage = "note_language"
         case biggerModel = "bigger_model"
@@ -181,13 +186,15 @@ public struct SummariseConfig: Codable, Equatable {
     public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
                 local: OllamaTarget = .init(), allowLocalFallback: Bool = false,
                 embeddedEnabled: Bool = false,
+                embeddedModel: String = EmbeddedSummaryModelCatalog.appleID,
                 options: SummariseOptions = .init(),
                 promptStyle: Prompt.Style = .classic,
                 noteLanguage: String = "en",
                 biggerModel: String? = nil) {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
-        self.embeddedEnabled = embeddedEnabled; self.options = options
+        self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
+        self.options = options
         self.promptStyle = promptStyle
         self.noteLanguage = noteLanguage
         self.biggerModel = biggerModel
@@ -201,6 +208,7 @@ public struct SummariseConfig: Codable, Equatable {
         local = try c.decodeIfPresent(OllamaTarget.self, forKey: .local) ?? d.local
         allowLocalFallback = try c.decodeIfPresent(Bool.self, forKey: .allowLocalFallback) ?? d.allowLocalFallback
         embeddedEnabled = try c.decodeIfPresent(Bool.self, forKey: .embeddedEnabled) ?? d.embeddedEnabled
+        embeddedModel = try c.decodeIfPresent(String.self, forKey: .embeddedModel) ?? d.embeddedModel
         options = try c.decodeIfPresent(SummariseOptions.self, forKey: .options) ?? d.options
         // An unknown string (or a missing key) falls back to the default
         // rather than failing the whole config.

@@ -104,7 +104,21 @@ extension PipelineDeps {
         // .embedded when summarise.embeddedEnabled is on (Vikunja #336).
         let ollamaSummarise = deps.summarise
         deps.summarise = { transcript, target, options, context in
-            if case .embedded = target {
+            if case .embedded(let model) = target {
+                // A downloaded model (local Gemma, Vikunja #2198) runs through the
+                // MLX route (routing trace + generator); unlike Apple's it follows
+                // the configured prompt style and note language. The route lives in
+                // DistavoEmbedded so headless tests exercise the same code.
+                if model != EmbeddedSummaryModelCatalog.appleID {
+                    return try await GemmaPipelineRoute.summarise(
+                        transcript: transcript, modelID: model, context: context)
+                }
+                // Activity-log trace for Apple's model: always the classic prompt,
+                // no note language.
+                await ModelCoordinator.shared.report(SummaryRouting.traceLine(
+                    model: EmbeddedSummaryModelCatalog.model(id: model), transcript: transcript,
+                    noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
+                    style: .classic, noteLanguage: nil))
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(
@@ -119,7 +133,20 @@ extension PipelineDeps {
         // merely still downloading or switched off — the on-device analogue of
         // "Ollama server offline". Conditions that can never resolve on this Mac
         // stay failures, pointing the user back at Ollama.
-        deps.embeddedReadiness = {
+        deps.embeddedReadiness = { model in
+            guard model == EmbeddedSummaryModelCatalog.appleID else {
+                // Edition gate: Direct only for now (see SummaryModelEdition).
+                // Setapp shares Direct's config path, so a config naming Gemma
+                // must not silently start a download or run the engine there.
+                guard SummaryModelEdition.offersDownloadedModels else {
+                    return .unsupported("The local Gemma summary model is not available in this edition — choose Apple Intelligence or Ollama in Settings.")
+                }
+                // A downloaded model: "download pending / in progress / failed
+                // its integrity check once" defer (never fail); RAM below the
+                // floor, an Intel Mac, or a download corrupt twice are the only
+                // failures. The manager also starts a missing download.
+                return await SummaryModelManager.shared.readiness(modelID: model)
+            }
             guard let reason = EmbeddedSummariser.unavailableReason() else { return .ready }
             let why = reason.errorDescription ?? "On-device summarisation is unavailable."
             switch reason {

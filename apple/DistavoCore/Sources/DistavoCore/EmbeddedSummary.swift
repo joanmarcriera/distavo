@@ -75,18 +75,32 @@ public struct EmbeddedSummaryBudget: Equatable {
             instructionTokens: EmbeddedSummaryTokens.estimate(EmbeddedSummaryPrompt.mapInstructions))
     }
 
+    /// Tokens held back for the final note, by prompt style. Classic's answer
+    /// was measured at ~700 tokens for a trivial transcript and fills out to
+    /// 1800 on a real meeting; facts-first adds the speakers section and the
+    /// facts ledger, and the Gemma spike (S0b) needed ~3500 for a full note.
+    public static func finalOutputTokens(style: Prompt.Style) -> Int {
+        style == .factsFirst ? 3500 : 1800
+    }
+
     /// Budget for the **final** step: Distavo's full 16-section prompt, whose
     /// answer is a complete note with two tables and an email.
     ///
-    /// `reservedForOutput` is 1800 — the smoke test produced ~700 tokens for a
-    /// trivial transcript, and a real meeting fills the tables.
-    public static func final(contextSize: Int, noteOwner: String, userSpeaker: String)
+    /// `reservedForOutput` is `finalOutputTokens(style:)` — 1800 for classic,
+    /// which is what every pre-#2198 caller got.
+    public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
+                             style: Prompt.Style = .classic, extraInstructions: String? = nil)
         -> EmbeddedSummaryBudget {
-        let instructions = Prompt.build(transcript: "", noteOwner: noteOwner, userSpeaker: userSpeaker)
+        let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
+                                        userSpeaker: userSpeaker, style: style)
+        // The end-of-user-turn block rides in the final prompt, so its tokens
+        // come out of the transcript budget too.
+        let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return EmbeddedSummaryBudget(
             contextSize: contextSize,
-            reservedForOutput: 1800,
-            instructionTokens: EmbeddedSummaryTokens.estimate(instructions))
+            reservedForOutput: finalOutputTokens(style: style),
+            instructionTokens: EmbeddedSummaryTokens.estimate(instructions)
+                + EmbeddedSummaryTokens.estimate(extra))
     }
 }
 
@@ -181,10 +195,12 @@ public enum EmbeddedSummaryPlanner {
 
     /// Decide between one pass and map-reduce for this transcript.
     public static func plan(
-        transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String
+        transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
+        style: Prompt.Style = .classic, extraInstructions: String? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
-            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker)
+            contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
+            extraInstructions: extraInstructions)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

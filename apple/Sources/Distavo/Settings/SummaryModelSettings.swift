@@ -19,9 +19,8 @@ enum SummaryModelEdition {
     /// Catalogue entries this edition AND this Mac may use. Always contains
     /// Apple's model; downloadable ones only where the edition offers them.
     static func selectable(memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes) -> [EmbeddedSummaryModel] {
-        EmbeddedSummaryModelCatalog.selectable(memoryBytes: memoryBytes).filter {
-            $0.downloadMB == 0 || offersDownloadedModels
-        }
+        EmbeddedSummaryModelCatalog.selectable(
+            memoryBytes: memoryBytes, allowDownloaded: offersDownloadedModels)
     }
 }
 

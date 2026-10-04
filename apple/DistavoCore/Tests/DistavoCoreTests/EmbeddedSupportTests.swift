@@ -78,6 +78,18 @@ final class EmbeddedSupportTests: XCTestCase {
         XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(memoryBytes: 24 * gb).map(\.id), ["apple", "gemma-4-e4b"])
     }
 
+    /// The edition gate (App Store / Setapp pass `allowDownloaded: false`): only
+    /// Apple's built-in model is offered, however much memory the Mac has.
+    func testEditionGateOffersOnlyAppleWhereDownloadsAreNotAllowed() {
+        let gb: UInt64 = 1024 * 1024 * 1024
+        for memory in [8, 16, 64] {
+            XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(
+                memoryBytes: UInt64(memory) * gb, allowDownloaded: false).map(\.id), ["apple"])
+        }
+        XCTAssertEqual(EmbeddedSummaryModelCatalog.selectable(
+            memoryBytes: 16 * gb, allowDownloaded: true).map(\.id), ["apple", "gemma-4-e4b"])
+    }
+
     func testSummaryModelMeetsMemoryFloor() {
         let gb: UInt64 = 1024 * 1024 * 1024
         let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")

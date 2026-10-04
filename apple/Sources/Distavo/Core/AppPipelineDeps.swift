@@ -105,25 +105,20 @@ extension PipelineDeps {
         let ollamaSummarise = deps.summarise
         deps.summarise = { transcript, target, options, context in
             if case .embedded(let model) = target {
-                // Activity-log trace (Vikunja #2198, S6): model, context cap and
-                // single pass vs map-reduce, like the transcription routing line.
-                let noteStyle = model == EmbeddedSummaryModelCatalog.appleID ? Prompt.Style.classic : context.promptStyle
+                // A downloaded model (local Gemma, Vikunja #2198) runs through the
+                // MLX route (routing trace + generator); unlike Apple's it follows
+                // the configured prompt style and note language. The route lives in
+                // DistavoEmbedded so headless tests exercise the same code.
+                if model != EmbeddedSummaryModelCatalog.appleID {
+                    return try await GemmaPipelineRoute.summarise(
+                        transcript: transcript, modelID: model, context: context)
+                }
+                // Activity-log trace for Apple's model: always the classic prompt,
+                // no note language.
                 await ModelCoordinator.shared.report(SummaryRouting.traceLine(
                     model: EmbeddedSummaryModelCatalog.model(id: model), transcript: transcript,
                     noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
-                    style: noteStyle,
-                    noteLanguage: model == EmbeddedSummaryModelCatalog.appleID ? nil : context.noteLanguage))
-                // A downloaded model (local Gemma, Vikunja #2198) runs through the
-                // MLX generator, and unlike Apple's it follows the configured
-                // prompt style and note language: its window is big enough for
-                // facts-first and Catalan/Spanish notes.
-                if model != EmbeddedSummaryModelCatalog.appleID {
-                    return try await GemmaSummariser.summarise(
-                        transcript: transcript, modelID: model,
-                        noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
-                        participants: context.participants, style: context.promptStyle,
-                        meetingDate: context.meetingDate, noteLanguage: context.noteLanguage)
-                }
+                    style: .classic, noteLanguage: nil))
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(

@@ -140,9 +140,12 @@ public enum EmbeddedSummaryModelCatalog {
     }
 
     /// Entries this Mac may run (the same physical-memory gate as transcription).
+    /// `allowDownloaded` is the edition gate: false drops every model that needs
+    /// a download, leaving only Apple's built-in one (App Store / Setapp).
     public static func selectable(
-        memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes
+        memoryBytes: UInt64 = HardwareProbe.physicalMemoryBytes,
+        allowDownloaded: Bool = true
     ) -> [EmbeddedSummaryModel] {
-        models.filter { $0.fits(memoryBytes: memoryBytes) }
+        models.filter { $0.fits(memoryBytes: memoryBytes) && (allowDownloaded || $0.downloadMB == 0) }
     }
 }

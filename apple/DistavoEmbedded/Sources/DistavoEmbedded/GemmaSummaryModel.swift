@@ -413,13 +413,18 @@ public enum GemmaSummariser {
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
-        onProgress: (@Sendable (String) -> Void)? = nil
+        onProgress: (@Sendable (String) -> Void)? = nil,
+        root: URL = EmbeddedModelStore.modelsDirectory,
+        manager: SummaryModelManager = .shared
     ) async throws -> String {
+        // `root` / `manager` default to the app's real models folder and manager;
+        // headless tests inject a temp folder and an isolated manager.
         try await ModelCoordinator.shared.withExclusiveAccess {
             try await run(
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
-                meetingDate: meetingDate, noteLanguage: noteLanguage, onProgress: onProgress)
+                meetingDate: meetingDate, noteLanguage: noteLanguage, onProgress: onProgress,
+                root: root, manager: manager)
         }
     }
 
@@ -427,16 +432,17 @@ public enum GemmaSummariser {
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
-        onProgress: (@Sendable (String) -> Void)?
+        onProgress: (@Sendable (String) -> Void)?,
+        root: URL, manager: SummaryModelManager
     ) async throws -> String {
         let model = EmbeddedSummaryModelCatalog.model(id: modelID)
-        guard model.engine == .mlx, SummaryModelStore.isVerified(model) else {
+        guard model.engine == .mlx, SummaryModelStore.isVerified(model, root: root) else {
             // Readiness is checked before transcription; this is the race where
             // the files vanished in between — defer, don't fail.
             throw RetryableDependencyError("\(model.displayName) is not downloaded yet.")
         }
         let generator = MLXGemmaGenerator(
-            modelDirectory: SummaryModelStore.directory(for: model), modelID: model.id,
+            modelDirectory: SummaryModelStore.directory(for: model, root: root), modelID: model.id,
             contextSize: model.contextCap ?? 8192)
         defer { generator.unload() }
         let report: @Sendable (String) -> Void = onProgress ?? { message in
@@ -480,12 +486,42 @@ public enum GemmaSummariser {
                 (error as? GemmaLoadFailure)?.underlying ?? error,
                 model: model.id, tracker: .shared, isLoadFailure: isLoad)
             if resolution.discardWeights {
-                await SummaryModelManager.shared.discardWeights(
+                await manager.discardWeights(
                     model,
                     permanentMessage: resolution.permanent
                         ? (resolution.error as? LocalSummaryError)?.message : nil)
             }
             throw resolution.error
         }
+    }
+}
+
+// MARK: - Pipeline route
+
+/// The pipeline's summarise step for a downloaded model: the activity-log
+/// routing trace, then `GemmaSummariser`. Lives here (not in the app target's
+/// `AppPipelineDeps`) so headless tests drive exactly the code the app runs;
+/// `root` / `manager` default to the app's real folder and manager.
+public enum GemmaPipelineRoute {
+    public static func summarise(
+        transcript: String, modelID: String, context: NoteContext,
+        root: URL = EmbeddedModelStore.modelsDirectory,
+        manager: SummaryModelManager = .shared
+    ) async throws -> String {
+        // Activity-log trace (Vikunja #2198, S6): model, context cap and single
+        // pass vs map-reduce, like the transcription routing line.
+        await ModelCoordinator.shared.report(SummaryRouting.traceLine(
+            model: EmbeddedSummaryModelCatalog.model(id: modelID), transcript: transcript,
+            noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
+            style: context.promptStyle, noteLanguage: context.noteLanguage))
+        // Unlike Apple's model, Gemma follows the configured prompt style and
+        // note language: its window is big enough for facts-first and Catalan/
+        // Spanish notes.
+        return try await GemmaSummariser.summarise(
+            transcript: transcript, modelID: modelID,
+            noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
+            participants: context.participants, style: context.promptStyle,
+            meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
+            root: root, manager: manager)
     }
 }

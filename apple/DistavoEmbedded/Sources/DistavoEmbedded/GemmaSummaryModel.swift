@@ -107,6 +107,10 @@ public actor SummaryModelManager {
     private var removedByUser: Set<String> = []
     private var lastError: [String: String] = [:]
     private let optIn: SummaryDownloadOptIn
+    /// Physical memory / CPU the readiness decision sees (injectable so tests do
+    /// not depend on the machine they run on; CI runners have 7 GB).
+    private let memoryGB: Int
+    private let isAppleSilicon: Bool
 
     public init() {
         self.init(root: EmbeddedModelStore.modelsDirectory, coordinator: .shared,
@@ -114,7 +118,10 @@ public actor SummaryModelManager {
     }
 
     init(root: URL, coordinator: ModelCoordinator, fetch: @escaping SummaryFileFetch,
-         optIn: SummaryDownloadOptIn = .inMemory(initially: ["gemma-4-e4b"])) {
+         optIn: SummaryDownloadOptIn = .inMemory(initially: ["gemma-4-e4b"]),
+         memoryGB: Int = Int(HardwareProbe.physicalMemoryBytes / (1024 * 1024 * 1024)),
+         isAppleSilicon: Bool = HardwareProbe.isAppleSilicon) {
+        self.memoryGB = memoryGB; self.isAppleSilicon = isAppleSilicon
         self.root = root; self.coordinator = coordinator; self.fetch = fetch; self.optIn = optIn
     }
 
@@ -142,8 +149,7 @@ public actor SummaryModelManager {
         let freeMB = Int(EmbeddedModelStore.freeSpaceBytes(at: root) / (1024 * 1024))
         let result = SummaryModelReadiness.evaluate(
             model: model, downloadState: state,
-            memoryGB: Int(HardwareProbe.physicalMemoryBytes / (1024 * 1024 * 1024)),
-            isAppleSilicon: HardwareProbe.isAppleSilicon, freeDiskMB: freeMB)
+            memoryGB: memoryGB, isAppleSilicon: isAppleSilicon, freeDiskMB: freeMB)
         let needsDownload = state == .notStarted || state == .manifestMismatch
         if needsDownload, case .temporarilyUnavailable = result {
             if removedByUser.contains(model.id) {

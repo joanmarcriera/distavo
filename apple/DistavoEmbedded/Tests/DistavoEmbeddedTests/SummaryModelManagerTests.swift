@@ -201,7 +201,8 @@ final class SummaryModelManagerTests: XCTestCase {
         let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
         let fetches = Box()
         let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
-                                          fetch: { url, _, _ in fetches.add(url.lastPathComponent); throw URLError(.cancelled) })
+                                          fetch: { url, _, _ in fetches.add(url.lastPathComponent); throw URLError(.cancelled) },
+                                          memoryGB: 32, isAppleSilicon: true)
         let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
         await manager.cancelAndForgetAll()
         let r = await manager.readiness(modelID: gemma.id)
@@ -218,7 +219,7 @@ final class SummaryModelManagerTests: XCTestCase {
         let manager = SummaryModelManager(
             root: root, coordinator: ModelCoordinator(),
             fetch: { url, _, _ in fetches.add(url.lastPathComponent); throw URLError(.cancelled) },
-            optIn: .inMemory())
+            optIn: .inMemory(), memoryGB: 32, isAppleSilicon: true)
         let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
         let r = await manager.readiness(modelID: gemma.id)
         guard case .temporarilyUnavailable(let why) = r else { return XCTFail("expected a deferral, got \(r)") }

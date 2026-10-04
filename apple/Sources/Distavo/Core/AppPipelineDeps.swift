@@ -72,6 +72,8 @@ extension PipelineDeps {
             // Always report the engine + language line (also for a pinned model),
             // plus the recommendation when the router has one (#2667).
             await ModelCoordinator.shared.report(decision.logLine)
+            await ModelCoordinator.shared.report(
+                EngineRouter.traceLine(config: transcribeConfig, detections: detections, decision: decision))
             if let recommendation = decision.recommendation {
                 await ModelCoordinator.shared.report(recommendation)
             }

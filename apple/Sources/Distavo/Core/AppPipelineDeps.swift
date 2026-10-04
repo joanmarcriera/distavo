@@ -104,7 +104,12 @@ extension PipelineDeps {
         // .embedded when summarise.embeddedEnabled is on (Vikunja #336).
         let ollamaSummarise = deps.summarise
         deps.summarise = { transcript, target, options, context in
-            if case .embedded = target {
+            if case .embedded(let model) = target {
+                // Only Apple's model has an engine until the MLX generator lands
+                // (Vikunja #2198 S4-S6); readiness below already refuses the rest.
+                guard model == EmbeddedSummaryModelCatalog.appleID else {
+                    throw EmbeddedSummariserError.failed("the \(model) summary model is not available in this build")
+                }
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(
@@ -119,7 +124,12 @@ extension PipelineDeps {
         // merely still downloading or switched off — the on-device analogue of
         // "Ollama server offline". Conditions that can never resolve on this Mac
         // stay failures, pointing the user back at Ollama.
-        deps.embeddedReadiness = {
+        deps.embeddedReadiness = { model in
+            guard model == EmbeddedSummaryModelCatalog.appleID else {
+                // No generator for downloaded models yet (S4-S6): can never
+                // resolve on this build, so fail once rather than defer forever.
+                return .unsupported("The \(model) summary model isn't available in this version — switch back to Apple Intelligence or Ollama in Settings.")
+            }
             guard let reason = EmbeddedSummariser.unavailableReason() else { return .ready }
             let why = reason.errorDescription ?? "On-device summarisation is unavailable."
             switch reason {

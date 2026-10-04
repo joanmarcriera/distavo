@@ -714,7 +714,7 @@ final class PipelineTests: XCTestCase {
         cfg.summarise.embeddedEnabled = true
         // Unreachable server must not matter — the embedded engine needs no network.
         let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
-        XCTAssertEqual(choice, .use(.embedded))
+        XCTAssertEqual(choice, .use(.embedded(model: "apple")))
     }
 
     /// The feature flag is a kill switch: with it off, a config asking for
@@ -754,7 +754,7 @@ final class PipelineTests: XCTestCase {
     func testEmbeddedModelNotReadyDefersRatherThanFails() async {
         let choice = await Pipeline.chooseSummariser(
             embeddedConfig(), reachable: { _ in false },
-            embeddedReadiness: { .temporarilyUnavailable("model still downloading") })
+            embeddedReadiness: { _ in .temporarilyUnavailable("model still downloading") })
         XCTAssertEqual(choice, .deferred("model still downloading"))
     }
 
@@ -762,7 +762,7 @@ final class PipelineTests: XCTestCase {
     func testEmbeddedNotEnabledDefers() async {
         let choice = await Pipeline.chooseSummariser(
             embeddedConfig(), reachable: { _ in false },
-            embeddedReadiness: { .temporarilyUnavailable("Apple Intelligence is turned off") })
+            embeddedReadiness: { _ in .temporarilyUnavailable("Apple Intelligence is turned off") })
         XCTAssertEqual(choice, .deferred("Apple Intelligence is turned off"))
     }
 
@@ -771,7 +771,7 @@ final class PipelineTests: XCTestCase {
     func testEmbeddedUnsupportedOSFailsRatherThanDefersForever() async {
         let choice = await Pipeline.chooseSummariser(
             embeddedConfig(), reachable: { _ in false },
-            embeddedReadiness: { .unsupported("needs macOS 26 or later") })
+            embeddedReadiness: { _ in .unsupported("needs macOS 26 or later") })
         XCTAssertEqual(choice, .unavailable("needs macOS 26 or later"))
     }
 
@@ -782,7 +782,7 @@ final class PipelineTests: XCTestCase {
         let cfg = Config()  // default: server backend
         _ = await Pipeline.chooseSummariser(
             cfg, reachable: { _ in true },
-            embeddedReadiness: { probed = true; return .ready })
+            embeddedReadiness: { _ in probed = true; return .ready })
         XCTAssertFalse(probed)
     }
 
@@ -795,7 +795,7 @@ final class PipelineTests: XCTestCase {
         cfg.summarise.embeddedEnabled = true
 
         var d = deps()
-        d.embeddedReadiness = { .temporarilyUnavailable("model still downloading") }
+        d.embeddedReadiness = { _ in .temporarilyUnavailable("model still downloading") }
 
         let result = await Pipeline.processOne(path: input, config: cfg, deps: d,
                                                stableChecks: 1, stableDelay: 0)
@@ -833,7 +833,123 @@ final class PipelineTests: XCTestCase {
             stableChecks: 1, stableDelay: 0)
 
         XCTAssertEqual(result.status, .done)
-        XCTAssertEqual(seen.value, .embedded)
+        XCTAssertEqual(seen.value, .embedded(model: "apple"))
+    }
+
+    // MARK: Embedded model through the seam (Vikunja #2198 S2)
+
+    /// Thread-safe recorder for the transcribe-call count and readiness probes.
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var n = 0
+        private var ids: [String] = []
+        func bump() { lock.lock(); n += 1; lock.unlock() }
+        func probe(_ id: String) { lock.lock(); ids.append(id); lock.unlock() }
+        var count: Int { lock.lock(); defer { lock.unlock() }; return n }
+        var probed: [String] { lock.lock(); defer { lock.unlock() }; return ids }
+    }
+
+    private func gemmaConfig() -> Config {
+        var cfg = embeddedConfig()
+        cfg.summarise.embeddedModel = "gemma-4-e4b"
+        return cfg
+    }
+
+    func testChooseSummariserCarriesConfiguredModelAndProbesItsReadiness() async {
+        let seen = Counter()
+        let choice = await Pipeline.chooseSummariser(
+            gemmaConfig(), reachable: { _ in false },
+            embeddedReadiness: { id in seen.probe(id); return .ready })
+        XCTAssertEqual(choice, .use(.embedded(model: "gemma-4-e4b")))
+        XCTAssertEqual(seen.probed, ["gemma-4-e4b"])
+    }
+
+    /// An unknown id in a hand-edited config resolves to Apple's model, so
+    /// readiness is asked about a model that exists.
+    func testUnknownEmbeddedModelResolvesToApple() async {
+        var cfg = embeddedConfig()
+        cfg.summarise.embeddedModel = "no-such-model"
+        let choice = await Pipeline.chooseSummariser(cfg, reachable: { _ in false })
+        XCTAssertEqual(choice, .use(.embedded(model: "apple")))
+    }
+
+    /// Kill switch: `embedded_enabled = false` falls back to Ollama whichever
+    /// model the config names, and readiness is never probed.
+    func testKillSwitchBeatsGemmaModel() async {
+        var cfg = gemmaConfig()
+        cfg.summarise.embeddedEnabled = false
+        let seen = Counter()
+        let choice = await Pipeline.chooseSummariser(
+            cfg, reachable: { _ in true }, embeddedReadiness: { id in seen.probe(id); return .ready })
+        XCTAssertEqual(choice, .use(.ollama(url: cfg.summarise.server.url,
+                                            model: cfg.summarise.server.model)))
+        XCTAssertTrue(seen.probed.isEmpty)
+    }
+
+    /// Readiness is per model: Apple can be ready while Gemma's weights are
+    /// still downloading, and the deferral names the model that is not ready.
+    func testReadinessIsKeyedByModel() async {
+        let readiness: (String) async -> EmbeddedReadiness = { id in
+            id == "gemma-4-e4b" ? .temporarilyUnavailable("Gemma is downloading") : .ready
+        }
+        var cfg = embeddedConfig()
+        let apple = await Pipeline.chooseSummariser(cfg, reachable: { _ in false }, embeddedReadiness: readiness)
+        XCTAssertEqual(apple, .use(.embedded(model: "apple")))
+        cfg.summarise.embeddedModel = "gemma-4-e4b"
+        let gemma = await Pipeline.chooseSummariser(cfg, reachable: { _ in false }, embeddedReadiness: readiness)
+        XCTAssertEqual(gemma, .deferred("Gemma is downloading"))
+    }
+
+    /// Defer-never-fail end to end for Gemma: not ready defers BEFORE
+    /// transcription (no minutes of work wasted), leaves no failed marker, and
+    /// once readiness flips the next run reaches `.done` with the model id.
+    func testGemmaNotReadyDefersBeforeTranscribeThenCompletes() async throws {
+        let (cfgBase, input) = try makeEnv()
+        var cfg = cfgBase
+        cfg.summarise.backend = "embedded"
+        cfg.summarise.embeddedEnabled = true
+        cfg.summarise.embeddedModel = "gemma-4-e4b"
+
+        let transcribeCalls = Counter()
+        let seen = TargetRecorder()
+        let state = ReadyFlag()
+        var d = deps(reachable: { _ in false },
+                     summarise: { _, target, _, _ in seen.set(target); return PipelineTests.validNote })
+        let innerTranscribe = d.transcribe
+        d.transcribe = { url, tc in transcribeCalls.bump(); return try await innerTranscribe(url, tc) }
+        d.embeddedReadiness = { _ in state.ready ? .ready : .temporarilyUnavailable("downloading Gemma") }
+
+        let first = await Pipeline.processOne(path: input, config: cfg, deps: d,
+                                              stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(first.status, .deferredNeedLocal)
+        XCTAssertEqual(transcribeCalls.count, 0, "readiness must be decided before transcription")
+        let store = try DistavoState.Store(
+            stateDir: Config.resolvePath(cfg.workDir).appendingPathComponent(".state"),
+            notesDir: Config.resolvePath(cfg.notesDir))
+        XCTAssertFalse(store.isFailed("demo"))
+
+        state.ready = true
+        let second = await Pipeline.processOne(path: input, config: cfg, deps: d,
+                                               stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(second.status, .done)
+        XCTAssertEqual(seen.value, .embedded(model: "gemma-4-e4b"))
+    }
+
+    /// `.unsupported` (e.g. under the RAM floor) fails once with the reason.
+    func testGemmaUnsupportedFailsOnce() async {
+        let choice = await Pipeline.chooseSummariser(
+            gemmaConfig(), reachable: { _ in false },
+            embeddedReadiness: { _ in .unsupported("needs 16 GB of memory") })
+        XCTAssertEqual(choice, .unavailable("needs 16 GB of memory"))
+    }
+
+    private final class ReadyFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = false
+        var ready: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return value }
+            set { lock.lock(); value = newValue; lock.unlock() }
+        }
     }
 
     func testEmitsPhasesInPipelineOrder() async throws {

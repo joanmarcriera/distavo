@@ -154,6 +154,80 @@ final class SummaryModelManagerTests: XCTestCase {
         }
     }
 
+    // MARK: Removal and recovery (review findings)
+
+    /// remove() forgets a permanent failure and the manifest strikes, so a
+    /// removed-then-redownloaded model starts with a clean slate.
+    func testRemoveClearsPermanentFailureAndManifestStrikes() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let coordinator = ModelCoordinator()
+        let manager = SummaryModelManager(root: root, coordinator: coordinator,
+                                          fetch: fetching(["config.json": Data("{}".utf8), "model.safetensors": Data("WEIGHTS".utf8)]))
+        for _ in 0..<2 { do { try await manager.download(model) } catch {} }
+        var state = await manager.downloadState(model)
+        if case .failedPermanently = state {} else { XCTFail("setup: expected permanent, got \(state)") }
+        await manager.remove(model)
+        state = await manager.downloadState(model)
+        XCTAssertEqual(state, .notStarted)
+        let strikes = await coordinator.manifestFailureCount(id: model.id)
+        XCTAssertEqual(strikes, 0)
+    }
+
+    /// remove() cancels an in-flight download and waits for it, so nothing is
+    /// recreated afterwards.
+    func testRemoveCancelsAnInFlightDownload() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let started = Box()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(), fetch: { _, _, _ in
+            started.add("fetch")
+            try await Task.sleep(nanoseconds: 60_000_000_000)   // until cancelled
+        })
+        await manager.startDownload(model)
+        while started.all.isEmpty { try await Task.sleep(nanoseconds: 10_000_000) }
+        var state = await manager.downloadState(model)
+        if case .inProgress = state {} else { XCTFail("expected inProgress, got \(state)") }
+        await manager.remove(model)
+        state = await manager.downloadState(model)
+        XCTAssertEqual(state, .notStarted, "the task ended; nothing is downloading")
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: SummaryModelStore.stagingDirectory(for: model, root: root).path))
+    }
+
+    /// After "Remove downloaded models" the next scan must not silently start
+    /// a fresh 5 GB download; Settings' explicit download re-enables it.
+    func testRemovedModelIsNotAutoRedownloaded() async {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let fetches = Box()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: { url, _, _ in fetches.add(url.lastPathComponent); throw URLError(.cancelled) })
+        let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
+        await manager.cancelAndForgetAll()
+        let r = await manager.readiness(modelID: gemma.id)
+        guard case .temporarilyUnavailable(let why) = r else { return XCTFail("expected a deferral, got \(r)") }
+        XCTAssertTrue(why.contains("removed"), why)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(fetches.all.isEmpty, "no download was started")
+    }
+
+    /// Unreadable weights: the folder (with its sentinel) is deleted so the
+    /// next readiness check sees "not downloaded"; a permanent message stops it.
+    func testDiscardWeightsDeletesTheFolderAndCanMarkPermanent() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: fetching(["config.json": Data("{}".utf8), "model.safetensors": Data("weights".utf8)]))
+        try await manager.download(model)
+        XCTAssertTrue(SummaryModelStore.isVerified(model, root: root))
+        await manager.discardWeights(model, permanentMessage: nil)
+        var state = await manager.downloadState(model)
+        XCTAssertEqual(state, .notStarted)
+        await manager.discardWeights(model, permanentMessage: "unreadable twice")
+        state = await manager.downloadState(model)
+        XCTAssertEqual(state, .failedPermanently("unreadable twice"))
+    }
+
     func testReadinessForAppleModelNeverStartsADownload() async {
         let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
         let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),

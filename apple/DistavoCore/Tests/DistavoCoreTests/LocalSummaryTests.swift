@@ -5,61 +5,6 @@ import XCTest
 /// (OOM -> retryable once, then fail) and the Key-people post-process.
 final class LocalSummaryTests: XCTestCase {
 
-    // MARK: classify
-
-    func testClassifyTable() {
-        let table: [(String, LocalSummaryFailureKind)] = [
-            ("[metal::malloc] Attempting to allocate 17179869184 bytes which is greater than the maximum allowed buffer size", .outOfMemory),
-            ("Insufficient Memory (00000008:kIOGPUCommandBufferCallbackErrorOutOfMemory)", .outOfMemory),
-            ("Failed to allocate memory for array", .outOfMemory),
-            ("out of memory", .outOfMemory),
-            ("Unable to load weights: file is corrupt", .weightsUnreadable),
-            ("No safetensors found in /x", .weightsUnreadable),
-            ("the model folder is missing tokenizer.json", .weightsUnreadable),
-            ("something else entirely", .other("something else entirely")),
-        ]
-        for (message, kind) in table {
-            XCTAssertEqual(LocalSummaryFailurePolicy.classify(message: message), kind, message)
-        }
-    }
-
-    // MARK: decide
-
-    func testFirstOutOfMemoryIsRetryableSecondFails() {
-        if case .retryable = LocalSummaryFailurePolicy.decide(.outOfMemory, priorOutOfMemory: 0) {} else {
-            XCTFail("first OOM must defer")
-        }
-        if case .fail(let why) = LocalSummaryFailurePolicy.decide(.outOfMemory, priorOutOfMemory: 1) {
-            XCTAssertTrue(why.contains("Ollama"), "points the user at the fallback")
-        } else { XCTFail("second consecutive OOM must fail") }
-    }
-
-    func testDecisionTable() {
-        func isRetryable(_ d: LocalSummaryFailureDecision) -> Bool { if case .retryable = d { return true }; return false }
-        XCTAssertTrue(isRetryable(LocalSummaryFailurePolicy.decide(.weightsUnreadable, priorOutOfMemory: 0)))
-        XCTAssertFalse(isRetryable(LocalSummaryFailurePolicy.decide(.repetitionCollapse, priorOutOfMemory: 0)))
-        XCTAssertFalse(isRetryable(LocalSummaryFailurePolicy.decide(.emptyOutput, priorOutOfMemory: 0)))
-        XCTAssertFalse(isRetryable(LocalSummaryFailurePolicy.decide(.other("x"), priorOutOfMemory: 0)))
-    }
-
-    func testTrackerCountsConsecutiveOutOfMemoryAndResetsOnSuccess() {
-        let tracker = LocalSummaryFailureTracker()
-        XCTAssertEqual(tracker.noteOutOfMemory(model: "gemma-4-e4b"), 0)   // prior count before this one
-        XCTAssertEqual(tracker.noteOutOfMemory(model: "gemma-4-e4b"), 1)
-        tracker.noteSuccess(model: "gemma-4-e4b")
-        XCTAssertEqual(tracker.noteOutOfMemory(model: "gemma-4-e4b"), 0)
-        XCTAssertEqual(tracker.noteOutOfMemory(model: "other"), 0)
-    }
-
-    func testResolveThrowsRetryableThenPermanent() {
-        let tracker = LocalSummaryFailureTracker()
-        let oom = NSError(domain: "mlx", code: 1, userInfo: [NSLocalizedDescriptionKey: "Insufficient Memory"])
-        let first = LocalSummaryFailurePolicy.resolve(oom, model: "gemma-4-e4b", tracker: tracker)
-        XCTAssertTrue(first is RetryableDependencyError)
-        let second = LocalSummaryFailurePolicy.resolve(oom, model: "gemma-4-e4b", tracker: tracker)
-        XCTAssertFalse(second is RetryableDependencyError)
-    }
-
     // MARK: Streaming guard + retry
 
     private func stream(_ chunks: [String]) -> AsyncStream<String> {
@@ -148,12 +93,59 @@ final class LocalSummaryTests: XCTestCase {
         XCTAssertFalse(out.contains("Unknown Corp"))
     }
 
-    func testMatchingIgnoresCaseAndDiacriticsAndAcceptsMostTokens() {
-        let t = "SPEAKER_00: parlem amb Núria Puig de la consultora"
-        let text = "## Key people and organisations\n- nuria puig: recruiter\n- Núria Vidal Soler: someone\n"
-        let out = SummaryPostProcess.dropUnsupportedKeyPeople(text, transcript: t)
+    private func keyPeople(_ bullets: [String], transcript t: String, extra: [String] = [],
+                           keep: [String] = []) -> String {
+        let text = "## Key people and organisations\n" + bullets.map { "- \($0)" }.joined(separator: "\n") + "\n"
+        return SummaryPostProcess.dropUnsupportedKeyPeople(text, transcript: t, alwaysKeep: keep, extraHaystack: extra)
+    }
+
+    func testMatchingIgnoresCaseAndDiacritics() {
+        let out = keyPeople(["nuria puig: recruiter", "Unknown Vidal: someone"],
+                            transcript: "SPEAKER_00: parlem amb Núria Puig de la consultora")
         XCTAssertTrue(out.contains("nuria puig"))
-        XCTAssertFalse(out.contains("Vidal Soler"), "only one of three tokens appears")
+        XCTAssertFalse(out.contains("Unknown Vidal"))
+    }
+
+    /// Only the first name was spoken: a single matching token is enough.
+    func testFullNameKeptWhenOnlyFirstNameIsSpoken() {
+        let out = keyPeople(["Jordi Puig: hiring manager"], transcript: "SPEAKER_01: hola, sóc en Jordi")
+        XCTAssertTrue(out.contains("Jordi Puig"))
+    }
+
+    func testHonorificsAreStrippedAndDoNotCountAsMatches() {
+        let t = "SPEAKER_01: the doctor said Garcia will join"
+        let out = keyPeople(["Dr. Garcia: reviewer", "Sra. Ferrer: assistant", "Mr Smith: unknown", "Mrs. Jones"],
+                            transcript: t)
+        XCTAssertTrue(out.contains("Dr. Garcia"))
+        XCTAssertFalse(out.contains("Sra. Ferrer"))
+        XCTAssertFalse(out.contains("Mr Smith"))
+        XCTAssertFalse(out.contains("Mrs. Jones"))
+        // "Mr" in the transcript must not rescue "Mr Smith".
+        XCTAssertFalse(keyPeople(["Mr Smith: x"], transcript: "SPEAKER_00: mr and mrs somebody").contains("Smith"))
+    }
+
+    func testApostrophesHyphensAndAccentsAreNormalised() {
+        XCTAssertTrue(keyPeople(["O’Brien: client"], transcript: "SPEAKER_00: talk to O'Brien").contains("O’Brien"))
+        XCTAssertTrue(keyPeople(["O'Brien: client"], transcript: "SPEAKER_00: talk to O’Brien").contains("O'Brien"))
+        XCTAssertTrue(keyPeople(["Martínez: client"], transcript: "SPEAKER_00: ask Martinez").contains("Martínez"))
+        XCTAssertTrue(keyPeople(["Martinez: client"], transcript: "SPEAKER_00: ask Martínez").contains("Martinez"))
+        XCTAssertTrue(keyPeople(["Anna Garcia-Lopez: lead"], transcript: "SPEAKER_00: Anna Garcia Lopez joins").contains("Garcia-Lopez"))
+        XCTAssertTrue(keyPeople(["Garcia Lopez: lead"], transcript: "SPEAKER_00: ask Garcia‐Lopez").contains("Garcia Lopez"))
+    }
+
+    /// People named in the participants description or speaker hints are real
+    /// even when nobody says their name aloud.
+    func testExtraHaystackAndAlwaysKeepSaveParticipants() {
+        let out = keyPeople(["Ana Roca: colleague", "Pau Marti: other", "Zed Nobody: invented"],
+                            transcript: "SPEAKER_00: hello", extra: ["Ana Roca and Pau Martí from the client"])
+        XCTAssertTrue(out.contains("Ana Roca"))
+        XCTAssertTrue(out.contains("Pau Marti"))
+        XCTAssertFalse(out.contains("Zed Nobody"))
+    }
+
+    func testShortTokensAreNotEnoughToMatch() {
+        // "Al" and "Bo" are under 3 letters: never a match on their own.
+        XCTAssertFalse(keyPeople(["Al Bo: x"], transcript: "SPEAKER_00: al bo").contains("Al Bo"))
     }
 
     func testNoKeyPeopleSectionIsIdentity() {

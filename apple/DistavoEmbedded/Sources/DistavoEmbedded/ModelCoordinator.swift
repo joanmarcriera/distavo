@@ -99,6 +99,10 @@ public actor ModelCoordinator {
 
     /// Delete every downloaded model once nothing is using them.
     public func removeAllModels() async throws {
+        // A summary-model download runs outside the exclusive lock (it would
+        // block transcription for 5 GB): stop it first, or it would recreate
+        // the files this call deletes.
+        await SummaryModelManager.shared.cancelAndForgetAll()
         try await withExclusiveAccess { try EmbeddedModelStore.removeAll() }
     }
 

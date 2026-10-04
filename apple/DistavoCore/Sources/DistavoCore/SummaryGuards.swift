@@ -267,20 +267,47 @@ public enum SummaryPostProcess {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func fold(_ s: String) -> String {
-        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+    /// Lowercase, accent-folded, with curly/straight apostrophes unified and
+    /// every hyphen variant turned into a space ("Garcia-Lopez" = "Garcia Lopez").
+    private static func normaliseName(_ s: String) -> String {
+        var out = s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil)
+        for apostrophe in ["\u{2019}", "\u{2018}", "\u{02BC}", "\u{0060}", "\u{00B4}"] {
+            out = out.replacingOccurrences(of: apostrophe, with: "'")
+        }
+        for hyphen in ["-", "\u{2010}", "\u{2011}", "\u{2012}", "\u{2013}", "\u{2014}"] {
+            out = out.replacingOccurrences(of: hyphen, with: " ")
+        }
+        return out
     }
 
-    /// Drop bullets under "## Key people and organisations" whose name never
-    /// occurs in the transcript — the spike's biggest source of invented
+    /// Words of 3+ letters (apostrophes kept inside a word: "o'brien").
+    private static func nameTokens(_ normalised: String) -> [String] {
+        normalised.split(whereSeparator: { !$0.isLetter && !$0.isNumber && $0 != "'" })
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "'")) }
+            .filter { $0.count >= 3 }
+    }
+
+    /// Titles that say nothing about who someone is, in English, Catalan and
+    /// Spanish; stripped from a name and never counted as a match.
+    private static let honorifics: Set<String> = [
+        "dr", "dra", "doctor", "doctora", "prof", "profesor", "profesora", "sr", "sra", "srta",
+        "mr", "mrs", "ms", "miss", "mx", "sir", "madam", "madame", "don", "dona", "dna",
+        "senyor", "senyora", "senor", "senora", "mister", "lord", "lady",
+    ]
+
+    /// Drop bullets under "## Key people and organisations" whose name the
+    /// meeting does not support — the spike's biggest source of invented
     /// organisations ("ChatGPT" becoming "OpenAI"). A name is kept when it
-    /// appears whole, or (multi-word) when more than half of its tokens of 3+
-    /// letters appear; matching ignores case and diacritics. Always kept:
-    /// placeholders ("none", "unclear"), `SPEAKER_nn` labels, and any name in
-    /// `alwaysKeep` (the note owner, who may be only implied). Other sections
-    /// are untouched.
+    /// appears whole, or when ANY of its tokens of 3+ letters (honorifics
+    /// removed) is a word of the transcript — a first name alone is enough.
+    /// Matching ignores case, accents, curly-versus-straight apostrophes and
+    /// hyphens. `extraHaystack` (the participants description, speaker hints)
+    /// counts as meeting text. Always kept: placeholders ("none", "unclear"),
+    /// `SPEAKER_nn` labels and any name in `alwaysKeep` (the note owner, who
+    /// may be only implied). Other sections are untouched.
     public static func dropUnsupportedKeyPeople(
-        _ text: String, transcript: String, alwaysKeep: [String] = []
+        _ text: String, transcript: String, alwaysKeep: [String] = [],
+        extraHaystack: [String] = []
     ) -> String {
         let lines = text.components(separatedBy: "\n")
         guard let start = lines.firstIndex(where: {
@@ -288,8 +315,9 @@ public enum SummaryPostProcess {
         }) else { return text }
         let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
 
-        let haystack = fold(transcript)
-        let keepers = alwaysKeep.map(fold).filter { !$0.isEmpty }
+        let haystack = normaliseName(([transcript] + extraHaystack).joined(separator: "\n"))
+        let words = Set(nameTokens(haystack))
+        let keepers = alwaysKeep.map(normaliseName).filter { !$0.isEmpty }
         let placeholders = ["none", "unclear", "not stated", "n/a", "ninguno", "cap", "no one"]
 
         func supported(_ bullet: String) -> Bool {
@@ -300,15 +328,14 @@ public enum SummaryPostProcess {
                 if let r = name.range(of: separator) { name = String(name[..<r.lowerBound]) }
             }
             name = name.trimmingCharacters(in: .whitespaces)
-            let f = fold(name)
+            let f = normaliseName(name)
             if f.isEmpty || f.hasPrefix("speaker_") { return true }
             if placeholders.contains(where: { f == $0 || f.hasPrefix($0 + " ") || f.hasPrefix($0 + ".") }) { return true }
             if keepers.contains(where: { f.contains($0) || $0.contains(f) }) { return true }
-            if haystack.contains(f) { return true }
-            let tokens = f.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).filter { $0.count >= 3 }
-            guard tokens.count > 1 else { return false }
-            let found = tokens.filter { haystack.contains($0) }.count
-            return found * 2 > tokens.count
+            let tokens = nameTokens(f).filter { !honorifics.contains($0) }
+            if tokens.isEmpty { return false }
+            if haystack.contains(tokens.joined(separator: " ")) { return true }   // whole name, honorifics aside
+            return tokens.contains { words.contains($0) }
         }
 
         var out = Array(lines[...start])
@@ -323,13 +350,15 @@ public enum SummaryPostProcess {
     }
 
     /// The whole cleanup in the order the spike recommends: strip meta, drop
-    /// ledger duplicates, drop Key-people names the transcript does not
-    /// support (only when `transcript` is given), repair headings.
+    /// ledger duplicates, drop Key-people names the meeting does not support
+    /// (only when `transcript` is given), repair headings.
     public static func clean(_ text: String, style: Prompt.Style,
-                             transcript: String? = nil, alwaysKeep: [String] = []) -> String {
+                             transcript: String? = nil, alwaysKeep: [String] = [],
+                             extraHaystack: [String] = []) -> String {
         var out = stripTrailingMeta(text)
         if style == .factsFirst { out = dedupeLedgerRows(out) }
-        if let transcript { out = dropUnsupportedKeyPeople(out, transcript: transcript, alwaysKeep: alwaysKeep) }
+        if let transcript { out = dropUnsupportedKeyPeople(out, transcript: transcript, alwaysKeep: alwaysKeep,
+                                                           extraHaystack: extraHaystack) }
         return ensureHeadings(out, style: style)
     }
 }

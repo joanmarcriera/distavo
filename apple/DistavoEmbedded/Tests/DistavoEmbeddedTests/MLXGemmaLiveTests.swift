@@ -17,14 +17,14 @@ final class MLXGemmaLiveTests: XCTestCase {
 
     func testMissingWeightsAreARetryableDeferralNotAHardFailure() async {
         let gen = MLXGemmaGenerator(modelDirectory: URL(fileURLWithPath: "/nonexistent-\(UUID().uuidString)"),
-                                    modelID: "gemma-test", contextSize: 16384,
-                                    tracker: LocalSummaryFailureTracker())
+                                    modelID: "gemma-test", contextSize: 16384)
         do {
             _ = try await gen.generate("hi", maxOutputTokens: 8)
             XCTFail("expected an error")
         } catch {
-            // Either classified as unreadable weights (retryable) or a plain
-            // failure with a clear message; it must never be a crash or a hang.
+            // A load failure surfaces as `GemmaLoadFailure`, which
+            // `GemmaSummariser` turns into "discard and download again".
+            XCTAssertTrue(error is GemmaLoadFailure, "\(error)")
             XCTAssertFalse((error as? LocalizedError)?.errorDescription?.isEmpty ?? true)
         }
     }

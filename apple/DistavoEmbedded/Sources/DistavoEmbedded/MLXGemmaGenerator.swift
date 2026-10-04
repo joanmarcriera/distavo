@@ -63,13 +63,22 @@ struct TokenizerBridge: MLXLMCommon.Tokenizer {
 
 // MARK: - Generator
 
+/// The model failed to LOAD (as opposed to failing mid-generation). Kept apart
+/// because an unrecognised load error means unreadable weights, which is
+/// handled by deleting them so they are downloaded again.
+struct GemmaLoadFailure: Error, LocalizedError {
+    let underlying: Error
+    var errorDescription: String? {
+        (underlying as? LocalizedError)?.errorDescription ?? underlying.localizedDescription
+    }
+}
+
 /// A `SummaryGenerator` backed by a Gemma model folder on disk.
 public final class MLXGemmaGenerator: SummaryGenerator, @unchecked Sendable {
     public let contextSize: Int
     private let modelDirectory: URL
     private let modelID: String
     private let temperature: Double
-    private let tracker: LocalSummaryFailureTracker
 
     private let lock = NSLock()
     private var container: ModelContainer?
@@ -78,32 +87,25 @@ public final class MLXGemmaGenerator: SummaryGenerator, @unchecked Sendable {
     ///   - contextSize: Distavo's cap (catalogue `contextCap`), not the model's.
     ///   - temperature: base sampler temperature; a loop retries at +0.2.
     public init(modelDirectory: URL, modelID: String, contextSize: Int,
-                temperature: Double = LoopGuard.defaultTemperature,
-                tracker: LocalSummaryFailureTracker = .shared) {
+                temperature: Double = LoopGuard.defaultTemperature) {
         self.modelDirectory = modelDirectory; self.modelID = modelID
         self.contextSize = contextSize; self.temperature = temperature
-        self.tracker = tracker
     }
 
     /// Nil: the driver falls back to its conservative 3.0 chars/token estimate
     /// (the spike measured 3.75-3.85 on Gemma's tokenizer).
     public func tokenCount(_ text: String) async -> Int? { nil }
 
+    /// Throws raw engine errors (a load failure wrapped in `GemmaLoadFailure`,
+    /// a collapsed stream as `LocalSummaryError`); the defer-versus-fail
+    /// decision is `GemmaSummariser`'s, via `LocalSummaryFailurePolicy`.
     public func generate(_ prompt: String, maxOutputTokens: Int) async throws -> String {
-        do {
-            let loaded = try await loadedContainer()
-            let text = try await LoopGuard.runWithRetry(temperature: temperature) { t in
-                try await self.streamOnce(loaded, prompt: prompt, maxTokens: maxOutputTokens, temperature: t)
-            }
-            return text
-        } catch let e as LocalSummaryError {
-            throw e
-        } catch let e as RetryableDependencyError {
-            throw e
-        } catch is CancellationError {
+        let loaded: ModelContainer
+        do { loaded = try await loadedContainer() } catch is CancellationError {
             throw CancellationError()
-        } catch {
-            throw LocalSummaryFailurePolicy.resolve(error, model: modelID, tracker: tracker)
+        } catch { throw GemmaLoadFailure(underlying: error) }
+        return try await LoopGuard.runWithRetry(temperature: temperature) { t in
+            try await self.streamOnce(loaded, prompt: prompt, maxTokens: maxOutputTokens, temperature: t)
         }
     }
 

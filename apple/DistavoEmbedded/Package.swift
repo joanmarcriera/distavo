@@ -30,7 +30,7 @@ let package = Package(
         // swift-transformers, bridged by hand in MLXGemmaGenerator instead of the
         // MLXHuggingFace macros, so no macro plugin has to be trusted.
         .package(url: "https://github.com/ml-explore/mlx-swift-lm", exact: "3.32.3", traits: []),
-        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers", exact: "1.3.4"),
     ],
     targets: [
         .target(

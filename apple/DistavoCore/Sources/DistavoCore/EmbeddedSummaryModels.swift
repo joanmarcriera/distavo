@@ -15,9 +15,10 @@ public enum EmbeddedSummaryEngine: String, Equatable, Sendable {
     case mlx
 }
 
-/// One file of a model snapshot at its pinned revision. `sha256` is known only
-/// for LFS files (the Hugging Face API publishes it); small files are checked
-/// by size alone.
+/// One file of a model snapshot at its pinned revision. `sha256` is the
+/// publisher's hash where the Hugging Face API lists one (LFS files); the app
+/// hashes every file locally after download regardless, and compares to this
+/// when present.
 public struct EmbeddedSummaryModelFile: Equatable, Sendable {
     public let path: String
     public let bytes: Int64
@@ -74,11 +75,15 @@ public struct EmbeddedSummaryModel: Equatable, Identifiable, Sendable {
 
     /// The `manifest.json` (same shape as the BSC WhisperKit models'), written
     /// next to the downloaded files so `ModelManifestCheck` can verify them.
-    public func manifestJSON() -> Data {
+    ///
+    /// `sha256ByPath` holds the hashes the app computed locally after download;
+    /// a file with no entry is written WITHOUT a hash, which the verifier
+    /// rejects, so every file must be hashed before the manifest is trusted.
+    public func manifestJSON(sha256ByPath: [String: String]) -> Data {
         var entries: [String: [String: Any]] = [:]
         for f in files {
             var e: [String: Any] = ["bytes": f.bytes]
-            if let h = f.sha256 { e["sha256"] = h }
+            if let h = sha256ByPath[f.path] { e["sha256"] = h }
             entries[f.path] = e
         }
         return (try? JSONSerialization.data(withJSONObject: ["files": entries], options: [.sortedKeys])) ?? Data()

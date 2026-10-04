@@ -165,8 +165,20 @@ public actor SummaryModelManager {
 
         // Verify before anything is trusted (spec: a partial or tampered
         // download must not produce a garbled note).
-        try model.manifestJSON().write(to: staging.appendingPathComponent("manifest.json"))
+        // Every file is hashed locally right after download (also those resumed
+        // from staging), compared to the publisher's SHA-256 where the catalogue
+        // has one, and the local hashes go into the manifest — so every file is
+        // hash-checked on every later verification, none by size alone.
         do {
+            var hashes: [String: String] = [:]
+            for file in model.files {
+                let local = try ModelManifestCheck.sha256Hex(of: staging.appendingPathComponent(file.path))
+                if let published = file.sha256, published != local {
+                    throw ModelManifestError.mismatch(file: file.path)
+                }
+                hashes[file.path] = local
+            }
+            try model.manifestJSON(sha256ByPath: hashes).write(to: staging.appendingPathComponent("manifest.json"))
             try ModelManifestCheck.verify(folder: staging, expectManifest: true)
         } catch {
             try? fm.removeItem(at: staging)

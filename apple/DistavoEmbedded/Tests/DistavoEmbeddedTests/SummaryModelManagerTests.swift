@@ -113,13 +113,45 @@ final class SummaryModelManagerTests: XCTestCase {
         XCTAssertFalse(SummaryModelStore.isVerified(model, root: root), "files without the sentinel are an interrupted download")
     }
 
-    func testManifestAcceptsEntriesWithoutSha256() throws {
+    /// Integrity must not be weakenable by a manifest: an entry with no hash
+    /// fails to decode, so verification throws instead of skipping the hash.
+    func testManifestEntryWithoutSha256IsRejected() throws {
         let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
         try Data("ab".utf8).write(to: root.appendingPathComponent("config.json"))
         try Data(#"{"files":{"config.json":{"bytes":2}}}"#.utf8).write(to: root.appendingPathComponent("manifest.json"))
-        XCTAssertNoThrow(try ModelManifestCheck.verify(folder: root, expectManifest: true))
-        try Data("abc".utf8).write(to: root.appendingPathComponent("config.json"))
         XCTAssertThrowsError(try ModelManifestCheck.verify(folder: root, expectManifest: true))
+        XCTAssertThrowsError(try JSONDecoder().decode(
+            ModelManifest.self, from: Data(#"{"files":{"a":{"bytes":1}}}"#.utf8)))
+    }
+
+    /// Small files are hashed locally and the hashes land in the manifest, so
+    /// a same-size tamper of a small file is caught on verification.
+    func testSmallFilesAreHashedIntoTheManifest() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: fetching(["config.json": Data("{}".utf8),
+                                                           "model.safetensors": Data("weights".utf8)]))
+        try await manager.download(model)
+        let dir = SummaryModelStore.directory(for: model, root: root)
+        let manifest = try JSONDecoder().decode(ModelManifest.self,
+                                                from: Data(contentsOf: dir.appendingPathComponent("manifest.json")))
+        XCTAssertEqual(manifest.files["config.json"]?.sha256, sha(Data("{}".utf8)))
+        try Data("[]".utf8).write(to: dir.appendingPathComponent("config.json"))   // same size
+        XCTAssertThrowsError(try ModelManifestCheck.verify(folder: dir, expectManifest: true))
+    }
+
+    /// A publisher hash that disagrees with the local one is a mismatch even
+    /// when the size is right.
+    func testPublisherHashMismatchFailsTheDownload() async throws {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let model = tinyModel()
+        let manager = SummaryModelManager(root: root, coordinator: ModelCoordinator(),
+                                          fetch: fetching(["config.json": Data("{}".utf8),
+                                                           "model.safetensors": Data("WEIGHTS".utf8)]))
+        do { try await manager.download(model); XCTFail("expected a mismatch") } catch {
+            XCTAssertTrue(error is ModelManifestError)
+        }
     }
 
     func testReadinessForAppleModelNeverStartsADownload() async {

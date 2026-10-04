@@ -9,9 +9,9 @@ import CryptoKit
 struct ModelManifest: Decodable {
     struct Entry: Decodable {
         let bytes: Int64
-        /// nil for files whose hash the source does not publish (small non-LFS
-        /// files of the Gemma summary model): those are checked by size only.
-        let sha256: String?
+        /// Required: an entry without a hash fails to decode, so a manifest can
+        /// never silently weaken verification.
+        let sha256: String
     }
     let files: [String: Entry]
 }
@@ -71,10 +71,8 @@ enum ModelManifestCheck {
             guard size == entry.bytes else {
                 throw ModelManifestError.mismatch(file: relativePath)
             }
-            if let expected = entry.sha256 {
-                guard try sha256Hex(of: fileURL) == expected else {
-                    throw ModelManifestError.mismatch(file: relativePath)
-                }
+            guard try sha256Hex(of: fileURL) == entry.sha256 else {
+                throw ModelManifestError.mismatch(file: relativePath)
             }
         }
     }
@@ -94,7 +92,7 @@ enum ModelManifestCheck {
     /// Streamed SHA-256 in 1 MiB chunks — files here run to ~1.5 GB, so
     /// `Data(contentsOf:)` (which loads the whole file into memory) is not an
     /// option.
-    private static func sha256Hex(of url: URL) throws -> String {
+    static func sha256Hex(of url: URL) throws -> String {
         guard let handle = FileHandle(forReadingAtPath: url.path) else {
             throw ModelManifestError.missing(file: url.lastPathComponent)
         }

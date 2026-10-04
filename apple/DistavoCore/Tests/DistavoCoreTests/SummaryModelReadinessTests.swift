@@ -75,10 +75,12 @@ final class SummaryModelReadinessTests: XCTestCase {
         let weights = try XCTUnwrap(gemma.files.first { $0.path == "model.safetensors" })
         XCTAssertEqual(gemma.downloadURL(for: weights)?.absoluteString,
                        "https://huggingface.co/mlx-community/gemma-4-e4b-it-4bit/resolve/475b9088d29754a3379866cf5aeb6b41acd313c2/model.safetensors")
-        let json = try JSONSerialization.jsonObject(with: gemma.manifestJSON()) as? [String: Any]
+        let json = try JSONSerialization.jsonObject(
+            with: gemma.manifestJSON(sha256ByPath: ["model.safetensors": "aa", "config.json": "bb"])) as? [String: Any]
         let files = try XCTUnwrap(json?["files"] as? [String: [String: Any]])
-        XCTAssertEqual(files["model.safetensors"]?["sha256"] as? String, weights.sha256)
-        XCTAssertNil(files["config.json"]?["sha256"], "small files are size-checked only")
+        XCTAssertEqual(files["model.safetensors"]?["sha256"] as? String, "aa", "locally computed hashes are written")
+        XCTAssertEqual(files["config.json"]?["sha256"] as? String, "bb")
+        XCTAssertNil(files["tokenizer.json"]?["sha256"], "an unhashed file is written without a hash so the verifier rejects it")
         XCTAssertNil(apple.downloadURL(for: weights))
     }
 }

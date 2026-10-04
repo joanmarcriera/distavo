@@ -105,6 +105,14 @@ extension PipelineDeps {
         let ollamaSummarise = deps.summarise
         deps.summarise = { transcript, target, options, context in
             if case .embedded(let model) = target {
+                // Activity-log trace (Vikunja #2198, S6): model, context cap and
+                // single pass vs map-reduce, like the transcription routing line.
+                let noteStyle = model == EmbeddedSummaryModelCatalog.appleID ? Prompt.Style.classic : context.promptStyle
+                await ModelCoordinator.shared.report(SummaryRouting.traceLine(
+                    model: EmbeddedSummaryModelCatalog.model(id: model), transcript: transcript,
+                    noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
+                    style: noteStyle,
+                    noteLanguage: model == EmbeddedSummaryModelCatalog.appleID ? nil : context.noteLanguage))
                 // A downloaded model (local Gemma, Vikunja #2198) runs through the
                 // MLX generator, and unlike Apple's it follows the configured
                 // prompt style and note language: its window is big enough for
@@ -132,6 +140,12 @@ extension PipelineDeps {
         // stay failures, pointing the user back at Ollama.
         deps.embeddedReadiness = { model in
             guard model == EmbeddedSummaryModelCatalog.appleID else {
+                // Edition gate: Direct only for now (see SummaryModelEdition).
+                // Setapp shares Direct's config path, so a config naming Gemma
+                // must not silently start a download or run the engine there.
+                guard SummaryModelEdition.offersDownloadedModels else {
+                    return .unsupported("The local Gemma summary model is not available in this edition — choose Apple Intelligence or Ollama in Settings.")
+                }
                 // A downloaded model: "download pending / in progress / failed
                 // its integrity check once" defer (never fail); RAM below the
                 // floor, an Intel Mac, or a download corrupt twice are the only

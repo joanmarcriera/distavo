@@ -288,3 +288,29 @@ final class SummaryDriverTests: XCTestCase {
         XCTAssertEqual(EmbeddedSummaryBudget.finalOutputTokens(style: .factsFirst), 3500)
     }
 }
+
+/// Vikunja #2198 S6: the summariser routing trace line.
+final class SummaryRoutingTests: XCTestCase {
+    private func line(_ id: String, transcript: String, style: Prompt.Style, lang: String? = nil) -> String {
+        SummaryRouting.traceLine(
+            model: EmbeddedSummaryModelCatalog.model(id: id), transcript: transcript,
+            noteOwner: "Marc", userSpeaker: "SPEAKER_00", style: style, noteLanguage: lang)
+    }
+
+    func testGemmaShortTranscriptIsSinglePass() {
+        XCTAssertEqual(line("gemma-4-e4b", transcript: "hello there", style: .factsFirst, lang: "ca"),
+            "Summariser \u{2014} model=gemma-4-e4b engine=mlx context=16384 style=\(Prompt.Style.factsFirst.rawValue) language=ca; transcript\u{2248}\(EmbeddedSummaryTokens.estimate("hello there")) tokens; plan=single pass")
+    }
+
+    func testAppleLongTranscriptIsMapReduce() {
+        let long = String(repeating: "word ", count: 20_000)
+        let l = line("apple", transcript: long, style: .classic)
+        XCTAssertTrue(l.contains("model=apple engine=appleFoundationModels context=4096"), l)
+        XCTAssertTrue(l.contains("language=default"), l)
+        XCTAssertTrue(l.contains("plan=map-reduce ("), l)
+    }
+
+    func testUnknownModelFallsBackToApple() {
+        XCTAssertTrue(line("nope", transcript: "x", style: .classic).contains("model=apple"))
+    }
+}

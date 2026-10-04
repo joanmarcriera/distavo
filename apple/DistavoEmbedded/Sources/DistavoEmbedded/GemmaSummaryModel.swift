@@ -55,6 +55,42 @@ public enum SummaryModelStore {
 typealias SummaryFileFetch = @Sendable (_ url: URL, _ destination: URL,
                                         _ onBytes: @escaping @Sendable (Int64) -> Void) async throws -> Void
 
+/// What Settings shows for a downloadable summary model.
+public enum SummaryModelStatus: Equatable, Sendable {
+    case notDownloaded
+    case downloading(fraction: Double)
+    case ready
+    /// The user removed it; nothing will fetch it again until they ask.
+    case removed
+    case failed(String)
+}
+
+/// Whether the user explicitly chose to download a model (Settings button).
+/// A 5 GB transfer must never start from a background scan, so readiness only
+/// auto-starts a download for a model whose opt-in is set. Persisted so a
+/// download interrupted by a relaunch resumes without asking again.
+struct SummaryDownloadOptIn: Sendable {
+    var isSet: @Sendable (String) -> Bool
+    var set: @Sendable (String, Bool) -> Void
+
+    static let userDefaults = SummaryDownloadOptIn(
+        isSet: { UserDefaults.standard.bool(forKey: "summaryModelDownloadOptIn.\($0)") },
+        set: { UserDefaults.standard.set($1, forKey: "summaryModelDownloadOptIn.\($0)") })
+
+    /// Isolated in-memory flags (tests; never touches real preferences).
+    static func inMemory(initially: Set<String> = []) -> SummaryDownloadOptIn {
+        let box = OptInBox(initially)
+        return SummaryDownloadOptIn(isSet: { box.get($0) }, set: { box.put($0, $1) })
+    }
+}
+
+private final class OptInBox: @unchecked Sendable {
+    private let lock = NSLock(); private var ids: Set<String>
+    init(_ ids: Set<String>) { self.ids = ids }
+    func get(_ id: String) -> Bool { lock.withLock { ids.contains(id) } }
+    func put(_ id: String, _ on: Bool) { lock.withLock { if on { _ = ids.insert(id) } else { _ = ids.remove(id) } } }
+}
+
 /// Owns the summary model's download lifecycle and answers readiness.
 public actor SummaryModelManager {
     public static let shared = SummaryModelManager()
@@ -69,13 +105,29 @@ public actor SummaryModelManager {
     /// Models the user removed: not re-downloaded behind their back by the
     /// next scan; an explicit `startDownload` (Settings) clears the flag.
     private var removedByUser: Set<String> = []
+    private var lastError: [String: String] = [:]
+    private let optIn: SummaryDownloadOptIn
 
     public init() {
-        self.init(root: EmbeddedModelStore.modelsDirectory, coordinator: .shared, fetch: urlSessionFetch)
+        self.init(root: EmbeddedModelStore.modelsDirectory, coordinator: .shared,
+                  fetch: urlSessionFetch, optIn: .userDefaults)
     }
 
-    init(root: URL, coordinator: ModelCoordinator, fetch: @escaping SummaryFileFetch) {
-        self.root = root; self.coordinator = coordinator; self.fetch = fetch
+    init(root: URL, coordinator: ModelCoordinator, fetch: @escaping SummaryFileFetch,
+         optIn: SummaryDownloadOptIn = .inMemory(initially: ["gemma-4-e4b"])) {
+        self.root = root; self.coordinator = coordinator; self.fetch = fetch; self.optIn = optIn
+    }
+
+    /// For Settings: the accurate state of a downloadable model.
+    public func status(_ model: EmbeddedSummaryModel) async -> SummaryModelStatus {
+        switch await downloadState(model) {
+        case .verified: return .ready
+        case .inProgress(let f): return .downloading(fraction: f)
+        case .failedPermanently(let why): return .failed(why)
+        case .notStarted, .manifestMismatch:
+            if let why = lastError[model.id] { return .failed(why) }
+            return removedByUser.contains(model.id) ? .removed : .notDownloaded
+        }
     }
 
     // MARK: Readiness
@@ -98,6 +150,11 @@ public actor SummaryModelManager {
                 return .temporarilyUnavailable(
                     "\(model.displayName) was removed — download it again in Settings, or choose another summary model.")
             }
+            // Never start a multi-GB transfer the user did not ask for in Settings.
+            guard optIn.isSet(model.id) else {
+                return .temporarilyUnavailable(
+                    "\(model.displayName) has not been downloaded — choose Download now in Settings, or pick another summary model.")
+            }
             if freeMB >= model.downloadMB * SummaryModelReadiness.diskFactor { launch(model) }
         }
         return result
@@ -116,8 +173,10 @@ public actor SummaryModelManager {
     /// The user asked for the download (Settings): start it even if the model
     /// was removed earlier, and clear that flag.
     public func startDownload(_ model: EmbeddedSummaryModel) {
+        optIn.set(model.id, true)
         removedByUser.remove(model.id)
         permanentFailures[model.id] = nil
+        lastError[model.id] = nil
         launch(model)
     }
 
@@ -129,12 +188,15 @@ public actor SummaryModelManager {
         tasks[model.id] = Task { [self] in
             do { try await download(model) } catch {
                 if !Task.isCancelled {
+                    record(error: (error as? LocalizedError)?.errorDescription ?? "\(error)", for: model.id)
                     await coordinator.report("Downloading \(model.displayName) failed: \((error as? LocalizedError)?.errorDescription ?? "\(error)")")
                 }
             }
             finished(model.id)
         }
     }
+
+    private func record(error: String, for id: String) { lastError[id] = error }
 
     private func finished(_ id: String) {
         tasks[id] = nil; fractions[id] = nil
@@ -234,6 +296,7 @@ public actor SummaryModelManager {
         }
         permanentFailures[model.id] = nil
         fractions[model.id] = nil
+        lastError[model.id] = nil
         await coordinator.resetManifestFailures(id: model.id)
         LocalSummaryFailureTracker.shared.noteSuccess(model: model.id)
     }
@@ -242,6 +305,7 @@ public actor SummaryModelManager {
     /// not downloaded again behind the user's back; `startDownload` re-enables it.
     public func remove(_ model: EmbeddedSummaryModel) async {
         await cancelAndForget(model)
+        optIn.set(model.id, false)
         removedByUser.insert(model.id)
         try? FileManager.default.removeItem(at: SummaryModelStore.directory(for: model, root: root))
         try? FileManager.default.removeItem(at: SummaryModelStore.stagingDirectory(for: model, root: root))
@@ -253,6 +317,7 @@ public actor SummaryModelManager {
     public func cancelAndForgetAll() async {
         for model in EmbeddedSummaryModelCatalog.models where model.engine == .mlx {
             await cancelAndForget(model)
+            optIn.set(model.id, false)
             removedByUser.insert(model.id)
         }
     }

@@ -211,6 +211,32 @@ final class SummaryModelManagerTests: XCTestCase {
         XCTAssertTrue(fetches.all.isEmpty, "no download was started")
     }
 
+    /// A 5 GB download starts only after the user chose it in Settings.
+    func testReadinessDoesNotDownloadWithoutOptIn() async {
+        let root = tempRoot(); defer { try? FileManager.default.removeItem(at: root) }
+        let fetches = Box()
+        let manager = SummaryModelManager(
+            root: root, coordinator: ModelCoordinator(),
+            fetch: { url, _, _ in fetches.add(url.lastPathComponent); throw URLError(.cancelled) },
+            optIn: .inMemory())
+        let gemma = EmbeddedSummaryModelCatalog.model(id: "gemma-4-e4b")
+        let r = await manager.readiness(modelID: gemma.id)
+        guard case .temporarilyUnavailable(let why) = r else { return XCTFail("expected a deferral, got \(r)") }
+        XCTAssertTrue(why.contains("Settings"), why)
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertTrue(fetches.all.isEmpty, "no download was started")
+        let s1 = await manager.status(gemma)
+        XCTAssertEqual(s1, .notDownloaded)
+        // The explicit action opts in; the transfer now starts.
+        await manager.startDownload(gemma)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertFalse(fetches.all.isEmpty, "Download now starts the transfer")
+        // Remove clears the opt-in and reports the removed state.
+        await manager.remove(gemma)
+        let s2 = await manager.status(gemma)
+        XCTAssertEqual(s2, .removed)
+    }
+
     /// Unreadable weights: the folder (with its sentinel) is deleted so the
     /// next readiness check sees "not downloaded"; a permanent message stops it.
     func testDiscardWeightsDeletesTheFolderAndCanMarkPermanent() async throws {

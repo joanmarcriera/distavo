@@ -411,7 +411,14 @@ struct SettingsView: View {
                         ? "‘Server (GPU)’ uses the Server Ollama URL; ‘Local Mac’ uses the Local Ollama URL on this Mac. ‘Built-in’ summarises with Apple Intelligence on this Mac — no server or install, but it handles long meetings in several passes and is less detailed than Ollama."
                         : "‘Server (GPU)’ uses the Server Ollama URL; ‘Local Mac’ uses the Local Ollama URL on this Mac. If the server is offline you can allow the local fallback below.")
                 }
-                if draft.summarise.embeddedEnabled && draft.summarise.backend == "embedded" {
+                if draft.summarise.embeddedEnabled {
+                    SummaryModelSettings(modelID: $draft.summarise.embeddedModel)
+                }
+                if draft.summarise.embeddedEnabled && draft.summarise.backend == "embedded"
+                    && draft.summarise.embeddedModel != EmbeddedSummaryModelCatalog.appleID {
+                    Text("Summarising on this Mac with the downloaded Gemma model — nothing leaves the device and no Ollama is needed. It follows the Prompt and note language settings below.")
+                        .font(.caption).foregroundStyle(.secondary)
+                } else if draft.summarise.embeddedEnabled && draft.summarise.backend == "embedded" {
                     if let reason = EmbeddedSummariser.unavailableReason() {
                         Text("⚠︎ \(reason.localizedDescription)")
                             .font(.caption).foregroundStyle(.secondary)

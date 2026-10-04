@@ -36,7 +36,7 @@ on:
 jobs:
   upload-appstore:
     runs-on: macos-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     env:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
@@ -206,7 +206,7 @@ jobs:
       # Without that profile Apple accepts delivery but marks the build ineligible
       # for TestFlight (ITMS-90889).
       - name: Archive (App Store, manual signing)
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           cd apple

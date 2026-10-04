@@ -49,10 +49,16 @@ Release -xcconfig configs/Direct.xcconfig` → export (`developer-id` method) �
 --wait` + `stapler staple` the **app**, then build + notarize + staple the **DMG** →
 `spctl -a -vvv --type exec` Gatekeeper check → (if `SPARKLE_ED_PRIVATE_KEY` is set) sign a Sparkle
 appcast, else silently skip — **check this secret exists before assuming Direct auto-update
-actually ships** → `gh release create`/`upload`. Secrets: `APPLE_TEAM_ID`,
-`DEVELOPER_ID_CERT_P12_BASE64`, `DEVELOPER_ID_CERT_PASSWORD`, `APPLE_ID`,
-`APPLE_NOTARY_PASSWORD`. `workflow_dispatch` (no tag) = dry run, uploads the DMG as a build
-artifact only, no GitHub Release.
+actually ships** → `gh release create`/`upload` → `Publish appcast to distavo.com` (runs
+`ops/publish-appcast.sh $RELEASE_TAG` over SSH; since e947d1d; no-ops with a warning if
+`APPCAST_DEPLOY_SSH_KEY` is unset — then run the script by hand). Notarization uses the ASC API key
+(`notarytool --key`; since 89cad1a — the Apple ID + app-specific password gave HTTP 401 on v1.15.0).
+Secrets: `APPLE_TEAM_ID`, `DEVELOPER_ID_CERT_P12_BASE64`, `DEVELOPER_ID_CERT_PASSWORD`,
+`ASC_API_KEY_ID`, `ASC_API_ISSUER_ID`, `ASC_API_KEY_P8_BASE64`, `APPCAST_DEPLOY_SSH_KEY`.
+`workflow_dispatch` with empty `release_tag` = dry run (DMG as build artifact only, no Release);
+with `release_tag=vX.Y.Z` it builds and publishes that existing tag (Release + appcast) without
+re-firing the App Store upload — use it to recover a failed Direct run.
+**Still verify the live feed** (`curl -s https://distavo.com/appcast.xml | grep shortVersionString`).
 
 **`release-appstore.yml` (App Store upload)** — two jobs:
 1. `upload-appstore` (`macos-latest`, 30 min timeout): preflights the What's New file + all 8

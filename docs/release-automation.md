@@ -10,7 +10,7 @@ one-time secrets each pipeline needs. The mechanical steps in
 | --- | --- | --- | --- |
 | Build + test (all 3 editions) | — | ✅ fully | every push / PR (`ci.yml`) |
 | Bump releasable version | — | ✅ fully | every non-bot push to `main` (`version-bump.yml`) |
-| Sign → notarize → DMG → GitHub Release | **Direct** | ✅ fully (once secrets set) | push a `v*` tag (`release.yml`) |
+| Sign → notarize → DMG → GitHub Release | **Direct** | ✅ fully (once secrets set) | push a `v*` tag, or dispatch `release.yml` with `release_tag` for an existing tag |
 | Build → sign → upload → submit to App Review | **App Store** | ✅ upload fully; submission behind **one Approve click** (`app-store-submission` environment); release is automatic once Apple approves | push a `v*` tag (`release-appstore.yml`) |
 | Retry / staged-test an App Review submission | **App Store** | ✅ on demand (`dry_run` defaults on) | Actions → "Submit to App Review (manual)" (`submit-appstore.yml`) |
 | Submit build | **Setapp** | ❌ first version is Web-UI only; later versions scriptable | manual — see `setapp-submission.md` |
@@ -31,8 +31,8 @@ AFTER_APPROVAL`). Setapp's first upload stays manual by Setapp's own rules.
 > These workflows are validated for YAML/shell syntax but **cannot be run end-to-end
 > until the secrets below exist and the Apple/App-Store-Connect setup in
 > `distribution-checklist.md` §1 + §4.1 is done.** Do a `workflow_dispatch` dry run
-> of `release.yml` first — it builds and notarizes a DMG as an artifact without
-> publishing a Release.
+> of `release.yml` first (leave `release_tag` empty) — it builds and notarizes a DMG as an
+> artifact without publishing a Release.
 
 ## One-time prerequisites (you, once)
 
@@ -44,8 +44,9 @@ From `distribution-checklist.md` §1 + §4.1:
 - A **Mac App Store provisioning profile** for `uk.co.riera.distavo`. App Store
   Connect can accept delivery without it, but Apple reports ITMS-90889 and the
   build cannot be used with TestFlight unless the main `.app` bundle embeds it.
-- An **App-Specific Password** (notarization) and an **App Store Connect API key**
-  (.p8, App Manager role — used for App Store upload).
+- An **App Store Connect API key** (.p8, App Manager role) — used for the App Store upload
+  and, since `89cad1a`, for Direct DMG notarization (`notarytool --key`); the old Apple ID +
+  app-specific password returned HTTP 401 on the v1.15.0 Direct release.
 
 ## Secrets to add
 
@@ -76,10 +77,15 @@ Never commit these; never paste them in chat — add them yourself in the GitHub
 ## How `release.yml` works (Direct)
 1. Imports the Developer ID cert into a throwaway keychain.
 2. `xcodegen generate` → archive the Direct edition with `Developer ID Application`.
-3. Export (`developer-id`), zip the app, `notarytool submit --wait`, `stapler staple`.
+3. Export (`developer-id`), zip the app, `notarytool submit --wait` (authenticated with the ASC API key: `--key/--key-id/--issuer`), `stapler staple`.
 4. `hdiutil` a DMG, notarize + staple **the DMG too** (trusted offline).
 5. Gatekeeper assess (`spctl`), then `gh release create <tag>` with the DMG.
-   A `workflow_dispatch` run stops at step 4 and uploads the DMG as an artifact (dry run).
+   A `workflow_dispatch` run with an empty `release_tag` stops at step 4 and uploads the DMG as an artifact (dry run).
+6. Last step, `Publish appcast to distavo.com` (see "Appcast hosting" below).
+
+**Re-running for an existing tag:** `release.yml` has a `workflow_dispatch` input `release_tag`
+(e.g. `v1.15.0`). When set, it checks out that tag and builds, notarizes and publishes the GitHub
+Release (and appcast) for it, without re-firing `release-appstore.yml` (that fires only on the tag push).
 
 ## How `release-appstore.yml` works
 1. Imports **both** signing certs (Apple Distribution + 3rd Party Mac Developer

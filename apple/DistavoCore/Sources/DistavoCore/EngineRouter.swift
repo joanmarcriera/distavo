@@ -107,6 +107,22 @@ public enum EngineRouter {
         return nil
     }
 
+    /// One diagnostic activity-log line per recording: the configured model and
+    /// language, every detector window result, the hint the router settled on,
+    /// and the language options WhisperKit will actually be given. Makes a
+    /// silent mis-route (e.g. a forced "en" that translates) visible. Pure.
+    public static func traceLine(config: TranscribeConfig, detections: [LanguageDetection],
+                                 decision: RoutingDecision) -> String {
+        let dets = detections.isEmpty ? "none"
+            : detections.map { "\($0.code) \(Int(($0.probability * 100).rounded()))%" }.joined(separator: ", ")
+        let plan = whisperLanguagePlan(hint: decision.languageHint)
+        let whisper = decision.model.engine == .whisperKit
+            ? " whisper(language=\(plan.language ?? "auto"), detect=\(plan.detectLanguage))" : ""
+        return "Routing \u{2014} configured model=\(config.embeddedModel) language=\(config.language); "
+            + "detections=\(dets); hint=\(decision.languageHint ?? "none"); "
+            + "engine=\(decision.model.engine)\(whisper)"
+    }
+
     public static func choose(detections: [LanguageDetection], config: TranscribeConfig,
                               memoryBytes: UInt64) -> RoutingDecision {
         let fixedLanguage = EmbeddedModelCatalog.isAutomatic(config.language) ? nil

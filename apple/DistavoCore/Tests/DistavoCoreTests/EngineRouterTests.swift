@@ -233,6 +233,17 @@ final class EngineRouterTests: XCTestCase {
         XCTAssertNil(r.confidence)
     }
 
+    func testRoutingTraceLine() {
+        let cfg = pin("large-v3-turbo")
+        let dets = [d("ca", 0.92), d("en", 0.031)]
+        let r = EngineRouter.choose(detections: dets, config: cfg, memoryBytes: gb16)
+        XCTAssertEqual(EngineRouter.traceLine(config: cfg, detections: dets, decision: r),
+            "Routing \u{2014} configured model=large-v3-turbo language=auto; detections=ca 92%, en 3%; hint=ca; engine=whisperKit whisper(language=ca, detect=false)")
+        let none = EngineRouter.choose(detections: [], config: cfg, memoryBytes: gb16)
+        XCTAssertEqual(EngineRouter.traceLine(config: cfg, detections: [], decision: none),
+            "Routing \u{2014} configured model=large-v3-turbo language=auto; detections=none; hint=none; engine=whisperKit whisper(language=auto, detect=true)")
+    }
+
     func testLogLines() {
         let turbo = EngineRouter.choose(detections: [d("ca", 0.92)], config: pin("large-v3-turbo"), memoryBytes: gb16)
         XCTAssertEqual(turbo.logLine,

@@ -1,3 +1,13 @@
-• New in the direct-download edition: an optional on-device Gemma 4 summary model (Settings → Summary model). It downloads about 5 GB once, only when you press Download now, and recordings never leave your Mac. Catalan and Spanish notes are written in the meeting's language.
-• The activity log now shows which language was detected and which transcription and summary model each recording used, so a surprising note is easy to explain.
-• Stronger checks on downloaded models: every file is verified before it is used.
+• Settings has a new sidebar layout with a Notes pane, a filter field and shorter explanations. Every existing setting is still there. Everything new below is off until you turn it on.
+• Write notes in any language: English, the meeting's own language, or a language you choose. You can also set it per recording.
+• Teach Distavo your names and jargon with a vocabulary list and find-and-replace rules.
+• Summary templates for stand-ups, 1:1s, interviews, sales calls and lectures, plus your own; choose one per recordings subfolder or per recording.
+• Regenerate a note with another template, model or instruction, without transcribing again. The previous version is kept.
+• Optional Tasks and Decisions sections, a window listing open action items across your notes, and Send to Reminders.
+• Search across all notes and transcripts, and Ask Your Notes, answered by your local model only.
+• Open Transcript: play the recording, click a word to jump there, correct the text and re-summarise. Rename speakers across a note.
+• Export a transcript as SRT, WebVTT, JSON, HTML, Word or PDF.
+• While recording: Quick Notes that steer the summary, and key-moment markers with audio clip export.
+• Optional prompt to record when a call app starts using the microphone, and calendar-aware titles and attendees.
+• Shortcuts actions, a distavo:// link scheme and a Finder service; a Processing Queue window with drag and drop; Obsidian-friendly frontmatter, tags and vault copy.
+• Fixed: the local-network check could mistake some public server names for private ones.

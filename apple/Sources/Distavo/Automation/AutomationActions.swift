@@ -11,12 +11,15 @@ import DistavoCore
 /// user-granted, security-scoped bookmark folders (`SandboxFolders`), whose scope
 /// is open for the app's lifetime, so writing into / reading from them works the
 /// same in all three editions. Files handed over by Shortcuts or Services are
-/// only readable for the duration of the call, so they are COPIED immediately.
+/// only readable for the duration of the call, so they are COPIED (off the main
+/// thread: videos can be GBs) and the original URL is never kept.
 
 /// Errors surfaced to Shortcuts / the Services menu.
 enum AutomationError: Error, CustomLocalizedStringResourceConvertible {
     case appNotReady
     case unsupportedFile(String)
+    case notAFile(String)
+    case emptyFile(String)
     case unreadableFile
     case copyFailed(String)
     case noNotes
@@ -29,6 +32,8 @@ enum AutomationError: Error, CustomLocalizedStringResourceConvertible {
         switch self {
         case .appNotReady: return "Distavo is still starting. Try again in a moment."
         case .unsupportedFile(let n): return "Distavo cannot transcribe \"\(n)\". Use an audio or video file."
+        case .notAFile(let n): return "\"\(n)\" is not a file (folders are not supported)."
+        case .emptyFile(let n): return "\"\(n)\" is empty."
         case .unreadableFile: return "Distavo could not read that file."
         case .copyFailed(let m): return "Could not add the file to the recordings folder: \(m)"
         case .noNotes: return "There are no notes yet."
@@ -46,6 +51,11 @@ enum AutomationError: Error, CustomLocalizedStringResourceConvertible {
 final class AutomationHub {
     static let shared = AutomationHub()
     weak var controller: WatcherController?
+    /// A "start recording?" alert is on screen: further link requests are dropped.
+    var recordPromptShowing = false
+    /// Repeat limiter for URL-triggered commands.
+    var throttle = CommandThrottle(interval: 5)
+    let notifier = Notifier()
 
     func requireController() throws -> WatcherController {
         guard let c = controller else { throw AutomationError.appNotReady }
@@ -53,43 +63,84 @@ final class AutomationHub {
     }
 }
 
+/// A validated copy job, prepared on the main actor and executed off it.
+private struct CopyJob: Sendable {
+    let source: URL?
+    let data: Data?
+    let dest: URL
+    let temp: URL
+}
+
 @MainActor
 extension WatcherController {
 
-    /// Copy a file into the recordings folder under a unique name (never
-    /// overwriting), atomically (`.part` then rename, so the scanner never sees
-    /// a half-copied file), then kick a scan. Returns the queued file name.
-    /// `source` may be nil when only `data` is available.
-    func queueForTranscription(source: URL?, data: Data?, name: String) throws -> String {
-        guard QueuedFile.isSupportedMedia(name) else {
-            throw AutomationError.unsupportedFile(name)
-        }
+    /// Validate, name and copy a file into the recordings folder (atomically via
+    /// a `.distavo-copy` temp, never overwriting), then kick a scan. The copy runs
+    /// on a background task. Returns the queued file name. A file already inside
+    /// the recordings folder is not duplicated, only scanned.
+    /// `releaseScope`: stop security-scoped access on `source` when done (the
+    /// caller started it).
+    func queueForTranscription(source: URL?, data: Data?, name: String,
+                               releaseScope: Bool = false) async throws -> String {
+        defer { if releaseScope { source?.stopAccessingSecurityScopedResource() } }
+        guard QueuedFile.isSupportedMedia(name) else { throw AutomationError.unsupportedFile(name) }
         let dir = Config.resolvePath(config.recordingsDir)
         let fm = FileManager.default
+
+        if let source {
+            // Resolve symlinks, require a non-empty regular file.
+            let resolved = source.resolvingSymlinksInPath()
+            let v = try? resolved.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+            switch QueuedFile.sourceProblem(isRegularFile: v?.isRegularFile ?? false, size: v?.fileSize) {
+            case .notRegularFile: throw AutomationError.notAFile(name)
+            case .empty: throw AutomationError.emptyFile(name)
+            case nil: break
+            }
+            if QueuedFile.isInside(resolved, folder: dir) {
+                Task { await self.scanOnce() }
+                return resolved.lastPathComponent
+            }
+        } else if (data?.isEmpty ?? true) {
+            throw AutomationError.emptyFile(name)
+        }
+
         try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
         let dest = QueuedFile.uniqueDestination(forName: name, in: dir) { fm.fileExists(atPath: $0.path) }
-        let part = dest.deletingLastPathComponent()
-            .appendingPathComponent("." + dest.lastPathComponent + ".part")
+        let job = CopyJob(source: source?.resolvingSymlinksInPath(), data: data,
+                          dest: dest, temp: QueuedFile.tempURL(for: dest))
         do {
-            if let source {
-                let scoped = source.startAccessingSecurityScopedResource()
-                defer { if scoped { source.stopAccessingSecurityScopedResource() } }
-                try fm.copyItem(at: source, to: part)
-            } else if let data {
-                try data.write(to: part)
-            } else {
-                throw AutomationError.unreadableFile
-            }
-            try fm.moveItem(at: part, to: dest)
+            try await Task.detached(priority: .utility) { try Self.runCopy(job) }.value
         } catch let e as AutomationError {
-            try? fm.removeItem(at: part)
             throw e
         } catch {
-            try? fm.removeItem(at: part)
             throw AutomationError.copyFailed(error.localizedDescription)
         }
         Task { await self.scanOnce() }
         return dest.lastPathComponent
+    }
+
+    /// The blocking copy (background thread only).
+    nonisolated private static func runCopy(_ job: CopyJob) throws {
+        let fm = FileManager.default
+        do {
+            if let source = job.source {
+                try fm.copyItem(at: source, to: job.temp)
+            } else if let data = job.data {
+                try data.write(to: job.temp)
+            } else {
+                throw AutomationError.unreadableFile
+            }
+            try fm.moveItem(at: job.temp, to: job.dest)
+        } catch {
+            try? fm.removeItem(at: job.temp)
+            throw error
+        }
+    }
+
+    /// Remove temp copies left by a crash mid-copy (called at launch).
+    func removeStaleAutomationTemps() {
+        let dir = Config.resolvePath(config.recordingsDir)
+        Task.detached(priority: .utility) { QueuedFile.removeStaleTemps(in: dir) }
     }
 
     /// Newest note on disk (skips `.prev-` backups), if any.
@@ -98,28 +149,37 @@ extension WatcherController {
     }
 
     /// Run a parsed `distavo://` command. The URL carries no paths and none of
-    /// these read, move or delete files or change settings; the only recording
-    /// start is confirmed with the user first.
+    /// these read, move or delete files or change settings; starting a recording
+    /// is confirmed with the user first (Cancel is the default button).
     func perform(_ command: AutomationCommand) {
+        let hub = AutomationHub.shared
         switch command {
         case .openLatestNote:
             if let note = latestNoteURL() { NSWorkspace.shared.open(note) }
         case .processNow:
             // scanOnce, not processNow(): the latter also clears .failed markers.
+            guard hub.throttle.allow(.processNow, now: ProcessInfo.processInfo.systemUptime) else { return }
             Task { await self.scanOnce() }
         case .settings:
             showSettings()
         case .recordStop:
             capture.stopRecording()
         case .recordStart:
-            guard MeetingCaptureController.isSupported, !capture.isRecording else { return }
+            guard MeetingCaptureController.isSupported, !capture.isRecording,
+                  !hub.recordPromptShowing else { return }
+            hub.recordPromptShowing = true
+            defer { hub.recordPromptShowing = false }
             NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = "Start recording?"
-            alert.informativeText = "Requested by a link."
-            alert.addButton(withTitle: "Start recording")
+            alert.informativeText = "A link asked Distavo to record your microphone and the audio playing on this Mac. Only continue if you started this yourself."
+            // The first button is the default (Return) and a button titled
+            // "Cancel" also answers Escape: a stray key press never starts a recording.
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            alert.addButton(withTitle: "Start recording")
+            guard alert.runModal() == .alertSecondButtonReturn else { return }
+            // State may have changed while the alert was up.
+            guard !capture.isRecording else { return }
             Task { _ = await self.capture.startRecording() }
         }
     }
@@ -131,13 +191,13 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
+        Task { @MainActor in AutomationHub.shared.controller?.removeStaleAutomationTemps() }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let command = AutomationCommand.parse(url) else {
-                // Unknown or malformed: ignore, but leave a trace. Log only the
-                // scheme-less shape, truncated, never act on it.
+                // Unknown or malformed: ignore, but leave a trace (truncated).
                 NSLog("Distavo: ignored unknown URL command (%@)", String(url.absoluteString.prefix(80)))
                 continue
             }
@@ -146,29 +206,40 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Finder Service "Transcribe with Distavo" (NSMessage `transcribeFiles`).
-    /// Files passed by Services are readable only during this call, so they are
-    /// copied synchronously here.
+    /// Pasteboard URLs are read synchronously and security-scoped access started
+    /// here (it is only guaranteed during this call); the actual copy happens on
+    /// a background task so a multi-GB video never blocks the menu bar, with a
+    /// notification on completion or failure.
     @objc func transcribeFiles(_ pboard: NSPasteboard, userData: String,
                                error: AutoreleasingUnsafeMutablePointer<NSString>) {
         let urls = (pboard.readObjects(forClasses: [NSURL.self],
                                        options: [.urlReadingFileURLsOnly: true]) as? [URL]) ?? []
-        MainActor.assumeIsolated {
-            guard let controller = AutomationHub.shared.controller else {
-                error.pointee = "Distavo is still starting. Try again in a moment." as NSString
-                return
-            }
-            var queued = 0
-            var firstError: String?
-            for url in urls {
+        let scoped = urls.map { ($0, $0.startAccessingSecurityScopedResource()) }
+        let ready: Bool = MainActor.assumeIsolated { AutomationHub.shared.controller != nil }
+        guard ready, !urls.isEmpty else {
+            for (u, s) in scoped where s { u.stopAccessingSecurityScopedResource() }
+            error.pointee = (ready ? "No audio or video files selected."
+                                   : "Distavo is still starting. Try again in a moment.") as NSString
+            return
+        }
+        Task { @MainActor in
+            guard let controller = AutomationHub.shared.controller else { return }
+            let notifier = AutomationHub.shared.notifier
+            var queued: [String] = []
+            for (url, s) in scoped {
                 do {
-                    _ = try controller.queueForTranscription(source: url, data: nil, name: url.lastPathComponent)
-                    queued += 1
+                    queued.append(try await controller.queueForTranscription(
+                        source: url, data: nil, name: url.lastPathComponent, releaseScope: s))
                 } catch {
-                    firstError = firstError ?? String(localized: (error as? AutomationError)?.localizedStringResource
-                                                      ?? "Could not queue the file.")
+                    notifier.notify(title: "Could not queue \(url.lastPathComponent)",
+                                    body: String(localized: (error as? AutomationError)?.localizedStringResource
+                                                 ?? "The file could not be copied."))
                 }
             }
-            if queued == 0 { error.pointee = (firstError ?? "No audio or video files selected.") as NSString }
+            if !queued.isEmpty {
+                notifier.notify(title: "Queued for transcription",
+                                body: queued.joined(separator: ", "))
+            }
         }
     }
 }

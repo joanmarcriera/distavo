@@ -21,7 +21,10 @@ Backup copies (`.prev-` files from Regenerate) are never returned as the latest 
 `open distavo://<command>`. Commands: `open-latest-note`, `process-now`, `settings`, `record/start`, `record/stop`.
 
 Any web page or app can open a URL, so the scheme is deliberately tiny: no command takes a path, reads, moves or
-deletes files, or changes settings. `record/start` always asks "Start recording? Requested by a link." first.
+deletes files, or changes settings. Starting a recording by link always asks first (Cancel is the default button,
+so a stray Return does nothing; repeated links while the question is open are dropped). `record/stop` needs no
+confirmation because stopping saves the audio. `process-now` repeats within 5 seconds are ignored. The Start Recording
+shortcut posts a "Recording started (via Shortcuts)" notification so a recording never starts silently.
 Unknown or malformed URLs are ignored and logged. `process-now` scans for new recordings but, unlike the menu's
 Process now, does not clear failed markers.
 

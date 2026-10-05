@@ -23,9 +23,9 @@ struct TranscribeFileIntent: AppIntent {
         let name = file.filename
         let queued: String
         if let url = file.fileURL, FileManager.default.isReadableFile(atPath: url.path) {
-            queued = try controller.queueForTranscription(source: url, data: nil, name: name)
+            queued = try await controller.queueForTranscription(source: url, data: nil, name: name)
         } else {
-            queued = try controller.queueForTranscription(source: nil, data: file.data, name: name)
+            queued = try await controller.queueForTranscription(source: nil, data: file.data, name: name)
         }
         return .result(value: queued)
     }
@@ -41,6 +41,9 @@ struct StartRecordingIntent: AppIntent {
         guard MeetingCaptureController.isSupported else { throw AutomationError.recordingUnsupported }
         guard !controller.capture.isRecording else { throw AutomationError.alreadyRecording }
         guard await controller.capture.startRecording() else { throw AutomationError.recordingFailed }
+        // A shortcut must never start a recording with only the icon changing.
+        AutomationHub.shared.notifier.notify(title: "Recording started (via Shortcuts)",
+                                             body: "Distavo is recording. Stop it from the menu bar or a Stop Recording shortcut.")
         return .result()
     }
 }

@@ -285,7 +285,7 @@ public enum DistavoState {
         guard let entries = try? FileManager.default.contentsOfDirectory(
             at: notesDir, includingPropertiesForKeys: keys) else { return nil }
         return entries
-            .filter { $0.pathExtension.lowercased() == "md" }
+            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
             .compactMap { url -> (url: URL, date: Date)? in
                 guard let v = try? url.resourceValues(forKeys: Set(keys)),
                       v.isRegularFile == true,

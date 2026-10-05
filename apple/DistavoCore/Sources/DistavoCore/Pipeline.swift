@@ -120,10 +120,14 @@ public struct NoteContext: Equatable, Sendable {
     /// before the feature. Honoured by Ollama and Gemma; Apple's on-device
     /// model gets it only for languages it reports supporting.
     public var noteLanguage: String?
+    /// A one-off instruction from "Regenerate Note…" (Vikunja #2947); nil for
+    /// every automatic run, which leaves the prompt byte-identical.
+    public var customInstruction: String?
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
-                noteLanguage: String? = nil) {
+                noteLanguage: String? = nil, customInstruction: String? = nil) {
+        self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
         self.participants = participants; self.meetingDate = meetingDate
         self.promptStyle = promptStyle; self.noteLanguage = noteLanguage
@@ -133,7 +137,7 @@ public struct NoteContext: Equatable, Sendable {
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
-                     noteLanguage: noteLanguage)
+                     noteLanguage: noteLanguage, customInstruction: customInstruction)
     }
 }
 

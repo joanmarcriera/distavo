@@ -413,6 +413,7 @@ public enum GemmaSummariser {
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
+        customInstruction: String? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil,
         root: URL = EmbeddedModelStore.modelsDirectory,
         manager: SummaryModelManager = .shared
@@ -423,7 +424,8 @@ public enum GemmaSummariser {
             try await run(
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
-                meetingDate: meetingDate, noteLanguage: noteLanguage, onProgress: onProgress,
+                meetingDate: meetingDate, noteLanguage: noteLanguage,
+                customInstruction: customInstruction, onProgress: onProgress,
                 root: root, manager: manager)
         }
     }
@@ -432,6 +434,7 @@ public enum GemmaSummariser {
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
+        customInstruction: String?,
         onProgress: (@Sendable (String) -> Void)?,
         root: URL, manager: SummaryModelManager
     ) async throws -> String {
@@ -455,7 +458,8 @@ public enum GemmaSummariser {
             noteLanguage: noteLanguage,
             endOfTurnBlock: EndOfTurnBlock.build(
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
-                ownerSpeaker: userSpeaker))
+                ownerSpeaker: userSpeaker),
+            customInstruction: customInstruction)
         do {
             let raw = try await SummaryDriver.run(request, generator: generator, onProgress: report)
             LocalSummaryFailureTracker.shared.noteSuccess(model: model.id)
@@ -522,6 +526,7 @@ public enum GemmaPipelineRoute {
             noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
             participants: context.participants, style: context.promptStyle,
             meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
+            customInstruction: context.customInstruction,
             root: root, manager: manager)
     }
 }

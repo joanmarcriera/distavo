@@ -875,9 +875,34 @@ final class WatcherController: ObservableObject {
                 segments: TranscriptSegments.load(workDir: workDir, base: base))
         }
         RenameSpeakersWindowController.shared.show(notes: Array(notes), detect: detect,
-                                                   resetMapping: { SpeakerRename.resetMapping(workDir: workDir, base: $0) }) { [weak self] base, mapping in
+                                                   resetMapping: { SpeakerRename.resetMapping(workDir: workDir, base: $0) },
+                                                   preview: { SpeakerRename.preview(mapping: $1, base: $0, notesDir: notesDir) },
+                                                   mergeCopies: { SpeakerRename.mergeCopies(workDir: workDir, base: $0) },
+                                                   onReset: { [weak self] base in
+            Task { [weak self] in await self?.resetSpeakers(base: base) }
+        }) { [weak self] base, mapping in
             Task { [weak self] in await self?.renameSpeakers(base: base, mapping: mapping) }
         }
+    }
+
+    /// "Reset to original labels": transcript, timestamps and mapping are reset exactly;
+    /// the note is restored only if it is untouched since the last rename.
+    func resetSpeakers(base: String) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let notesDir = Config.resolvePath(config.notesDir)
+        let workDir = Config.resolvePath(config.workDir)
+        do {
+            let result = try SpeakerRename.reset(base: base, notesDir: notesDir, workDir: workDir)
+            indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+            log("Reset speaker labels in \(base): \(result.message)")
+            notifier.notify(title: "Speaker labels reset", body: "\(base): \(result.message)")
+        } catch {
+            log("Speaker reset failed: \(base) — \(error.localizedDescription)")
+            notifier.notify(title: "Speakers not reset", body: "\(base): \(error.localizedDescription) Nothing was changed.")
+        }
+        refreshActivity()
     }
 
     /// Apply a speaker rename under the same single-flight lock as the scanner,

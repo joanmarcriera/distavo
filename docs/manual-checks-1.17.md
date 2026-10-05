@@ -142,4 +142,7 @@ with at least two speakers.
 8. Start a scan and press Apply while it runs: the rename waits for the scan (single-flight).
 9. `SPEAKER_1` vs `SPEAKER_10`: renaming one never touches the other (unit-tested; spot-check in a long note).
 
+10. Type a name: under the list the window shows how many note lines will change with a preview of up to 5; a line like `- Mark: the release date` shows up there so you can cancel.
+11. **Reset to original labels** resets the transcript, timestamps and mapping exactly. The note is restored to its pre-rename state only if you did not edit it since the last rename; otherwise it is left as it is and the notification says so. After a merge the button is replaced by a note and a "Show copies" button.
+
 Phase 2 (voice profiles) is not built; see `docs/voice-profiles-feasibility.md`.

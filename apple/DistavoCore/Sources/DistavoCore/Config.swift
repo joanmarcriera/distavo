@@ -337,6 +337,9 @@ public struct Config: Codable, Equatable {
     /// Meeting auto-detect (Vikunja #2945). OFF for any config predating it and
     /// for fresh installs; see `MeetingDetectionConfig`.
     public var meetingDetection: MeetingDetectionConfig
+    /// Key-moment markers and clips (Vikunja #2950). Hotkey off, 15 s / 30 s for
+    /// any config predating it; see `RecordingOptions`.
+    public var recording: RecordingOptions
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -353,6 +356,7 @@ public struct Config: Codable, Equatable {
         case benchmark
         case whenDone = "when_done"
         case meetingDetection = "meeting_detection"
+        case recording
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -372,7 +376,8 @@ public struct Config: Codable, Equatable {
                 autoStopSilenceMinutes: Int = 5,
                 benchmark: [BenchmarkResult] = [],
                 whenDone: [WhenDoneAction] = [],
-                meetingDetection: MeetingDetectionConfig = .init()) {
+                meetingDetection: MeetingDetectionConfig = .init(),
+                recording: RecordingOptions = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -387,6 +392,7 @@ public struct Config: Codable, Equatable {
         self.benchmark = benchmark
         self.whenDone = whenDone
         self.meetingDetection = meetingDetection
+        self.recording = recording
     }
 
     public init(from decoder: Decoder) throws {
@@ -427,6 +433,7 @@ public struct Config: Codable, Equatable {
             }
         }
         meetingDetection = (try? c.decodeIfPresent(MeetingDetectionConfig.self, forKey: .meetingDetection)).flatMap { $0 } ?? d.meetingDetection
+        recording = (try? c.decodeIfPresent(RecordingOptions.self, forKey: .recording)).flatMap { $0 } ?? d.recording
     }
 
     /// Valid range for the silence-minute settings.

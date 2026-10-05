@@ -358,6 +358,9 @@ public enum Pipeline {
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
+            // A re-run must never leave the previous run's timed transcript
+            // behind (#2943): export would pair it with the new note.
+            try? FileManager.default.removeItem(at: TranscriptSegments.url(workDir: workDir, base: base))
             let wavPath = workDir.appendingPathComponent("\(base).wav")
             deps.onPhase?(.converting)
 
@@ -394,6 +397,12 @@ public enum Pipeline {
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.
             TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
+            // Timed twin of the clean transcript for exports/viewer (#2943).
+            // Best-effort: a failure to write it must never fail the recording.
+            if let timed = TranscriptSegments(whisperXResult: result) {
+                do { try timed.save(workDir: workDir, base: base) }
+                catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }
+            }
 
             deps.onPhase?(.summarising)
             // The note language (Vikunja #2147, #2956): a per-recording

@@ -82,6 +82,8 @@ public enum WordSpeakerAligner {
                 "end": current.last!.end,
             ]
             if let s = currentSpeaker { entry["speaker"] = String(format: "SPEAKER_%02d", s) }
+            // Word timings ride along for the segments sidecar (#2943); the cleaner ignores them.
+            entry["words"] = current.map { ["word": $0.text, "start": $0.start, "end": $0.end] as [String: Any] }
             out.append(entry)
             current = []
         }

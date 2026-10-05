@@ -16,6 +16,18 @@ public enum EmbeddedResultMapper {
         return stripped.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Word timings in the WhisperX `words` shape (`word`/`start`/`end`), kept
+    /// so `TranscriptSegments` can persist them for subtitle export (#2943).
+    /// nil when there are none. `TranscriptCleaner` ignores the key.
+    static func wordEntries(_ words: [WordTiming]) -> [[String: Any]]? {
+        let out: [[String: Any]] = words.compactMap { w in
+            let token = cleanText(w.word)
+            guard !token.isEmpty else { return nil }
+            return ["word": token, "start": Double(w.start), "end": Double(w.end)]
+        }
+        return out.isEmpty ? nil : out
+    }
+
     /// Non-diarized path: plain transcription segments, no speaker labels
     /// (TranscriptCleaner renders them as SPEAKER_UNKNOWN, same as a WhisperX
     /// server with diarization off).
@@ -24,11 +36,13 @@ public enum EmbeddedResultMapper {
         for segment in segments {
             let text = cleanText(segment.text)
             guard !text.isEmpty else { continue }
-            out.append([
+            var entry: [String: Any] = [
                 "text": text,
                 "start": Double(segment.start),
                 "end": Double(segment.end),
-            ])
+            ]
+            if let words = wordEntries(segment.words ?? []) { entry["words"] = words }
+            out.append(entry)
         }
         return ["segments": out]
     }
@@ -49,6 +63,7 @@ public enum EmbeddedResultMapper {
                 if let id = segment.speaker.speakerId {
                     entry["speaker"] = String(format: "SPEAKER_%02d", id)
                 }
+                if let words = wordEntries(segment.speakerWords.map(\.wordTiming)) { entry["words"] = words }
                 out.append(entry)
             }
         }

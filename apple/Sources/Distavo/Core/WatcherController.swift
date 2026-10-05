@@ -667,6 +667,26 @@ final class WatcherController: ObservableObject {
         }
     }
 
+    /// True when the last note's timed transcript (`<base>.segments.json`,
+    /// Vikunja #2943) is on disk. Recordings processed before that feature
+    /// have none, so "Export Transcript As…" is disabled for them.
+    var canExportLastTranscript: Bool {
+        guard let base = lastDone?.base else { return false }
+        return TranscriptExporter.hasSegments(workDir: Config.resolvePath(config.workDir), base: base)
+    }
+
+    func exportLastTranscript() {
+        guard let base = lastDone?.base,
+              let transcript = TranscriptExporter.segments(workDir: Config.resolvePath(config.workDir), base: base) else {
+            notifier.notify(title: "No timestamps saved",
+                            body: "This recording was processed before Distavo saved timestamps. Process it again to export subtitles or a formatted transcript.")
+            return
+        }
+        TranscriptExporter.run(base: base, transcript: transcript) { [weak self] title, body in
+            self?.notifier.notify(title: title, body: body)
+        }
+    }
+
     func copyLastTranscript() {
         guard let transcript = lastDone?.transcript,
               let text = try? String(contentsOf: transcript, encoding: .utf8) else {

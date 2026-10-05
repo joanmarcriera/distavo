@@ -326,6 +326,9 @@ public struct Config: Codable, Equatable {
     /// predating either key decodes to `[]` too, so upgrading never starts
     /// opening files or queueing re-runs unasked. See `WhenDoneAction`.
     public var whenDone: [WhenDoneAction]
+    /// Meeting auto-detect (Vikunja #2945). OFF for any config predating it and
+    /// for fresh installs; see `MeetingDetectionConfig`.
+    public var meetingDetection: MeetingDetectionConfig
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -341,6 +344,7 @@ public struct Config: Codable, Equatable {
         case autoStopSilenceMinutes = "auto_stop_silence_minutes"
         case benchmark
         case whenDone = "when_done"
+        case meetingDetection = "meeting_detection"
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -359,7 +363,8 @@ public struct Config: Codable, Equatable {
                 autoStopOnSilence: Bool = false,
                 autoStopSilenceMinutes: Int = 5,
                 benchmark: [BenchmarkResult] = [],
-                whenDone: [WhenDoneAction] = []) {
+                whenDone: [WhenDoneAction] = [],
+                meetingDetection: MeetingDetectionConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -373,6 +378,7 @@ public struct Config: Codable, Equatable {
         self.autoStopSilenceMinutes = Config.clampSilenceMinutes(autoStopSilenceMinutes)
         self.benchmark = benchmark
         self.whenDone = whenDone
+        self.meetingDetection = meetingDetection
     }
 
     public init(from decoder: Decoder) throws {
@@ -412,6 +418,7 @@ public struct Config: Codable, Equatable {
             default: whenDone = d.whenDone
             }
         }
+        meetingDetection = (try? c.decodeIfPresent(MeetingDetectionConfig.self, forKey: .meetingDetection)).flatMap { $0 } ?? d.meetingDetection
     }
 
     /// Valid range for the silence-minute settings.

@@ -37,6 +37,21 @@ final class MeetingDetectionConfigTests: XCTestCase {
         XCTAssertEqual(back.meetingDetection, cfg.meetingDetection)
     }
 
+    func testAppListIsDedupedOnDecodeAndInit() throws {
+        let cfg = try decode(#"{"meeting_detection":{"apps":["a.b","c.d","a.b"]}}"#)
+        XCTAssertEqual(cfg.meetingDetection.apps, ["a.b", "c.d"])
+        XCTAssertEqual(MeetingDetectionConfig(apps: ["x.y", "x.y"]).apps, ["x.y"])
+    }
+
+    func testBundleIDPlausibility() {
+        for ok in ["us.zoom.xos", "Cisco-Systems.Spark", "com.apple.FaceTime", "a.b_c"] {
+            XCTAssertTrue(MeetingDetectionConfig.isPlausibleBundleID(ok), ok)
+        }
+        for bad in ["", "zoom", "a..b", ".a.b", "a.b.", "a b.c", "com.épic.app", "a/b.c"] {
+            XCTAssertFalse(MeetingDetectionConfig.isPlausibleBundleID(bad), bad)
+        }
+    }
+
     func testOffForFreshInstalls() {
         XCTAssertFalse(Config.recommendedForThisMac(embeddedSupported: true).meetingDetection.enabled)
         XCTAssertFalse(Config.recommendedForThisMac(embeddedSupported: false).meetingDetection.enabled)

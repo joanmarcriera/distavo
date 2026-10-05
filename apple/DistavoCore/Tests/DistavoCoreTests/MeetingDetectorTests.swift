@@ -1,131 +1,159 @@
-// MeetingDetectorTests — the pure detection policy with a fake clock (Vikunja #2945).
+// MeetingDetectorTests — the pure detection policy with a fake monotonic clock (Vikunja #2945).
 import XCTest
 @testable import DistavoCore
 
 final class MeetingDetectorTests: XCTestCase {
     private let zoom = "us.zoom.xos"
-    private let t0 = Date(timeIntervalSince1970: 1_000_000)
+    private let facetime = "com.apple.FaceTime"
+    private let discord = "com.hnc.Discord"
 
     private func detector(fallback: Bool = false, snooze: TimeInterval = 600) -> MeetingDetector {
-        MeetingDetector(policy: MeetingDetectionPolicy(apps: [zoom, "com.apple.FaceTime"], snooze: snooze,
-                                                       allowFrontmostFallback: fallback))
+        MeetingDetector(policy: MeetingDetectionPolicy(apps: [zoom, facetime, discord, "com.microsoft.teams2"],
+                                                       snooze: snooze, allowFrontmostFallback: fallback))
     }
-    private func obs(_ t: TimeInterval, running: Set<String>? = nil, front: String? = nil, mic: Bool?,
+    private func obs(_ t: TimeInterval, cap: Set<String>?, front: String? = nil,
                      recording: Bool = false) -> MeetingObservation {
-        MeetingObservation(runningBundleIDs: running ?? [zoom, "com.apple.finder"], frontmostBundleID: front,
-                           micInUse: mic, isRecording: recording, now: t0.addingTimeInterval(t))
+        MeetingObservation(runningBundleIDs: [zoom, discord, "com.apple.finder"], frontmostBundleID: front,
+                           capturingBundleIDs: cap, isRecording: recording, now: t)
+    }
+    /// Observe once per second over [from, to) and return every non-.none event.
+    private func run(_ d: inout MeetingDetector, _ from: Int, _ to: Int, cap: Set<String>?,
+                     front: String? = nil, recording: Bool = false) -> [MeetingDetectionEvent] {
+        (from..<to).map { d.observe(obs(TimeInterval($0), cap: cap, front: front, recording: recording)) }
+            .filter { $0 != .none }
     }
 
-    func testFiresAfterMicDebounce() {
+    func testFiresForCapturingListedAppAfterDebounce() {
         var d = detector()
-        XCTAssertEqual(d.observe(obs(0, mic: true)), .none)
-        XCTAssertEqual(d.observe(obs(1, mic: true)), .none)
-        XCTAssertEqual(d.observe(obs(2, mic: true)), .offerRecording(app: zoom))
+        XCTAssertEqual(d.observe(obs(0, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(1, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(2, cap: [zoom])), .offerRecording(app: zoom))
     }
 
     func testBlipShorterThanDebounceNeverFires() {
         var d = detector()
-        XCTAssertEqual(d.observe(obs(0, mic: true)), .none)
-        XCTAssertEqual(d.observe(obs(1, mic: false)), .none)
-        XCTAssertEqual(d.observe(obs(2, mic: true)), .none)   // debounce restarts
-        XCTAssertEqual(d.observe(obs(3, mic: true)), .none)
-        XCTAssertEqual(d.observe(obs(4, mic: true)), .offerRecording(app: zoom))
+        XCTAssertEqual(d.observe(obs(0, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(1, cap: [])), .none)
+        XCTAssertEqual(d.observe(obs(2, cap: [zoom])), .none)   // debounce restarts
+        XCTAssertEqual(d.observe(obs(3, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(4, cap: [zoom])), .offerRecording(app: zoom))
     }
 
-    func testNoListedAppOrMicIdleNeverFires() {
+    func testListedAppsRunningButOnlyOneCapturingNamesThatOne() {
+        var d = detector()   // zoom + discord are running (see obs)
+        let events = run(&d, 0, 10, cap: [discord], front: zoom)
+        XCTAssertEqual(events, [.offerRecording(app: discord)])
+    }
+
+    func testNonListedAppCapturingNeverOffersEvenWithListedAppsRunning() {
         var d = detector()
-        for t in 0..<10 { XCTAssertEqual(d.observe(obs(Double(t), running: ["com.apple.finder"], mic: true)), .none) }
-        var e = detector()
-        for t in 0..<10 { XCTAssertEqual(e.observe(obs(Double(t), mic: false)), .none) }
+        XCTAssertEqual(run(&d, 0, 30, cap: ["com.apple.VoiceMemos", "com.spotify.client"], front: zoom), [])
     }
 
-    func testOneOfferPerEpisodeThenAgainAfterMicGoesIdle() {
+    func testNothingCapturingNeverFires() {
         var d = detector()
-        _ = d.observe(obs(0, mic: true))
-        XCTAssertEqual(d.observe(obs(2, mic: true)), .offerRecording(app: zoom))
-        for t in 3..<20 { XCTAssertEqual(d.observe(obs(Double(t), mic: true)), .none) }
-        XCTAssertEqual(d.observe(obs(20, mic: false)), .none)
-        _ = d.observe(obs(21, mic: true))
-        XCTAssertEqual(d.observe(obs(23, mic: true)), .offerRecording(app: zoom))
+        XCTAssertEqual(run(&d, 0, 30, cap: [], front: zoom), [])
     }
 
-    func testUnknownMicDoesNotFireByDefaultEvenIfFrontmost() {
+    func testHelperProcessMapsToListedApp() {
         var d = detector()
-        for t in stride(from: 0.0, to: 60, by: 1) {
-            XCTAssertEqual(d.observe(obs(t, front: zoom, mic: nil)), .none)
-        }
+        XCTAssertEqual(run(&d, 0, 5, cap: ["com.microsoft.teams2.helper"]),
+                       [.offerRecording(app: "com.microsoft.teams2")])
+        let p = MeetingDetectionPolicy(apps: ["com.microsoft.teams", "com.microsoft.teams2"])
+        XCTAssertEqual(p.listedApp(forCapturing: "com.microsoft.teams2"), "com.microsoft.teams2")
+        XCTAssertEqual(p.listedApp(forCapturing: "com.microsoft.teams.helper"), "com.microsoft.teams")
+        XCTAssertNil(p.listedApp(forCapturing: "com.microsoft.teamsx"))   // needs the dot
+        XCTAssertNil(p.listedApp(forCapturing: "us.zoom"))
     }
 
-    func testFrontmostFallbackOnlyWhenAllowedAndMicUnknown() {
+    func testOneOfferPerEpisodeThenAgainAfterCaptureStops() {
+        var d = detector()
+        XCTAssertEqual(run(&d, 0, 20, cap: [zoom]), [.offerRecording(app: zoom)])
+        XCTAssertEqual(run(&d, 20, 22, cap: []), [])
+        XCTAssertEqual(run(&d, 22, 30, cap: [zoom]), [.offerRecording(app: zoom)])
+    }
+
+    func testUnknownCaptureStateDoesNotFireByDefaultEvenIfFrontmost() {
+        var d = detector()
+        XCTAssertEqual(run(&d, 0, 60, cap: nil, front: zoom), [])
+    }
+
+    func testFrontmostFallbackNamesNoAppAndFiresOnce() {
         var d = detector(fallback: true)
-        XCTAssertEqual(d.observe(obs(0, front: zoom, mic: nil)), .none)
-        XCTAssertEqual(d.observe(obs(9, front: zoom, mic: nil)), .none)
-        XCTAssertEqual(d.observe(obs(10, front: zoom, mic: nil)), .offerRecording(app: zoom))
-        XCTAssertEqual(d.observe(obs(11, front: zoom, mic: nil)), .none)   // once
-        // A known idle mic overrides the heuristic.
+        XCTAssertEqual(run(&d, 0, 9, cap: nil, front: zoom), [])
+        XCTAssertEqual(run(&d, 9, 30, cap: nil, front: zoom), [.offerPossibleCall(frontmost: zoom)])
+        // A known empty capture set overrides the heuristic.
         var e = detector(fallback: true)
-        for t in stride(from: 0.0, to: 30, by: 1) { XCTAssertEqual(e.observe(obs(t, front: zoom, mic: false)), .none) }
+        XCTAssertEqual(run(&e, 0, 30, cap: [], front: zoom), [])
     }
 
     func testFrontmostFallbackNeedsContinuousFrontmost() {
         var d = detector(fallback: true)
-        _ = d.observe(obs(0, front: zoom, mic: nil))
-        _ = d.observe(obs(5, front: "com.apple.finder", mic: nil))
-        XCTAssertEqual(d.observe(obs(10, front: zoom, mic: nil)), .none)   // restarted at 10
-        XCTAssertEqual(d.observe(obs(20, front: zoom, mic: nil)), .offerRecording(app: zoom))
+        _ = d.observe(obs(0, cap: nil, front: zoom))
+        _ = d.observe(obs(5, cap: nil, front: "com.apple.finder"))
+        XCTAssertEqual(d.observe(obs(10, cap: nil, front: zoom)), .none)   // restarted at 10
+        XCTAssertEqual(run(&d, 11, 21, cap: nil, front: zoom), [.offerPossibleCall(frontmost: zoom)])
     }
 
     func testNeverFiresWhileRecordingAndCoolsDownAfter() {
         var d = detector()
-        for t in 0..<10 { XCTAssertEqual(d.observe(obs(Double(t), mic: true, recording: true)), .none) }
-        // Recording stopped at t=10 but the call (mic) continues: same episode, and cooldown.
-        for t in 10..<60 { XCTAssertEqual(d.observe(obs(Double(t), mic: true)), .none) }
+        XCTAssertEqual(run(&d, 0, 10, cap: [zoom], recording: true), [])
+        // Recording stopped at t=10 but the call continues: same episode, no prompt.
+        XCTAssertEqual(run(&d, 10, 60, cap: [zoom]), [])
         // Call ends, a new one starts later: prompts again.
-        XCTAssertEqual(d.observe(obs(61, mic: false)), .none)
-        _ = d.observe(obs(70, mic: true))
-        XCTAssertEqual(d.observe(obs(72, mic: true)), .offerRecording(app: zoom))
+        XCTAssertEqual(run(&d, 60, 62, cap: []), [])
+        XCTAssertEqual(run(&d, 62, 70, cap: [zoom]), [.offerRecording(app: zoom)])
+    }
+
+    func testEpisodeStartingDuringOwnRecordingAndEndingAfterIt() {
+        var d = detector()
+        XCTAssertEqual(run(&d, 0, 5, cap: [], recording: true), [])        // we record first
+        XCTAssertEqual(run(&d, 5, 15, cap: [zoom], recording: true), [])   // call starts mid-recording
+        XCTAssertEqual(run(&d, 15, 100, cap: [zoom]), [])                  // we stop; call carries on
+        XCTAssertEqual(run(&d, 100, 105, cap: []), [])                     // call ends
+        XCTAssertEqual(run(&d, 105, 115, cap: [zoom]), [.offerRecording(app: zoom)])
     }
 
     func testCooldownHoldsANewEpisodeAfterRecording() {
         var d = detector()
-        _ = d.observe(obs(0, mic: true, recording: true))
-        XCTAssertEqual(d.observe(obs(1, mic: false)), .none)       // recording ended, mic idle
-        _ = d.observe(obs(2, mic: true))
-        XCTAssertEqual(d.observe(obs(5, mic: true)), .none)        // inside the 30 s cool-down
-        XCTAssertEqual(d.observe(obs(32, mic: true)), .offerRecording(app: zoom))
+        XCTAssertEqual(run(&d, 0, 1, cap: [], recording: true), [])
+        XCTAssertEqual(run(&d, 1, 2, cap: []), [])
+        XCTAssertEqual(run(&d, 2, 30, cap: [zoom]), [])                    // inside the 30 s cool-down
+        XCTAssertEqual(run(&d, 30, 40, cap: [zoom]), [.offerRecording(app: zoom)])
     }
 
     func testSnoozeSuppressesThatAppThenExpires() {
         var d = detector(snooze: 600)
-        _ = d.observe(obs(0, mic: true))
-        XCTAssertEqual(d.observe(obs(2, mic: true)), .offerRecording(app: zoom))
-        d.snooze(app: zoom, at: t0.addingTimeInterval(2))
-        XCTAssertEqual(d.observe(obs(3, mic: false)), .none)
-        _ = d.observe(obs(10, mic: true))
-        XCTAssertEqual(d.observe(obs(13, mic: true)), .none)       // snoozed
-        XCTAssertEqual(d.observe(obs(20, mic: false)), .none)
-        _ = d.observe(obs(700, mic: true))
-        XCTAssertEqual(d.observe(obs(703, mic: true)), .offerRecording(app: zoom))   // expired
+        XCTAssertEqual(run(&d, 0, 5, cap: [zoom]), [.offerRecording(app: zoom)])
+        d.snooze(app: zoom, at: 4)
+        XCTAssertEqual(run(&d, 5, 8, cap: []), [])
+        XCTAssertEqual(run(&d, 8, 20, cap: [zoom]), [])                    // snoozed
+        XCTAssertEqual(run(&d, 20, 22, cap: []), [])
+        XCTAssertEqual(run(&d, 604, 608, cap: [zoom]), [.offerRecording(app: zoom)])   // expired (gap resets debounce only)
     }
 
     func testSnoozeIsPerApp() {
         var d = detector()
-        d.snooze(app: zoom, at: t0)
-        let both: Set<String> = [zoom, "com.apple.FaceTime"]
-        _ = d.observe(obs(1, running: both, mic: true))
-        XCTAssertEqual(d.observe(obs(4, running: both, mic: true)), .offerRecording(app: "com.apple.FaceTime"))
+        d.snooze(app: zoom, at: 0)
+        XCTAssertEqual(run(&d, 1, 6, cap: [zoom, facetime]), [.offerRecording(app: facetime)])
     }
 
-    func testPrefersFrontmostListedApp() {
+    func testPrefersFrontmostWhenSeveralReady() {
         var d = detector()
-        let both: Set<String> = [zoom, "com.apple.FaceTime"]
-        _ = d.observe(obs(0, running: both, front: "com.apple.FaceTime", mic: true))
-        XCTAssertEqual(d.observe(obs(3, running: both, front: "com.apple.FaceTime", mic: true)),
-                       .offerRecording(app: "com.apple.FaceTime"))
+        XCTAssertEqual(run(&d, 0, 3, cap: [zoom, facetime], front: facetime), [.offerRecording(app: facetime)])
+    }
+
+    func testLongGapResetsDebounce() {
+        var d = detector()
+        XCTAssertEqual(d.observe(obs(0, cap: [zoom])), .none)
+        // Sleep/wake: the next observation is minutes later; no credit for the gap.
+        XCTAssertEqual(d.observe(obs(300, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(301, cap: [zoom])), .none)
+        XCTAssertEqual(d.observe(obs(302, cap: [zoom])), .offerRecording(app: zoom))
     }
 
     func testEmptyAppListNeverFires() {
         var d = MeetingDetector(policy: MeetingDetectionPolicy(apps: []))
-        for t in 0..<10 { XCTAssertEqual(d.observe(obs(Double(t), mic: true)), .none) }
+        XCTAssertEqual(run(&d, 0, 10, cap: [zoom]), [])
     }
 }

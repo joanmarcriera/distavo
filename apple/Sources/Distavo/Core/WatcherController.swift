@@ -216,6 +216,7 @@ final class WatcherController: ObservableObject {
         }
         seedLastNoteFromDisk()
         refreshFailedRecordings()
+        reconcileSearchIndex()   // #2942, background
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
             if !isPaused { await scanOnce() }
@@ -437,6 +438,7 @@ final class WatcherController: ObservableObject {
                 UserDefaults.standard.set(detected, forKey: Self.lastDetectedKey)
             }
             log("Saved note: \(result.base)")
+            indexForSearch(base: result.base, note: result.notePath)   // #2942
             if result.message.contains("recording compacted") {
                 log(result.message.replacingOccurrences(of: "note written; ", with: "")
                     .replacingOccurrences(of: "recording compacted", with: "Recording compacted"))
@@ -826,6 +828,7 @@ final class WatcherController: ObservableObject {
             hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             log("Regenerated note: \(base) — \(result.message)")
+            indexForSearch(base: base, note: result.notePath)   // #2942
             notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
         default:
             status = "Idle"

@@ -192,6 +192,59 @@ final class VocabularyTests: XCTestCase {
         XCTAssertFalse(seen.prompt.contains("BaseTerm"))
     }
 
+    // MARK: Regenerate and the custom instruction (#2947)
+
+    func testRegenerateCarriesGlossaryButDoesNotReapplyReplacements() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-regen-\(UUID().uuidString)")
+        var cfg = Config()
+        cfg.recordingsDir = root.appendingPathComponent("recordings").path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        let notes = URL(fileURLWithPath: cfg.notesDir), work = URL(fileURLWithPath: cfg.workDir)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        // The cached transcript is already cleaned: a leftover "slum" must stay as is.
+        try "[SPEAKER_00]\nthe slum cluster".write(
+            to: Pipeline.cachedTranscriptURL(workDir: work, base: "demo"), atomically: true, encoding: .utf8)
+        cfg.transcribe.vocabulary = ["Slurm"]
+        cfg.transcribe.replacements = [ReplacementRule(from: "slum", to: "Slurm")]
+        let seen = SeenBox()
+        let deps = PipelineDeps(
+            convertToWav: { _, _ in }, transcribe: { _, _ in [:] }, ollamaReachable: { _ in true },
+            summarise: { transcript, _, _, context in
+                seen.transcript = transcript
+                seen.prompt = context.prompt(transcript: transcript)
+                return PipelineTests.validNote
+            })
+        let result = await Pipeline.regenerate(
+            base: "demo", options: RegenerateOptions(customInstruction: "Actions first"), config: cfg, deps: deps)
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertTrue(seen.transcript.contains("slum cluster"), "replacements must not be re-applied")
+        XCTAssertTrue(seen.prompt.contains(": Slurm\n"))
+        XCTAssertTrue(seen.prompt.contains("Actions first"))
+    }
+
+    func testGlossaryAndCustomInstructionComposeInOrderAndStayByteIdenticalWhenUnset() {
+        for style in [Prompt.Style.classic, .factsFirst] {
+            func p(_ glossary: [String], _ instruction: String?) -> String {
+                Prompt.build(transcript: "TRANSCRIPT", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                             style: style, customInstruction: instruction, glossary: glossary)
+            }
+            let base = Prompt.build(transcript: "TRANSCRIPT", noteOwner: "Marc", userSpeaker: "SPEAKER_00", style: style)
+            XCTAssertEqual(p([], nil), base)
+            XCTAssertEqual(p(["", " "], "  "), base)
+            let both = p(["Slurm"], "Actions first")
+            let glossary = both.range(of: "spell exactly as written here")!
+            let transcript = both.range(of: "TRANSCRIPT")!
+            let instruction = both.range(of: "Actions first")!
+            // Glossary rides in the header, the instruction after the transcript.
+            XCTAssertLessThan(glossary.lowerBound, transcript.lowerBound)
+            XCTAssertLessThan(transcript.lowerBound, instruction.lowerBound)
+            XCTAssertTrue(both.hasPrefix(p(["Slurm"], nil).prefix(100)))
+            XCTAssertTrue(both.hasSuffix(Prompt.customInstructionBlock("Actions first")))
+        }
+    }
+
     // MARK: Summary prompt
 
     private func build(style: Prompt.Style, glossary: [String]? = nil) -> String {

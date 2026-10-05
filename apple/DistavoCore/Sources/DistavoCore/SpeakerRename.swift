@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 #if canImport(Darwin)
 import Darwin
 #endif
@@ -43,9 +44,28 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     public static let currentVersion = 1
     public var version: Int
     public var names: [String: String]
+    /// SHA-256 of the note as it was before the FIRST rename (the content of the
+    /// `.prev-` backup that rename took). nil once the note was hand-edited between
+    /// renames, since restoring it would then lose the edit. Additive field.
+    public var originalNoteSHA256: String?
+    /// SHA-256 of the note right after the last rename; "Reset" restores the
+    /// original note only while the note still hashes to this (content, not mtime).
+    public var lastNoteSHA256: String?
 
-    public init(version: Int = SpeakerNames.currentVersion, names: [String: String] = [:]) {
+    enum CodingKeys: String, CodingKey {
+        case version, names
+        case originalNoteSHA256 = "original_note_sha256"
+        case lastNoteSHA256 = "last_note_sha256"
+    }
+
+    public init(version: Int = SpeakerNames.currentVersion, names: [String: String] = [:],
+                originalNoteSHA256: String? = nil, lastNoteSHA256: String? = nil) {
         self.version = version; self.names = names
+        self.originalNoteSHA256 = originalNoteSHA256; self.lastNoteSHA256 = lastNoteSHA256
+    }
+
+    static func sha256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public static func url(workDir: URL, base: String) -> URL {
@@ -104,20 +124,18 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     }
 
     /// What Regenerate should tell the summariser for this recording: the owner's
-    /// speaker label as renamed here (config is never touched), and the
-    /// participants hint extended with a line explaining the renamed labels.
-    /// Returns the inputs unchanged when nothing was renamed.
+    /// speaker label as renamed here (config is never touched); the participants
+    /// hint is returned unchanged. Inputs are returned unchanged when nothing was renamed.
     public static func regenerateContext(userSpeaker: String, participants: String?,
                                          workDir: URL, base: String) -> (userSpeaker: String, participants: String?) {
         guard let n = load(workDir: workDir, base: base), !n.names.isEmpty else { return (userSpeaker, participants) }
         let key = userSpeaker.precomposedStringWithCanonicalMapping
         let owner = n.names[key] ?? userSpeaker
-        let list = n.names.sorted { $0.key < $1.key }.prefix(12)
-            .map { "\($0.key) is now \"\($0.value)\"" }.joined(separator: "; ")
-        let line = "The speaker labels in this transcript were renamed after transcription (\(list)). " +
-                   "The transcript's labels are the new names: use them exactly as written."
-        let base = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return (owner, base.isEmpty ? line : base + "\n" + line)
+        // No extra explanatory text: the cached transcript already carries the new
+        // names, and anything added to the prompt would be uncounted by the
+        // on-device token budget. Only the owner's label changes, capped and on one line.
+        let oneLine = owner.components(separatedBy: .newlines).joined(separator: " ")
+        return (String(oneLine.prefix(SpeakerRename.maxNameLength)), participants)
     }
 }
 
@@ -334,10 +352,14 @@ public enum SpeakerRename {
                 let isHeading = trimmed.range(of: #"^#{1,6}(\s|$)"#, options: .regularExpression) != nil
                 if isHeading {
                     let title = trimmed.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
-                    inSpeakers = title.caseInsensitiveCompare("Speakers") == .orderedSame
+                    let t = title.lowercased()
+                    inSpeakers = t == "speakers" || t.hasPrefix("key people")
                 }
                 if !trimmed.hasPrefix("|") { ownerCol = nil }
-                result = rules.rewriteLine(line, isHeading: isHeading, inSpeakers: inSpeakers, ownerCol: &ownerCol)
+                // The note's title (`# …`) is never rewritten.
+                let isTitle = trimmed.hasPrefix("# ") || trimmed == "#"
+                result = rules.rewriteLine(line, isHeading: isHeading, isTitle: isTitle,
+                                           inSpeakers: inSpeakers, ownerCol: &ownerCol)
             }
             out.append(cr ? result + "\r" : result)
         }
@@ -353,7 +375,12 @@ public enum SpeakerRename {
         let diariserRe: NSRegularExpression?
         let protectedRe = try! NSRegularExpression(
             pattern: #"`[^`\n]*`|<?https?://[^\s<>)\]]+>?|\]\([^)\n]*\)|\bwww\.[^\s<>)\]]+"#)
-        let start, paren, owner: NSRegularExpression?
+        let start, parenEnd, parenOwner, ownerCue, ledger: NSRegularExpression?
+        let listItemRe = try! NSRegularExpression(pattern: #"^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s"#)
+        let listSeparatorRe = try! NSRegularExpression(pattern: #"\s*(?:,|;|/|&|\band\b)\s*"#)
+        /// A name inside a list piece: optional bold, the name, an optional "(role)", punctuation.
+        let pieceRe = try! NSRegularExpression(
+            pattern: #"^(\s*(?:\*\*|__)?\s*)(.*?)(\s*(?:\([^)]*\))?\s*(?:\*\*|__)?[.;]?\s*)$"#)
 
         init(mapping: [String: String]) {
             self.mapping = mapping
@@ -367,7 +394,7 @@ public enum SpeakerRename {
             diariserRe = dia.isEmpty ? nil : try? NSRegularExpression(
                 pattern: "(?<![\(w)])(?i:speaker)[ _](\\d+)(?![\(w)])")
             if human.isEmpty {
-                humanAlt = nil; start = nil; paren = nil; owner = nil
+                humanAlt = nil; start = nil; parenEnd = nil; parenOwner = nil; ownerCue = nil; ledger = nil
                 return
             }
             // Longest first, both composed and decomposed spellings.
@@ -388,20 +415,53 @@ public enum SpeakerRename {
             let lead = #"^(\s*(?:>\s*)*(?:[-*+]\s+|\d+[.)]\s+)?(?:\*\*|__)?)"#
             start = try? NSRegularExpression(
                 pattern: lead + "(?:" + b + ")(" + alt + ")" + a + #"(?=(?:\*\*|__)?\s*:)"#)
-            paren = try? NSRegularExpression(pattern: #"(?<=\()(?:"# + alt + #")(?=\)|[,;:])"#)
-            owner = try? NSRegularExpression(
-                pattern: #"(?<!note )(?<!Note )(?<!NOTE )(?i:owner)\s*:\s*(?:\*\*|__)?"# + b + "(" + alt + ")" + a
-                    + #"(?=\s*(?:$|[,;.)|*_]|—|–))"#)
+            // `(Name)` only as an attribution: at the end of a list item, or right
+            // after an owner cue. Never inside a sentence ("The call (May, June) …").
+            parenEnd = try? NSRegularExpression(
+                pattern: #"\((?:\*\*|__)?(?:"# + b + ")(" + alt + ")" + a + #"(?:\*\*|__)?\)(?=\s*[.;,]?\s*$)"#)
+            parenOwner = try? NSRegularExpression(
+                pattern: #"(?<!note )(?<!Note )(?<!NOTE )(?i:owner)\s*\((?:"# + b + ")(" + alt + ")" + a + #"\)"#)
+            // `Owner: A, B / C (role)`; the name list starts after the cue ("Note owner" is not a cue).
+            ownerCue = try? NSRegularExpression(
+                pattern: #"(?<!note )(?<!Note )(?<!NOTE )(?i:owners?)(?:\*\*|__)?\s*:\s*(?:\*\*|__)?"#)
+            // factsFirst ledger bullet: `- fact | who said it | "excerpt" | …`.
+            ledger = try? NSRegularExpression(
+                pattern: #"^\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+[^|\n]*\|\s*(?:\*\*|__)?"# + b + "(" + alt + ")" + a
+                    + #"(?:\*\*|__)?\s*(?=\|)"#)
         }
 
-        func rewriteLine(_ line: String, isHeading: Bool, inSpeakers: Bool, ownerCol: inout Int?) -> String {
+        /// Names in a comma / slash / "and" list inside `seg` (an owner field or table cell).
+        func listCandidates(_ ns: NSString, in seg: NSRange,
+                            lookup: (String) -> String?) -> [(NSRange, String)] {
+            var out: [(NSRange, String)] = []
+            var pieceStart = seg.location
+            var ranges: [NSRange] = []
+            let text = ns.substring(with: seg)
+            for m in listSeparatorRe.matches(in: text, range: NSRange(location: 0, length: (text as NSString).length)) {
+                ranges.append(NSRange(location: pieceStart, length: seg.location + m.range.location - pieceStart))
+                pieceStart = seg.location + NSMaxRange(m.range)
+            }
+            ranges.append(NSRange(location: pieceStart, length: NSMaxRange(seg) - pieceStart))
+            for p in ranges where p.length > 0 {
+                let piece = ns.substring(with: p)
+                guard let m = pieceRe.firstMatch(in: piece, range: NSRange(location: 0, length: (piece as NSString).length)) else { continue }
+                let inner = m.range(at: 2)
+                if inner.length > 0, let new = lookup((piece as NSString).substring(with: inner)) {
+                    out.append((NSRange(location: p.location + inner.location, length: inner.length), new))
+                }
+            }
+            return out
+        }
+
+        func rewriteLine(_ line: String, isHeading: Bool, isTitle: Bool, inSpeakers: Bool,
+                         ownerCol: inout Int?) -> String {
             let ns = line as NSString
             let full = NSRange(location: 0, length: ns.length)
             var cands: [(NSRange, String)] = []
             func lookup(_ s: String) -> String? { mapping[s.precomposedStringWithCanonicalMapping] }
 
             // Diariser-style labels: unambiguous tokens, replaced anywhere.
-            if let re = diariserRe {
+            if let re = diariserRe, !isTitle {
                 for m in re.matches(in: line, range: full) {
                     if let n = Int(ns.substring(with: m.range(at: 1))), let key = diariser[n], let new = mapping[key] {
                         cands.append((m.range, new))
@@ -431,17 +491,37 @@ public enum SpeakerRename {
                             }
                         }
                     }
-                    // `(Name)` / `(Name, …)` attribution.
-                    if let re = paren {
-                        for m in re.matches(in: line, range: full) {
-                            if let new = lookup(ns.substring(with: m.range)) { cands.append((m.range, new)) }
-                        }
-                    }
-                    // `owner: Name`.
-                    if let re = owner {
+                    let isListItem = listItemRe.firstMatch(in: line, range: full) != nil
+                    // `(Name)` attribution at the end of a list item.
+                    if isListItem, let re = parenEnd {
                         for m in re.matches(in: line, range: full) {
                             let r = m.range(at: 1)
                             if let new = lookup(ns.substring(with: r)) { cands.append((r, new)) }
+                        }
+                    }
+                    // `owner (Name)`.
+                    if let re = parenOwner {
+                        for m in re.matches(in: line, range: full) {
+                            let r = m.range(at: 1)
+                            if let new = lookup(ns.substring(with: r)) { cands.append((r, new)) }
+                        }
+                    }
+                    // `- fact | Name | "excerpt" | …` (second field of a ledger bullet).
+                    if let re = ledger {
+                        for m in re.matches(in: line, range: full) {
+                            let r = m.range(at: 1)
+                            if let new = lookup(ns.substring(with: r)) { cands.append((r, new)) }
+                        }
+                    }
+                    // `Owner: A, B / C (role)`: every name in the list.
+                    if let re = ownerCue {
+                        for m in re.matches(in: line, range: full) {
+                            var seg = NSRange(location: NSMaxRange(m.range), length: ns.length - NSMaxRange(m.range))
+                            let tail = ns.substring(with: seg)
+                            if let cut = tail.range(of: #"\s[—–]\s|\s\|\s|\.\s"#, options: .regularExpression) {
+                                seg.length = (tail.substring(to: cut.lowerBound) as NSString).length
+                            }
+                            cands += listCandidates(ns, in: seg, lookup: lookup)
                         }
                     }
                 } else {
@@ -485,9 +565,8 @@ public enum SpeakerRename {
             guard let col = ownerCol, col < cells.count else { return [] }
             let (range, part) = cells[col]
             let trimmed = part.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty, let new = lookup(trimmed) else { return [] }
-            let lead = (part as NSString).range(of: trimmed)
-            return [(NSRange(location: range.location + lead.location, length: lead.length), new)]
+            guard !trimmed.isEmpty else { return [] }
+            return listCandidates(ns, in: range, lookup: lookup)
         }
     }
 
@@ -508,6 +587,17 @@ public enum SpeakerRename {
         mapping rawMapping: [String: String], base: String, notesDir: URL, workDir: URL,
         now: Date = Date(),
         moveItem: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+    ) throws -> SpeakerRenameResult {
+        try apply(mapping: rawMapping, noteAction: .rewrite, base: base, notesDir: notesDir,
+                  workDir: workDir, now: now, moveItem: moveItem)
+    }
+
+    /// What to do with the note while applying a mapping.
+    enum NoteAction { case rewrite, leave, replace(String) }
+
+    static func apply(
+        mapping rawMapping: [String: String], noteAction: NoteAction, base: String, notesDir: URL, workDir: URL,
+        now: Date, moveItem: (URL, URL) throws -> Void
     ) throws -> SpeakerRenameResult {
         let mapping = try normalised(rawMapping)
         let fm = FileManager.default
@@ -541,9 +631,15 @@ public enum SpeakerRename {
         // Compute every new file content first; only differing ones are written.
         struct Job { let url: URL; let data: Data; let isNote: Bool }
         var jobs: [Job] = []
+        var finalNote = note
         if let note {
-            let new = rewriteNote(note, mapping: mapping)
-            if new != note { jobs.append(Job(url: notePath, data: Data(new.utf8), isNote: true)) }
+            let new: String
+            switch noteAction {
+            case .rewrite: new = rewriteNote(note, mapping: mapping)
+            case .leave: new = note
+            case .replace(let text): new = text
+            }
+            if new != note { jobs.append(Job(url: notePath, data: Data(new.utf8), isNote: true)); finalNote = new }
         }
         if let transcript {
             let new = rewriteTranscript(transcript, mapping: mapping)
@@ -558,8 +654,21 @@ public enum SpeakerRename {
         let present = detectSpeakers(note: note, transcript: transcript, segments: segments).map(\.label)
         var current = SpeakerNames()
         if case .ok(let n) = namesState { current = n }
-        jobs.append(Job(url: namesPath,
-                        data: try current.composing(mapping, presentLabels: Set(present)).encoded(), isNote: false))
+        var updated = current.composing(mapping, presentLabels: Set(present))
+        // Note content hashes, so "Reset" can tell an untouched note from an edited one.
+        let hashBefore = note.map { sha256Hex($0) }
+        let hashAfter = finalNote.map { sha256Hex($0) }
+        updated.lastNoteSHA256 = hashAfter
+        if updated.names.isEmpty {
+            updated.originalNoteSHA256 = nil; updated.lastNoteSHA256 = nil
+        } else if current.names.isEmpty {
+            updated.originalNoteSHA256 = hashBefore            // state before the first rename
+        } else if let last = current.lastNoteSHA256, hashBefore != last {
+            updated.originalNoteSHA256 = nil                   // hand-edited between renames
+        } else {
+            updated.originalNoteSHA256 = current.originalNoteSHA256
+        }
+        jobs.append(Job(url: namesPath, data: try updated.encoded(), isNote: false))
 
         try fm.createDirectory(at: workDir, withIntermediateDirectories: true)
         let token = UUID().uuidString.prefix(8)
@@ -633,6 +742,108 @@ public enum SpeakerRename {
         for job in jobs where !job.isNote { try? fm.removeItem(at: sibling(job.url, "rename-orig")) }
         return SpeakerRenameResult(changedFiles: jobs.map { $0.url.lastPathComponent }, backup: backup)
     }
+
+    // MARK: Dry run
+
+    /// One note line a rename would change.
+    public struct NoteChange: Equatable, Sendable {
+        public var line: Int          // 1-based
+        public var before: String
+        public var after: String
+    }
+
+    /// The note lines `mapping` would change (a dry run of the note rewrite; the
+    /// rewrite is line-preserving). Used by the window to show what Apply will do.
+    public static func noteChanges(note: String, mapping rawMapping: [String: String]) -> [NoteChange] {
+        guard let mapping = try? normalised(rawMapping), !mapping.isEmpty else { return [] }
+        let before = note.components(separatedBy: "\n")
+        let after = rewriteNote(note, mapping: mapping).components(separatedBy: "\n")
+        guard before.count == after.count else { return [] }
+        return zip(before, after).enumerated().compactMap { i, p in
+            p.0 == p.1 ? nil : NoteChange(line: i + 1, before: p.0, after: p.1)
+        }
+    }
+
+    /// `noteChanges` for the note of `base` on disk (empty when there is no readable note).
+    public static func preview(mapping: [String: String], base: String, notesDir: URL) -> [NoteChange] {
+        guard let note = try? String(contentsOf: notesDir.appendingPathComponent("\(base).md"), encoding: .utf8)
+        else { return [] }
+        return noteChanges(note: note, mapping: mapping)
+    }
+
+    // MARK: Reset
+
+    public struct ResetResult: Equatable, Sendable {
+        public var message: String
+        public var noteRestored: Bool
+    }
+
+    /// `<file>.pre-merge-*` copies kept by merges, so the window can say where they are.
+    public static func mergeCopies(workDir: URL, base: String) -> [URL] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: workDir.path)) ?? []
+        return names.filter { $0.hasPrefix("\(base).") && $0.contains(".pre-merge-") }.sorted()
+            .map { workDir.appendingPathComponent($0) }
+    }
+
+    /// Reset speakers to the original diariser labels. The transcript, the segments
+    /// and the mapping sidecar are reset exactly (they hold labels only). The NOTE is
+    /// never guessed at: the backup taken before the first rename is restored only if
+    /// the note still hashes to what the last rename wrote (content, not mtime);
+    /// otherwise it is left as it is. Speakers that were merged cannot be separated
+    /// again and stay as they are.
+    public static func reset(base: String, notesDir: URL, workDir: URL, now: Date = Date(),
+                             moveItem: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+    ) throws -> ResetResult {
+        if case .newer(let v) = SpeakerNames.inspect(workDir: workDir, base: base) { throw SpeakerRenameError.newerSidecar(v) }
+        guard let names = SpeakerNames.load(workDir: workDir, base: base), !names.names.isEmpty else {
+            return ResetResult(message: "Nothing to reset: no speakers were renamed.", noteRestored: false)
+        }
+        let mapping = resetMapping(workDir: workDir, base: base)
+        let fullyResettable = names.names.allSatisfy { $0.key == $0.value || mapping[$0.value] == $0.key }
+        let notePath = notesDir.appendingPathComponent("\(base).md")
+        let noteData = try? Data(contentsOf: notePath)
+
+        var action = NoteAction.leave
+        var noteMessage = "The note was left as it is."
+        if let noteData {
+            let nowHash = SpeakerNames.sha256(noteData)
+            if names.lastNoteSHA256 == nil || nowHash != names.lastNoteSHA256 {
+                noteMessage = "The note was edited after renaming, so it is left as it is; the transcript labels were reset."
+            } else if let original = names.originalNoteSHA256, fullyResettable {
+                if nowHash == original {
+                    noteMessage = "The note already had the original labels."
+                } else if let text = backupText(base: base, notesDir: notesDir, sha: original) {
+                    action = .replace(text)
+                    noteMessage = "The note was restored to its state before renaming (the renamed version is kept as a .prev backup)."
+                } else {
+                    noteMessage = "The note's pre-rename backup was not found, so the note is left as it is; the transcript labels were reset."
+                }
+            } else {
+                noteMessage = "The note is left as it is (it cannot be restored automatically after a merge or an edit between renames); the transcript labels were reset."
+            }
+        }
+        var restored = false
+        if case .replace = action { restored = true }
+        if mapping.isEmpty && !restored {
+            return ResetResult(message: "Merged speakers cannot be separated again. " + noteMessage, noteRestored: false)
+        }
+        try apply(mapping: mapping, noteAction: action, base: base, notesDir: notesDir, workDir: workDir,
+                  now: now, moveItem: moveItem)
+        return ResetResult(message: noteMessage, noteRestored: restored)
+    }
+
+    /// Content of the `<base>.prev-*.md` backup whose SHA-256 is `sha`.
+    private static func backupText(base: String, notesDir: URL, sha: String) -> String? {
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: notesDir.path)) ?? []
+        for f in files.sorted() where f.hasPrefix("\(base).prev-") && NoteVersions.isBackupName(f) {
+            guard let data = try? Data(contentsOf: notesDir.appendingPathComponent(f)),
+                  SpeakerNames.sha256(data) == sha, let text = String(data: data, encoding: .utf8) else { continue }
+            return text
+        }
+        return nil
+    }
+
+    private static func sha256Hex(_ s: String) -> String { SpeakerNames.sha256(Data(s.utf8)) }
 
     // MARK: File helpers
 

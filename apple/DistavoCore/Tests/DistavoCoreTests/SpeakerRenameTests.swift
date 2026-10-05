@@ -224,15 +224,15 @@ final class SpeakerRenameTests: XCTestCase {
     func testRenameToNameContainingOldIsIdempotent() {
         let t = "## Speakers\n- Anna — lead\n\n**Anna:** hello (Anna) owner: Anna\n"
         let once = rw(t, ["Anna": "Anna Puig"])
-        XCTAssertEqual(once, "## Speakers\n- Anna Puig — lead\n\n**Anna Puig:** hello (Anna Puig) owner: Anna Puig\n")
+        XCTAssertEqual(once, "## Speakers\n- Anna Puig — lead\n\n**Anna Puig:** hello (Anna) owner: Anna Puig\n")
         XCTAssertEqual(rw(once, ["Anna": "Anna Puig"]), once, "second application must change nothing")
     }
 
     func testDiariserLabelsReplacedEverywhereExceptCodeUrlsAndFooter() {
         let footer = "\n\n---\n_Transcribed on this Mac with WhisperKit; SPEAKER_00 labels from SpeakerKit._"
-        let t = "# Meeting with SPEAKER_00\n\nSPEAKER_00 said `SPEAKER_00` see https://x.example/SPEAKER_00/a and [l](http://x/SPEAKER_00).\n```\nSPEAKER_00 code\n```\nSpeaker 0 and Speaker_00 too." + footer
+        let t = "# Speaker 1 notes SPEAKER_00\n\nSPEAKER_00 said `SPEAKER_00` see https://x.example/SPEAKER_00/a and [l](http://x/SPEAKER_00).\n```\nSPEAKER_00 code\n```\nSpeaker 0 and Speaker_00 too." + footer
         XCTAssertEqual(rw(t, ["SPEAKER_00": "Marc"]),
-                       "# Meeting with Marc\n\nMarc said `SPEAKER_00` see https://x.example/SPEAKER_00/a and [l](http://x/SPEAKER_00).\n```\nSPEAKER_00 code\n```\nMarc and Marc too." + footer)
+                       "# Speaker 1 notes SPEAKER_00\n\nMarc said `SPEAKER_00` see https://x.example/SPEAKER_00/a and [l](http://x/SPEAKER_00).\n```\nSPEAKER_00 code\n```\nMarc and Marc too." + footer)
     }
 
     func testHumanNamesNotRewrittenInTitleUrlCodeFooterOrNoteOwnerLine() {
@@ -243,7 +243,7 @@ final class SpeakerRenameTests: XCTestCase {
 
     func testLabelPositionsInSpeakersSectionAttributionsOwnerFieldsAndTables() {
         let t = "## Speakers\n- **Marc** — owner\n* Edward (Cambridge)\n1. Núria: interviewer\n\n## Action items\n| Action | Owner | Deadline |\n|---|---|---|\n| Send CV | Marc | Friday |\n| Marc to call | Edward | none |\n\nEvidence (Marc, 00:10). Task owner: Marc.\n"
-        let expected = "## Speakers\n- **Marc R.** — owner\n* Ed (Cambridge)\n1. Núria: interviewer\n\n## Action items\n| Action | Owner | Deadline |\n|---|---|---|\n| Send CV | Marc R. | Friday |\n| Marc to call | Ed | none |\n\nEvidence (Marc R., 00:10). Task owner: Marc R..\n"
+        let expected = "## Speakers\n- **Marc R.** — owner\n* Ed (Cambridge)\n1. Núria: interviewer\n\n## Action items\n| Action | Owner | Deadline |\n|---|---|---|\n| Send CV | Marc R. | Friday |\n| Marc to call | Ed | none |\n\nEvidence (Marc, 00:10). Task owner: Marc R..\n"
         XCTAssertEqual(rw(t, ["Marc": "Marc R.", "Edward": "Ed"]), expected)
     }
 
@@ -347,6 +347,142 @@ final class SpeakerRenameTests: XCTestCase {
         XCTAssertTrue(leftovers(notes, work).isEmpty)
     }
 
+    // MARK: second review round
+
+    func testTitleHeadingIsNeverRewritten() {
+        XCTAssertEqual(rw("# Speaker 1 notes\n\nSPEAKER_01 spoke.", ["SPEAKER_01": "Ben"]), "# Speaker 1 notes\n\nBen spoke.")
+    }
+
+    func testParenthesisedNameOnlyAsAttribution() {
+        let t = "The call (May, June) was long. A (May) remark.\n- Send the deck (May)\n- Owner (May)\n"
+        XCTAssertEqual(rw(t, ["May": "May Lee"]),
+                       "The call (May, June) was long. A (May) remark.\n- Send the deck (May Lee)\n- Owner (May Lee)\n")
+    }
+
+    func testTemplateLabelShapesFactsFirstAndKeyPeople() {
+        let t = """
+        ## Facts ledger
+        - day rate | Anna | "eight fifty" | £850
+        - Anna said it | nobody | "x" | y
+
+        ## Key people and organisations
+        - Anna — recruiter
+        - Anna (recruiter)
+        - **Owner:** Anna
+        - Owner: Anna (role)
+
+        ## Action items
+        | Action | Owner | Deadline |
+        |---|---|---|
+        | A | **Anna** | Fri |
+        | B | Anna / Ben | Fri |
+        | C | Anna (owner) | Fri |
+        | D | Annabel | Fri |
+
+        - Action owner: Will, Pat
+        Anna will think about it. Ask Anna.
+        """
+        let out = rw(t, ["Anna": "Anna Puig", "Will": "Will S", "Pat": "Pat K"])
+        XCTAssertEqual(out, """
+        ## Facts ledger
+        - day rate | Anna Puig | "eight fifty" | £850
+        - Anna said it | nobody | "x" | y
+
+        ## Key people and organisations
+        - Anna Puig — recruiter
+        - Anna Puig (recruiter)
+        - **Owner:** Anna Puig
+        - Owner: Anna Puig (role)
+
+        ## Action items
+        | Action | Owner | Deadline |
+        |---|---|---|
+        | A | **Anna Puig** | Fri |
+        | B | Anna Puig / Ben | Fri |
+        | C | Anna Puig (owner) | Fri |
+        | D | Annabel | Fri |
+
+        - Action owner: Will S, Pat K
+        Anna will think about it. Ask Anna.
+        """)
+        XCTAssertEqual(rw(out, ["Anna": "Anna Puig", "Will": "Will S", "Pat": "Pat K"]), out)
+    }
+
+    func testDryRunListsChangedLines() {
+        let n = "# T\n- Mark: the release date\nMark said hi\n- **Mark:** ok\n"
+        let ch = SpeakerRename.noteChanges(note: n, mapping: ["Mark": "Mark Lee"])
+        XCTAssertEqual(ch.map(\.line), [2, 4])
+        XCTAssertEqual(ch[0].before, "- Mark: the release date")
+        XCTAssertEqual(ch[0].after, "- Mark Lee: the release date")
+        XCTAssertTrue(SpeakerRename.noteChanges(note: n, mapping: ["Mark": " "]).isEmpty)
+        let (notes, _) = (try? env(note: n)) ?? (URL(fileURLWithPath: "/"), URL(fileURLWithPath: "/"))
+        XCTAssertEqual(SpeakerRename.preview(mapping: ["Mark": "Mark Lee"], base: "demo", notesDir: notes).count, 2)
+    }
+
+    func testResetRestoresUntouchedNoteAndTranscriptExactly() throws {
+        let (notes, work) = try env(note: note, transcript: transcript, segments: segs())
+        let noteURL = notes.appendingPathComponent("demo.md")
+        try SpeakerRename.apply(mapping: ["SPEAKER_00": "Anna", "SPEAKER_01": "Ben"], base: "demo", notesDir: notes, workDir: work)
+        // Content, not mtime, decides: touching the file changes nothing.
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(3600)], ofItemAtPath: noteURL.path)
+        let r = try SpeakerRename.reset(base: "demo", notesDir: notes, workDir: work)
+        XCTAssertTrue(r.noteRestored, r.message)
+        XCTAssertEqual(read(noteURL), note)
+        XCTAssertEqual(read(Pipeline.cachedTranscriptURL(workDir: work, base: "demo")), transcript)
+        XCTAssertEqual(TranscriptSegments.load(workDir: work, base: "demo")?.segments.map(\.speaker), ["SPEAKER_00", "SPEAKER_01"])
+        XCTAssertEqual(SpeakerNames.load(workDir: work, base: "demo")?.names, [:])
+    }
+
+    func testResetNeverGuessesInAnEditedNote() throws {
+        let (notes, work) = try env(note: note, transcript: transcript, segments: segs())
+        let noteURL = notes.appendingPathComponent("demo.md")
+        try SpeakerRename.apply(mapping: ["SPEAKER_00": "Anna", "SPEAKER_01": "Ben"], base: "demo", notesDir: notes, workDir: work)
+        let edited = read(noteURL)! + "Anna: I will check. Anna said hi.\n"
+        try edited.write(to: noteURL, atomically: true, encoding: .utf8)
+        let r = try SpeakerRename.reset(base: "demo", notesDir: notes, workDir: work)
+        XCTAssertFalse(r.noteRestored)
+        XCTAssertTrue(r.message.contains("edited after renaming"), r.message)
+        XCTAssertEqual(read(noteURL), edited, "the note is left exactly as it is")
+        XCTAssertEqual(read(Pipeline.cachedTranscriptURL(workDir: work, base: "demo")), transcript)
+        XCTAssertEqual(TranscriptSegments.load(workDir: work, base: "demo")?.segments.map(\.speaker), ["SPEAKER_00", "SPEAKER_01"])
+        // A second reset has nothing left and cannot restore the old note either.
+        let again = try SpeakerRename.reset(base: "demo", notesDir: notes, workDir: work)
+        XCTAssertFalse(again.noteRestored)
+        XCTAssertEqual(read(noteURL), edited)
+    }
+
+    func testResetAfterEditBetweenRenamesDoesNotRestoreOldNote() throws {
+        let (notes, work) = try env(note: note, transcript: transcript, segments: segs())
+        let noteURL = notes.appendingPathComponent("demo.md")
+        try SpeakerRename.apply(mapping: ["SPEAKER_00": "Anna"], base: "demo", notesDir: notes, workDir: work)
+        let edited = read(noteURL)! + "Hand written.\n"
+        try edited.write(to: noteURL, atomically: true, encoding: .utf8)
+        try SpeakerRename.apply(mapping: ["SPEAKER_01": "Ben"], base: "demo", notesDir: notes, workDir: work)
+        let after = read(noteURL)
+        let r = try SpeakerRename.reset(base: "demo", notesDir: notes, workDir: work)
+        XCTAssertFalse(r.noteRestored)
+        XCTAssertEqual(read(noteURL), after)
+        XCTAssertTrue(after?.contains("Hand written.") == true)
+    }
+
+    func testResetAfterMergeLeavesMergedAndPointsToCopies() throws {
+        let (notes, work) = try env(note: note, transcript: transcript, segments: segs())
+        try SpeakerRename.apply(mapping: ["SPEAKER_01": "SPEAKER_00"], base: "demo", notesDir: notes, workDir: work)
+        XCTAssertEqual(SpeakerRename.mergeCopies(workDir: work, base: "demo").count, 2)
+        let r = try SpeakerRename.reset(base: "demo", notesDir: notes, workDir: work)
+        XCTAssertFalse(r.noteRestored)
+        XCTAssertTrue(r.message.contains("Merged speakers cannot be separated"), r.message)
+        XCTAssertEqual(TranscriptSegments.load(workDir: work, base: "demo")?.segments.map(\.speaker), ["SPEAKER_00", "SPEAKER_00"])
+    }
+
+    func testRegenerateContextCapsAndKeepsParticipants() throws {
+        let (notes, work) = try env(note: note, transcript: transcript)
+        try SpeakerRename.apply(mapping: ["SPEAKER_01": String(repeating: "x", count: 80)], base: "demo", notesDir: notes, workDir: work)
+        let c = SpeakerNames.regenerateContext(userSpeaker: "SPEAKER_01", participants: "P", workDir: work, base: "demo")
+        XCTAssertEqual(c.participants, "P")
+        XCTAssertLessThanOrEqual(c.userSpeaker.count, SpeakerRename.maxNameLength)
+    }
+
     func testRegenerateUsesRenamedOwnerLabelAndExplainsRenames() async throws {
         let (notes, work) = try env(note: note, transcript: transcript)
         try SpeakerRename.apply(mapping: ["SPEAKER_01": "Marc"], base: "demo", notesDir: notes, workDir: work)
@@ -362,7 +498,7 @@ final class SpeakerRenameTests: XCTestCase {
         let r = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg, deps: deps)
         XCTAssertEqual(r.status, .done, r.message)
         XCTAssertEqual(box.ctx?.userSpeaker, "Marc")
-        XCTAssertTrue(box.ctx?.participants?.contains("SPEAKER_01 is now \"Marc\"") == true)
+        XCTAssertNil(box.ctx?.participants, "no extra prompt text is added")
         XCTAssertEqual(cfg.userSpeaker, "SPEAKER_01", "config is never touched")
         // A recording that was not renamed is unchanged.
         let plain = SpeakerNames.regenerateContext(userSpeaker: "SPEAKER_00", participants: "x", workDir: work, base: "other")

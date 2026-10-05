@@ -55,3 +55,12 @@ is corrected when a rule matches inside that single word. A multi-word phrase ru
 text only: word tokens are left as heard (words are never re-timed or merged), and cue splitting that
 works from word tokens can therefore still show the original spelling. Speakers and times are never
 touched. With no replacements the file is byte-identical to before.
+
+## Edits (transcript viewer, #2951)
+
+Saving an edit in the viewer rewrites `<base>.segments.json` and `<base>.transcript.clean.txt` together
+(all-or-nothing) and keeps one pristine copy of each from before the first edit:
+`<base>.segments.orig.json` and `<base>.transcript.clean.orig.txt` (never overwritten; neither name
+ends in `.transcript.clean.txt`, so the search index ignores them). Editing a segment's text drops that
+segment's `words` and keeps its `start`/`end`; timings are never edited. Reprocessing the recording
+deletes the originals along with the old sidecar. The note is only rewritten by Re-summarise.

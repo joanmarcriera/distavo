@@ -79,6 +79,9 @@ struct StatusMenu: View {
         Button("Process now") { controller.processNow() }
         Button("Processing Queue…") { controller.showProcessingQueue() }
         Button("Process a recording with…") { controller.processRecordingWith() }
+        #if EDITION_DIRECT
+        Button("Import from URL…") { ImportURLWindowController.shared.show() }   // #2955
+        #endif
         Button("Compare…") { controller.compareRecordings() }
         Button("Regenerate Note…") { controller.showRegenerateNote() }
         Button("Search Notes…") { controller.showSearchNotes() }

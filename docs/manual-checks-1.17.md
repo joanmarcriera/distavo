@@ -21,3 +21,29 @@ Not exercised by unit tests: the SwiftUI window, notifications, the real Ollama 
 Notes made before this version regenerate fine as long as the work folder still holds `<base>.transcript.clean.txt` (every note the pipeline has written since the transcript cache was introduced); notes whose work folder was cleared, or imported without processing, cannot be regenerated.
 
 Language parity: with Settings -> Notes -> "Write notes in" = match the meeting, regenerate a note from an auto-detected Catalan meeting processed on this version: it must stay Catalan (the detected language is kept in `<base>.transcript.meta.json`). A note processed before this version has no such file and falls back to the spoken language set in Settings.
+
+## Export formats (Vikunja #2943)
+
+Unit tests cover the formats, but nothing here has been opened in a real app or driven through the
+real panel. Do these once on a signed build, in the Direct and App Store editions.
+
+Prerequisite: process a fresh recording (the sidecar `<base>.segments.json` only exists for
+recordings processed with this version). Ideally one with two speakers and diarisation on.
+
+1. Menu bar > **Export transcript as…** is enabled after processing. After relaunch (note seeded
+   from disk) it stays enabled for the new recording.
+2. For an OLD recording (no sidecar) the item reads "Export transcript as… (no timestamps saved)"
+   and is disabled; nothing crashes.
+3. The save panel shows a **Format** popup; changing it changes the file extension in the name field.
+4. **DOCX:** open in Word and Pages. No "unreadable content" prompt; speaker labels are bold; each
+   turn has a grey `[m:ss]` timestamp.
+5. **PDF:** open in Preview. Speaker labels in bold, timestamps grey, multiple pages for a long
+   meeting, text selectable.
+6. **SRT:** play the recording in VLC or QuickTime with the `.srt` loaded (same base name beside the
+   audio). Cue timing tracks speech within about 0.5 s; speaker prefix shown.
+7. **VTT:** load in a browser `<track>` or VLC; `<v SPEAKER_00>` voices parse, no stray tags shown.
+8. **JSON:** opens as valid JSON (`jq . file.json`); equals the work-dir sidecar.
+9. **HTML:** opens in Safari/Chrome, readable in light and dark mode, no network requests.
+10. **App Store edition:** saving to Desktop/Documents via the panel works (user-selected
+    read-write entitlement is already present in `apple/Distavo-AppStore.entitlements`).
+11. A `Process a recording with…` variant exports from its own sidecar (`<base>@<suffix>`).

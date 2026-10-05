@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import DistavoCore
 
 /// Vikunja #2949: typed scratchpad notes steer the summary.
@@ -78,20 +79,80 @@ final class ScratchpadTests: XCTestCase {
 
     // MARK: Prompt
 
-    func testNoScratchpadLeavesEveryPromptByteIdentical() {
-        let tpl = SummaryTemplateCatalog.bundledTemplates[0]
+    private func sha(_ s: String) -> String {
+        SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// SHA-256 of the FULL prompt / end-of-turn block with NO scratchpad, captured
+    /// from the code before #2949 changed anything (same approach as NoteLanguageTests).
+    /// A fixed template keeps the pins independent of the bundled templates.
+    private static let pins: [String: (prompt: String, eot: String)] = [
+        "classic none": ("c455f0b8555e58febaea877cec7935527e35e3164bd6bd00dfefba69d6eedbf1", "2e65114e1bfd98821021862c9b566a817f7aabe6267de98e42ab6a0f42f8595c"),
+        "classic tpl": ("102bb200c402abe7c29a251144f5e5b5f811eb0751617f609b5cdb8a45b2cda6", "0fe1a2279b115f3822a795a3c8d224cebc22673b972da9a8f554a7b1a1b3bef8"),
+        "facts_first none": ("f0eb9a7c38c72e377562185c20bed787f865fde1c514989bb32cbd2fcd416dfe", "5508371d616b170a1be48125e3a0ae74ded70377ab2ca4c82e044a241df49c26"),
+        "facts_first tpl": ("51cb6b8e090e8906652d60dc14c3e21c920b524cb938a162593d798562ab9b34", "154986aaa921ea09361317f700834f32afadd0f29c365854a4432dbcd3ecb0ac"),
+    ]
+
+    private let pinTemplate = SummaryTemplate.parse(
+        id: "pin", name: "Pin", summary: "s", outline: "## One\nDo one.\n\n## Two\nDo two.\n")!
+
+    func testNoScratchpadLeavesPromptAndEndOfTurnBlockPinned() {
         for style in [Prompt.Style.classic, .factsFirst] {
-            for template in [nil, tpl] {
-                let base = Prompt.build(transcript: "T", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
-                                        style: style, template: template)
-                XCTAssertEqual(Prompt.build(transcript: "T", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
-                                            style: style, template: template, scratchpad: nil), base)
-                XCTAssertEqual(Prompt.build(transcript: "T", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
-                                            style: style, template: template,
-                                            scratchpad: ScratchpadNotes()), base)
-                XCTAssertFalse(base.contains("Notes typed by the note owner"))
+            for (name, template) in [("none", SummaryTemplate?.none), ("tpl", pinTemplate)] {
+                let pin = Self.pins["\(style.rawValue) \(name)"]!
+                for pad in [ScratchpadNotes?.none, ScratchpadNotes()] {
+                    let p = Prompt.build(transcript: "T", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                                         style: style, template: template, scratchpad: pad)
+                    XCTAssertEqual(sha(p), pin.prompt, "prompt \(style) \(name)")
+                }
+                let e = EndOfTurnBlock.build(noteLanguage: nil, style: style, noteOwner: "Marc",
+                                             ownerSpeaker: "SPEAKER_00", template: template,
+                                             withHighlights: false)
+                XCTAssertEqual(sha(e), pin.eot, "eot \(style) \(name)")
             }
         }
+    }
+
+    func testWithScratchpadPromptAndEndOfTurnBlockAreConsistentAboutHighlights() {
+        for style in [Prompt.Style.classic, .factsFirst] {
+            for template in [SummaryTemplate?.none, pinTemplate] {
+                let p = Prompt.build(transcript: "T", noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                                     style: style, template: template, scratchpad: pad)
+                XCTAssertTrue(p.contains("using exactly these sections, preceded by the extra ## Highlights section"), "\(style)")
+                XCTAssertFalse(p.contains("using exactly these sections:"))
+                let e = EndOfTurnBlock.build(noteLanguage: nil, style: style, noteOwner: "Marc",
+                                             ownerSpeaker: "SPEAKER_00", template: template, withHighlights: true)
+                XCTAssertTrue(e.contains("plus '## Highlights' first"), e)
+                XCTAssertNotEqual(sha(e), Self.pins["\(style.rawValue) \(template == nil ? "none" : "tpl")"]!.eot)
+            }
+            for lang in ["ca", "es"] {
+                XCTAssertTrue(EndOfTurnBlock.build(noteLanguage: lang, style: style, noteOwner: "M",
+                                                   ownerSpeaker: "S", withHighlights: true).contains("Highlights"))
+            }
+        }
+    }
+
+    /// `QuickNotesModel.end()` commits a pending draft through `Line(typed:)` (the
+    /// model itself lives in the app target): an unfinished "!x" survives as a
+    /// flagged line, a blank draft yields no text so nothing is added.
+    func testUncommittedDraftBecomesALineAndBlankDraftDoesNot() {
+        let line = ScratchpadNotes.Line(typed: "!follow up with Sam", offsetSeconds: 90)
+        XCTAssertEqual(line, .init(offsetSeconds: 90, text: "follow up with Sam", flagged: true))
+        XCTAssertTrue(ScratchpadNotes.Line(typed: "  \n ", offsetSeconds: 1).text.isEmpty)
+        XCTAssertTrue(ScratchpadNotes.Line(typed: "!", offsetSeconds: 1).text.isEmpty)
+    }
+
+    func testTranslatedOrDifferentlyNamedHighlightsHeadingIsNotDuplicated() {
+        let keyed = "# Meeting notes\n\n## Key highlights\n- x\n\n## Executive summary\nBody."
+        XCTAssertEqual(pad.ensureHighlights(in: keyed), keyed)
+        // Translated heading, but the first section lists every typed line.
+        let catalan = "# Meeting notes\n\n## Destacats\n- 01:15 Ask about notice period - parlat\n- decision: go with option B\n\n## Executive summary\nBody."
+        XCTAssertEqual(pad.ensureHighlights(in: catalan), catalan)
+        // A first section that lists only some of them does not count.
+        let partial = "# Meeting notes\n\n## Destacats\n- ask about notice period\n\n## Executive summary\nBody."
+        XCTAssertTrue(pad.ensureHighlights(in: partial).contains("## Highlights"))
+        // A level-3 mention is not a Highlights section.
+        XCTAssertTrue(pad.ensureHighlights(in: "# Meeting notes\n\n### highlights aside\n\n## A\nx").contains("## Highlights"))
     }
 
     func testPromptBlockReachesBuildForBothStylesAndATemplate() {

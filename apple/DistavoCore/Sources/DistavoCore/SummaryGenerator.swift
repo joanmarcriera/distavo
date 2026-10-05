@@ -131,7 +131,8 @@ public enum SummaryDriver {
             if request.endOfTurnBlock != nil {
                 request.endOfTurnBlock = EndOfTurnBlock.build(
                     noteLanguage: request.noteLanguage, style: request.style,
-                    noteOwner: request.noteOwner, ownerSpeaker: request.userSpeaker)
+                    noteOwner: request.noteOwner, ownerSpeaker: request.userSpeaker,
+                    withHighlights: request.scratchpad?.isEmpty == false)
             }
             onProgress("The note template is too long for this model's window - writing a standard note.")
         }

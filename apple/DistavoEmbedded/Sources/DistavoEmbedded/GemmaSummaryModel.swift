@@ -462,7 +462,8 @@ public enum GemmaSummariser {
             noteLanguage: noteLanguage,
             endOfTurnBlock: EndOfTurnBlock.build(
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
-                ownerSpeaker: userSpeaker, template: template),
+                ownerSpeaker: userSpeaker, template: template,
+                withHighlights: scratchpad?.isEmpty == false),
             customInstruction: customInstruction, glossary: glossary, template: template,
             scratchpad: scratchpad)
         do {

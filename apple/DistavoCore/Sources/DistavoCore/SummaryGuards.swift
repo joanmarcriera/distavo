@@ -388,11 +388,11 @@ public enum EndOfTurnBlock {
     /// `userSpeaker`, e.g. "SPEAKER_00").
     public static func build(
         noteLanguage: String?, style: Prompt.Style, noteOwner: String, ownerSpeaker: String,
-        template: SummaryTemplate? = nil
+        template: SummaryTemplate? = nil, withHighlights: Bool = false
     ) -> String {
         if let template {
             return templated(noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
-                             ownerSpeaker: ownerSpeaker, template: template)
+                             ownerSpeaker: ownerSpeaker, template: template, withHighlights: withHighlights)
         }
         let count = SummaryPostProcess.requiredHeadings(for: style).count
         let facts = style == .factsFirst
@@ -400,7 +400,8 @@ public enum EndOfTurnBlock {
         case "ca":
             var s = "RECORDATORI FINAL: escriu TOTA la prosa de les notes en CATALÀ (no en anglès); "
                 + "els encapçalaments de secció segueixen en anglès. "
-                + "Usa exactament els \(count) encapçalaments indicats, inclòs '## Action items'. "
+                + (withHighlights ? "Usa exactament els \(count) encapçalaments indicats, més '## Highlights' al principi, inclòs '## Action items'. "
+                    : "Usa exactament els \(count) encapçalaments indicats, inclòs '## Action items'. ")
             if facts {
                 s += "No repeteixis files del Facts ledger; màxim 25 files úniques, cada fet una sola vegada, "
                     + "amb una cita de com a màxim 12 paraules. "
@@ -421,7 +422,8 @@ public enum EndOfTurnBlock {
         case "es":
             var s = "RECORDATORIO FINAL: escribe TODA la prosa de las notas en ESPAÑOL (no en inglés); "
                 + "los encabezados de sección siguen en inglés. "
-                + "Usa exactamente los \(count) encabezados indicados, incluido '## Action items'. "
+                + (withHighlights ? "Usa exactamente los \(count) encabezados indicados, más '## Highlights' al principio, incluido '## Action items'. "
+                    : "Usa exactamente los \(count) encabezados indicados, incluido '## Action items'. ")
             if facts {
                 s += "No repitas filas del Facts ledger; máximo 25 filas únicas, cada hecho una sola vez, "
                     + "con una cita de como máximo 12 palabras. "
@@ -447,7 +449,8 @@ public enum EndOfTurnBlock {
                 "write ALL the prose of the notes in \($0.uppercased()) (not English); the section headings stay in English; "
                 + "quoted excerpts stay verbatim in the language actually spoken. "
             } ?? ""
-            var s = "FINAL REMINDER: " + lead + "use exactly the \(count) section headings listed, "
+            var s = "FINAL REMINDER: " + lead + "use exactly the \(count) section headings listed"
+                + (withHighlights ? ", plus '## Highlights' first (right after '# Meeting notes')" : "") + ", "
                 + "including '## Action items' as its own heading before the action table. "
             if facts {
                 s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "
@@ -468,7 +471,8 @@ public enum EndOfTurnBlock {
     /// template does not have); the language rule leads it. Mentions only the
     /// sections the template really contains.
     static func templated(noteLanguage: String?, style: Prompt.Style, noteOwner: String,
-                          ownerSpeaker: String, template: SummaryTemplate) -> String {
+                          ownerSpeaker: String, template: SummaryTemplate,
+                          withHighlights: Bool = false) -> String {
         let headings = SummaryPostProcess.requiredHeadings(for: style, template: template)
         let have = Set(headings.map { $0.dropFirst(3).lowercased() })
         var lead = ""
@@ -477,8 +481,9 @@ public enum EndOfTurnBlock {
             lead = "write ALL the prose of the notes in \(name.uppercased()) (not English); the section headings stay "
                 + "in English; quoted excerpts stay verbatim in the language actually spoken. "
         }
-        var s = "FINAL REMINDER: " + lead + "use exactly the \(headings.count) section headings listed, "
-            + "spelled as given, in that order. "
+        var s = "FINAL REMINDER: " + lead + "use exactly the \(headings.count) section headings listed"
+            + (withHighlights ? ", plus '## Highlights' first (right after '# Meeting notes')" : "")
+            + ", spelled as given, in that order. "
         if style == .factsFirst {
             s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "
         }

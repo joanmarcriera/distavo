@@ -154,14 +154,25 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
 
     // MARK: Safety net
 
-    /// True when `note` has a `Highlights` heading (as a `#` heading or a
-    /// bold-only line, tolerating a trailing colon).
+    /// True when `note` has a level-2 (or bold-only) heading containing
+    /// "highlight" ("## Highlights", "## Key highlights:").
     static func hasHighlights(_ note: String) -> Bool {
         note.components(separatedBy: "\n").contains { line in
             let t = line.trimmingCharacters(in: .whitespaces)
-            guard t.hasPrefix("#") || t.hasPrefix("**") else { return false }
-            return t.trimmingCharacters(in: CharacterSet(charactersIn: " \t*:#_")).lowercased() == "highlights"
+            guard t.hasPrefix("## ") || t.hasPrefix("**") else { return false }
+            return t.lowercased().contains("highlight")
         }
+    }
+
+    /// True when the first section after the title already lists every typed
+    /// line's text: the model wrote the highlights under a translated heading
+    /// (e.g. "## Destacats"), so inserting another section would duplicate it.
+    func firstSectionListsAllLines(in note: String) -> Bool {
+        let lines = note.components(separatedBy: "\n")
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("## ") }) else { return false }
+        let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
+        let body = lines[start..<end].joined(separator: "\n").lowercased()
+        return sanitised().lines.allSatisfy { body.contains($0.text.lowercased()) }
     }
 
     /// The fallback section listing the typed lines verbatim with timestamps.
@@ -178,7 +189,8 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
     /// at the top when there is none). Unchanged when the model complied or
     /// there is nothing typed.
     public func ensureHighlights(in note: String) -> String {
-        guard !sanitised().isEmpty, !Self.hasHighlights(note) else { return note }
+        guard !sanitised().isEmpty, !Self.hasHighlights(note),
+              !firstSectionListsAllLines(in: note) else { return note }
         var lines = note.components(separatedBy: "\n")
         let section = highlightsSection().components(separatedBy: "\n")
         if let title = lines.firstIndex(where: { $0.hasPrefix("# ") }) {

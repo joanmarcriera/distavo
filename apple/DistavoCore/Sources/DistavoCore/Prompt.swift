@@ -280,15 +280,23 @@ public enum Prompt {
                              template: SummaryTemplate? = nil,
                              scratchpad: ScratchpadNotes? = nil) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let padBlock = scratchpad?.promptBlock() ?? ""
         let block = (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
             + glossaryText(glossary)
-            + (scratchpad?.promptBlock() ?? "")   // typed notes (#2949); "" = byte-identical
+            + padBlock   // typed notes (#2949); "" = byte-identical
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : Self.template
         // A summary template (#2940) swaps the section list; nil leaves the
         // text, and so the whole prompt, byte-identical to before.
         if let template { base = template.apply(to: base, style: style) }
+        // The typed-notes block adds a Highlights section, so "exactly these
+        // sections" must not contradict it (#2949); untouched without notes.
+        if !padBlock.isEmpty {
+            base = base.replacingOccurrences(
+                of: "using exactly these sections:",
+                with: "using exactly these sections, preceded by the extra \(ScratchpadNotes.highlightsHeading) section described above:")
+        }
         // nil, "en" and unrecognised codes leave the prompt byte-identical to
         // before this feature; any other catalog language replaces the
         // "Use British English." rule.

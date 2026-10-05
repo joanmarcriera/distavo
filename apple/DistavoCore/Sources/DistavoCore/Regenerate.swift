@@ -33,8 +33,8 @@ public struct RegenerateOptions: Equatable, Sendable {
     /// Free-text instruction appended to the prompt (capped, see
     /// `Prompt.maxCustomInstructionChars`).
     public var customInstruction: String?
-    /// Opaque id of a user summary template (Vikunja #2940). Carried through
-    /// untouched until that feature is merged and wired in.
+    /// Summary template id (Vikunja #2940): a bundled id, "custom", or "none" for
+    /// standard notes; nil/unknown = what the normal resolution picks.
     public var templateID: String?
 
     public init(promptStyle: Prompt.Style? = nil, model: String? = nil, backend: String? = nil,
@@ -112,6 +112,25 @@ extension Pipeline {
         return cfg
     }
 
+    /// The summary template (#2940) a regenerate run uses: the explicit choice
+    /// (`"none"` = standard notes), or - when nothing was chosen or the id does
+    /// not resolve - whatever the normal resolution picks for that recording
+    /// (recording sidecar > recordings subfolder > Settings), so regenerating
+    /// without a template choice keeps the note's shape.
+    static func regenerateTemplate(
+        options: RegenerateOptions, config: Config, workDir: URL, sourceBase: String, sourcePath: URL?
+    ) -> SummaryTemplate? {
+        let chosen = options.templateID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if chosen.lowercased() == SummaryTemplateCatalog.noneID { return nil }
+        if !chosen.isEmpty, let t = SummaryTemplateCatalog.template(id: chosen, config: config) { return t }
+        let folder = sourcePath.map {
+            SummaryTemplateCatalog.folder(of: $0, in: Config.resolvePath(config.recordingsDir))
+        } ?? ""
+        return SummaryTemplateCatalog.resolve(
+            config: config, folder: folder,
+            sidecarID: LanguageOverride.load(workDir: workDir, base: sourceBase)?.template)
+    }
+
     /// Regenerate the note for `base` from its cached transcript.
     ///
     /// - Parameters:
@@ -179,8 +198,6 @@ extension Pipeline {
         let noteLanguage = resolveNoteLanguage(
             config: cfg, workDir: workDir, base: base,
             dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage)
-        // TODO(#2940): apply template — when summary templates land, resolve
-        // `options.templateID` here and fold the template's prompt into `context`.
         let context = NoteContext(
             noteOwner: cfg.noteOwner, userSpeaker: cfg.userSpeaker, participants: participants,
             meetingDate: sourcePath.flatMap { meetingDate(for: $0) },
@@ -189,7 +206,9 @@ extension Pipeline {
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
-            glossary: cfg.transcribe.vocabulary)
+            glossary: cfg.transcribe.vocabulary,
+            template: regenerateTemplate(options: options, config: cfg, workDir: workDir,
+                                         sourceBase: sourceBase, sourcePath: sourcePath))
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

@@ -60,17 +60,21 @@ public struct SummaryRequest: Sendable {
     public var customInstruction: String?
     /// Custom vocabulary (Vikunja #2939); counted in the budget. Default empty.
     public var glossary: [String]
+    /// Summary template (#2940) replacing the stock section list; nil = stock.
+    public var template: SummaryTemplate?
 
     public init(transcript: String, noteOwner: String, userSpeaker: String,
                 participants: String? = nil, style: Prompt.Style = .classic,
                 meetingDate: Date? = nil, noteLanguage: String? = nil,
-                endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = []) {
+                endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
+                template: SummaryTemplate? = nil) {
         self.customInstruction = customInstruction
         self.transcript = transcript; self.noteOwner = noteOwner
         self.userSpeaker = userSpeaker; self.participants = participants
         self.style = style; self.meetingDate = meetingDate
         self.noteLanguage = noteLanguage; self.endOfTurnBlock = endOfTurnBlock
         self.glossary = glossary
+        self.template = template
     }
 }
 
@@ -78,6 +82,30 @@ public enum SummaryDriver {
 
     /// Bounded number of "condense the notes again" rounds in `reduceToFit`.
     public static let maxFoldRounds = 3
+
+    /// A template is honoured only while the transcript budget of the final prompt
+    /// stays at least this share of the untemplated one (#2940). The bundled
+    /// templates are shorter than the stock section list, so they always pass; a
+    /// very long custom template does not, and then the run uses no template.
+    public static let templateBudgetFloor = 0.75
+
+    /// Whether `template` leaves a sane transcript budget at `contextSize`.
+    static func templateFits(_ template: SummaryTemplate, request: SummaryRequest, contextSize: Int) -> Bool {
+        func budget(_ t: SummaryTemplate?) -> Int {
+            EmbeddedSummaryBudget.final(
+                contextSize: contextSize, noteOwner: request.noteOwner,
+                userSpeaker: request.userSpeaker, style: request.style,
+                extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
+                customInstruction: request.customInstruction, glossary: request.glossary,
+                template: t).transcriptTokens
+        }
+        let templated = budget(template)
+        return templated > 0 && Double(templated) >= templateBudgetFloor * Double(budget(nil))
+    }
+
+    /// The smallest final-prompt transcript budget `reduceToFit` will work with;
+    /// below it the notes would be cut to nothing and the model would invent a note.
+    static let minimumReduceTokens = 100
 
     /// Produce meeting notes from a cleaned transcript with `generator`.
     ///
@@ -87,16 +115,29 @@ public enum SummaryDriver {
     /// shape `SummaryValidator` expects either way. `participants` and the
     /// end-of-turn block reach the final prompt only.
     public static func run(
-        _ request: SummaryRequest, generator: some SummaryGenerator,
+        _ original: SummaryRequest, generator: some SummaryGenerator,
         onProgress: @Sendable (String) -> Void = { _ in }
     ) async throws -> String {
         let contextSize = generator.contextSize
+        var request = original
+        // A summary template that would squeeze the transcript out of a small
+        // window (Apple's 4096 tokens) is dropped for this run - never failed.
+        if let template = request.template, !templateFits(template, request: request, contextSize: contextSize) {
+            request.template = nil
+            // The caller built the end-of-turn block for the template's headings.
+            if request.endOfTurnBlock != nil {
+                request.endOfTurnBlock = EndOfTurnBlock.build(
+                    noteLanguage: request.noteLanguage, style: request.style,
+                    noteOwner: request.noteOwner, ownerSpeaker: request.userSpeaker)
+            }
+            onProgress("The note template is too long for this model's window - writing a standard note.")
+        }
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary)
+            glossary: request.glossary, template: request.template)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
@@ -104,7 +145,7 @@ public enum SummaryDriver {
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
             style: request.style, extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary)
+            glossary: request.glossary, template: request.template)
 
         switch plan {
         case .single:
@@ -146,7 +187,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, participants: request.participants,
             style: request.style, meetingDate: request.meetingDate,
             noteLanguage: request.noteLanguage, customInstruction: request.customInstruction,
-            glossary: request.glossary)
+            glossary: request.glossary, template: request.template)
         guard let block = request.endOfTurnBlock?.trimmingCharacters(in: .whitespacesAndNewlines),
               !block.isEmpty else { return prompt }
         return prompt + "\n" + block + "\n"
@@ -170,7 +211,9 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary)
+            glossary: request.glossary, template: request.template)
+        // No room for the notes at all: stop rather than prompt with an empty transcript.
+        guard budget.transcriptTokens >= minimumReduceTokens else { throw SummaryDriverError.contextTooSmall }
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
         var merged = EmbeddedSummaryPrompt.merge(partials: partials)
 

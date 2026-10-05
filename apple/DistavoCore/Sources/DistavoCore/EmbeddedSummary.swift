@@ -90,14 +90,17 @@ public struct EmbeddedSummaryBudget: Equatable {
     /// which is what every pre-#2198 caller got.
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
                              style: Prompt.Style = .classic, extraInstructions: String? = nil,
-                             noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [])
+                             noteLanguage: String? = nil, customInstruction: String? = nil,
+                             glossary: [String] = [], template: SummaryTemplate? = nil)
         -> EmbeddedSummaryBudget {
         // nil `noteLanguage` leaves the measured prompt (so the budget) exactly
-        // as before; a language swaps in its longer rule.
+        // as before; a language swaps in its longer rule. A summary template
+        // (#2940) is measured too - its sections replace the stock list.
         let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
                                         userSpeaker: userSpeaker, style: style,
                                         noteLanguage: noteLanguage,
-                                        customInstruction: customInstruction, glossary: glossary)
+                                        customInstruction: customInstruction, glossary: glossary,
+                                        template: template)
         // The end-of-user-turn block rides in the final prompt, so its tokens
         // come out of the transcript budget too.
         let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -202,12 +205,14 @@ public enum EmbeddedSummaryPlanner {
     public static func plan(
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
         style: Prompt.Style = .classic, extraInstructions: String? = nil,
-        noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = []
+        noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
+        template: SummaryTemplate? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
             extraInstructions: extraInstructions, noteLanguage: noteLanguage,
-            customInstruction: customInstruction, glossary: glossary)
+            customInstruction: customInstruction, glossary: glossary,
+            template: template)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

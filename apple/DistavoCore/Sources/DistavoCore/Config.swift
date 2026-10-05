@@ -191,6 +191,16 @@ public struct SummariseConfig: Codable, Equatable {
     /// predating the key) means the action has nothing to run, so Settings
     /// hides its checkbox and `WatcherController` skips it.
     public var biggerModel: String?
+    /// Summary template id for every recording ("" = none; "standup", "one_on_one",
+    /// "interview", "sales_call", "lecture" or "custom" - Vikunja #2940). See
+    /// `SummaryTemplateCatalog`. A config predating the key decodes to "" (no change).
+    public var template: String
+    /// The user's own template as a Markdown outline (`## Heading` + instruction
+    /// lines); used when `template` (or a folder/recording choice) is "custom".
+    public var customTemplate: String
+    /// Subfolder of the recordings dir (relative, "/"-separated) -> template id,
+    /// longest prefix wins; overrides `template` for recordings in that folder.
+    public var folderTemplates: [String: String]
 
     enum CodingKeys: String, CodingKey {
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
@@ -198,6 +208,7 @@ public struct SummariseConfig: Codable, Equatable {
         case promptStyle = "prompt_style"
         case noteLanguage = "note_language"
         case biggerModel = "bigger_model"
+        case template, customTemplate = "custom_template", folderTemplates = "folder_templates"
     }
 
     public init(backend: String = "server", server: OllamaTarget = .init(model: "gemma4:26b"),
@@ -207,7 +218,9 @@ public struct SummariseConfig: Codable, Equatable {
                 options: SummariseOptions = .init(),
                 promptStyle: Prompt.Style = .classic,
                 noteLanguage: String = "en",
-                biggerModel: String? = nil) {
+                biggerModel: String? = nil,
+                template: String = "", customTemplate: String = "",
+                folderTemplates: [String: String] = [:]) {
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -215,6 +228,8 @@ public struct SummariseConfig: Codable, Equatable {
         self.promptStyle = promptStyle
         self.noteLanguage = noteLanguage
         self.biggerModel = biggerModel
+        self.template = template; self.customTemplate = customTemplate
+        self.folderTemplates = folderTemplates
     }
 
     public init(from decoder: Decoder) throws {
@@ -233,6 +248,12 @@ public struct SummariseConfig: Codable, Equatable {
             .flatMap { $0.flatMap(Prompt.Style.init(rawValue:)) } ?? d.promptStyle
         noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage) ?? d.noteLanguage
         biggerModel = try c.decodeIfPresent(String.self, forKey: .biggerModel) ?? d.biggerModel
+        // Template keys (#2940): a wrong-typed value falls back to "no template" rather
+        // than failing the whole config.
+        template = ((try? c.decodeIfPresent(String.self, forKey: .template)) ?? nil) ?? d.template
+        customTemplate = ((try? c.decodeIfPresent(String.self, forKey: .customTemplate)) ?? nil) ?? d.customTemplate
+        folderTemplates = ((try? c.decodeIfPresent([String: String].self, forKey: .folderTemplates)) ?? nil)
+            ?? d.folderTemplates
     }
 }
 

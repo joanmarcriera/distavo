@@ -17,12 +17,12 @@ public enum SummaryRouting {
     /// measure slightly differently.
     public static func traceLine(
         model: EmbeddedSummaryModel, transcript: String, noteOwner: String, userSpeaker: String,
-        style: Prompt.Style, noteLanguage: String?
+        style: Prompt.Style, noteLanguage: String?, template: SummaryTemplate? = nil
     ) -> String {
         let context = model.contextCap ?? appleContextTokens
         let plan = EmbeddedSummaryPlanner.plan(
             transcript: transcript, contextSize: context, noteOwner: noteOwner,
-            userSpeaker: userSpeaker, style: style)
+            userSpeaker: userSpeaker, style: style, template: template)
         let planText: String
         switch plan {
         case .single: planText = "single pass"
@@ -30,7 +30,8 @@ public enum SummaryRouting {
         case .contextTooSmall: planText = "context too small"
         }
         return "Summariser \u{2014} model=\(model.id) engine=\(model.engine.rawValue) context=\(context) "
-            + "style=\(style.rawValue) language=\(noteLanguage ?? "default"); "
+            + "style=\(style.rawValue) language=\(noteLanguage ?? "default")"
+            + (template.map { " template=\($0.id)" } ?? "") + "; "
             + "transcript\u{2248}\(EmbeddedSummaryTokens.estimate(transcript)) tokens; plan=\(planText)"
     }
 }

@@ -27,17 +27,25 @@ public struct LanguageOverride: Codable, Equatable {
     public var code: String
     /// Per-recording note language, or nil = follow `summarise.note_language`.
     public var noteLanguage: String?
+    /// Per-recording summary template id (Vikunja #2940; a bundled id, "custom",
+    /// or "none" for "no template"), or nil = folder map / Settings decide. Lives
+    /// in this sidecar because it is the recorder's other per-recording note
+    /// choice; a sidecar without the key decodes to nil (no override).
+    public var template: String?
 
-    enum CodingKeys: String, CodingKey { case code, noteLanguage = "note_language" }
+    enum CodingKeys: String, CodingKey {
+        case code, noteLanguage = "note_language", template = "summary_template"
+    }
 
-    public init(code: String = "", noteLanguage: String? = nil) {
-        self.code = code; self.noteLanguage = noteLanguage
+    public init(code: String = "", noteLanguage: String? = nil, template: String? = nil) {
+        self.code = code; self.noteLanguage = noteLanguage; self.template = template
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         code = try c.decodeIfPresent(String.self, forKey: .code) ?? ""
         noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage)
+        template = try c.decodeIfPresent(String.self, forKey: .template)
     }
 
     public static func url(workDir: URL, base: String) -> URL {
@@ -55,7 +63,8 @@ public struct LanguageOverride: Codable, Equatable {
         if let note = decoded.noteLanguage, !NoteLanguage.isValidChoice(note) { decoded.noteLanguage = nil }
         // Nothing usable in the file (corrupt, "auto"/empty code, no note
         // language) behaves exactly like a missing sidecar.
-        guard !decoded.code.isEmpty || decoded.noteLanguage != nil else { return nil }
+        if decoded.template?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true { decoded.template = nil }
+        guard !decoded.code.isEmpty || decoded.noteLanguage != nil || decoded.template != nil else { return nil }
         return decoded
     }
 

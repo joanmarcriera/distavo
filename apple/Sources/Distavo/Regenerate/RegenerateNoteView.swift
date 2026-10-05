@@ -33,6 +33,7 @@ struct RegenerateNoteView: View {
     @State private var modelText = ""
     @State private var embeddedModel = ""
     @State private var instruction = ""
+    @State private var templateID: String?
 
     init(notes: [RegenerableNote], config: Config,
          onRegenerate: @escaping (String, RegenerateOptions) -> Void, onCancel: @escaping () -> Void) {
@@ -67,7 +68,18 @@ struct RegenerateNoteView: View {
                             Text(n.hasTranscript ? n.title : "\(n.title) (no saved transcript)").tag(n.base)
                         }
                     }
-                    // TODO(#2940): when summary templates land, add them to this picker.
+                    // Summary template (#2940). nil = what a normal run would use for this
+                    // recording (its own choice, folder rule or Settings), so the note keeps its shape.
+                    Picker("Template", selection: $templateID) {
+                        Text("As in Settings").tag(String?.none)
+                        Text("None (standard notes)").tag(String?.some(SummaryTemplateCatalog.noneID))
+                        ForEach(SummaryTemplateCatalog.bundledTemplates) { t in
+                            Text(t.name).tag(String?.some(t.id))
+                        }
+                        if SummaryTemplateCatalog.customTemplate(config: config) != nil {
+                            Text("Custom").tag(String?.some(SummaryTemplateCatalog.customID))
+                        }
+                    }
                     Picker("Prompt", selection: $style) {
                         Text("As in Settings (\(config.summarise.promptStyle == .factsFirst ? "Facts first" : "Classic"))")
                             .tag(Prompt.Style?.none)
@@ -125,7 +137,7 @@ struct RegenerateNoteView: View {
 
     private func run() {
         guard canRun else { return }
-        var options = RegenerateOptions(promptStyle: style, backend: backend)
+        var options = RegenerateOptions(promptStyle: style, backend: backend, templateID: templateID)
         let text = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
         options.customInstruction = text.isEmpty ? nil : text
         if effectiveBackend == "embedded" {

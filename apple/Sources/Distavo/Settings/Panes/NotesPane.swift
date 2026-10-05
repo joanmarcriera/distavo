@@ -34,6 +34,8 @@ struct NotesPane: View {
             SettingCaption("The language of the finished note. The language people speak is a separate setting: Transcription › Spoken language. Apple Intelligence writes English for languages it does not support.")
         }
 
+        TemplatesSection(model: model)
+
         Section("People") {
             TextField("Note owner", text: $model.draft.noteOwner)
             TextField("Your speaker label", text: $model.draft.userSpeaker)

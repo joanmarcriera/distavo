@@ -23,7 +23,7 @@ cd apple/DistavoCore && swift test --filter PipelineTests   # one suite
 # Suite files: apple/DistavoCore/Tests/DistavoCoreTests/*.swift (Pipeline, State,
 # Config, Cleaning, Validation, Prompt, WhisperXClient, OllamaClient, ActivityLog,
 # NetworkScope, AudioConverter, StereoBalancer, WhisperLanguageCatalog, IssueReport,
-# EmbeddedSummary).
+# EmbeddedSummary, and one suite per 1.17 feature — see the Tests dir).
 
 # Slower — builds WhisperKit/SpeakerKit (argmax-oss-swift) on first run.
 cd apple/DistavoEmbedded && swift test
@@ -90,6 +90,9 @@ target-specific settings (e.g. Setapp's hand-authored `Setapp-Info.plist`, `GENE
 NO`) — exercise those schemes directly before a release if you touched target-level settings.
 
 ## Environment gotchas that waste a build
+
+- **`strings | grep -q` under `set -o pipefail` gives false negatives**. Use `grep -aqF <text> <dylib>` directly.
+- **`docs/manual-checks-1.17.md` is union-merged** via `.gitattributes`; each feature appends its own section, so don't resolve it by hand or reorder it.
 
 - **Stale module cache after the repo moved.** The repo used to live at `/Users/marc/Distavo`.
   A `.build` carried over from then fails every target with `missing required module

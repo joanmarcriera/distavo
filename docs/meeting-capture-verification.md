@@ -92,6 +92,60 @@ defaults delete uk.co.riera.distavo distavo.didExplainCapture
    - Mic muted but the call audio playing (and the reverse) is never "silence".
    - The recorder cannot run in CI; this section is the only end-to-end check.
 
+## Meeting detection (Vikunja #2945) — UNVERIFIED until run on signed builds
+
+Unit tests cover the policy (`MeetingDetectorTests`, `MeetingDetectionConfigTests`).
+Everything below needs a real Mac and a real call. **Run it on BOTH a Direct build
+and a sandboxed App Store (TestFlight / Release-AppStore, signed) build** — the
+open question is whether `NSWorkspace.runningApplications` and Core Audio
+`kAudioDevicePropertyDeviceIsRunningSomewhere` on the default input device return
+real values under the App Sandbox. No entitlement or usage string was added; if
+the App Store build never prompts while Direct does, that is the failure to
+report (then the mic flag reads `nil` in the sandbox; see step 9).
+
+Setup: Settings → Recording → Meeting detection → turn ON "Offer to record when a
+call starts" (default list: Zoom, Teams, FaceTime, Webex, Slack, Discord). Allow
+notifications for Distavo. Do not launch a second Distavo build while your real
+one runs (shared config).
+
+1. **Off by default** — fresh config (or delete the `meeting_detection` block):
+   toggle is OFF; start a Zoom/FaceTime call: no prompt, ever. With it off, Activity
+   Monitor shows no extra wake-ups from Distavo (the timer exists only while on).
+2. **Prompt within 5 s** — ON; join/start a Zoom call (or FaceTime call to
+   yourself/another device) with the mic live. A notification "Zoom call detected —
+   record it?" with **Record** and **Not now** buttons appears within 5 s of the mic
+   going live (debounce is 2 s). Repeat for FaceTime and Teams if installed.
+3. **Record** — click Record: the normal pre-flight/permission flow (first time) then
+   the menu shows "Stop recording"; the recording works exactly as via the menu.
+   Nothing was recorded before the click (no purple indicator beforehand).
+4. **One prompt per call** — stay on the call for 2 min: no second prompt. Hang up,
+   start a new call: prompted again.
+5. **Not now** — end the call, start another, click Not now: no prompt for that app
+   for the snooze time (default 30 min; check a short value like 1 min and that the
+   next call after it expires prompts again). Other listed apps still prompt.
+6. **No prompt while recording** — start Record from the menu BEFORE the call
+   starts, then join: no prompt. Stop the recording mid-call: no prompt for the same
+   call and none for 30 s afterwards.
+7. **Notifications denied** (System Settings → Notifications → Distavo off): on a
+   call, open the menu-bar menu: "📞 Zoom call detected" with **Record this call** /
+   **Not now** is shown instead. It disappears when the call's mic use ends.
+8. **Non-listed / idle** — mic in use by a non-listed app with no listed app running
+   (e.g. a voice memo): no prompt. Listed app open but no call (mic idle): no prompt.
+9. **Sandbox diagnosis (App Store build)** — if step 2 fails only in the sandboxed
+   build, check `~/Library/Logs/Distavo/distavo.log` (should read "Meeting detection
+   on" and, on a call, "Meeting detected (...)"). Then run `log stream --predicate
+   'process == "Distavo"'` while on a call to see sandbox denials. Report which of
+   the two readings (running apps vs mic flag) fails. The mic reading failing means
+   the optional "frontmost app" fallback (`meeting_detection.allow_frontmost_fallback`,
+   no UI, default false) is the only heuristic left.
+10. **Browser caveat** — add `com.google.Chrome` (or your browser) to the list and
+    open meet.google.com with the mic on: prompt appears; with only a voice-search
+    on another site it also prompts (documented limitation). Remove it again.
+
+Known limitation: the mic flag is system-wide, not per app; a listed app that is just
+open plus any other mic use (dictation) looks like a call. Webex
+`com.cisco.webexmeetingsapp` is unverified; Webex's main app is `Cisco-Systems.Spark`.
+
 ## Known caveats (documented, not bugs)
 
 - Loudspeakers (no headphones): the mic also hears the remote participants, so

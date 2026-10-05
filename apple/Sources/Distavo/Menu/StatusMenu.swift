@@ -72,6 +72,7 @@ struct StatusMenu: View {
                 // Vikunja #2068: a take started by mistake — stop, delete, never transcribe.
                 Button("✕ Stop and delete recording") { capture.discard() }
                 Button("Quick Notes…") { capture.showQuickNotes() }   // #2949
+                Button("Mark Key Moment") { capture.markKeyMoment() }   // #2950
             }
         }
 
@@ -91,6 +92,8 @@ struct StatusMenu: View {
             controller.exportLastTranscript()
         }
         .disabled(!controller.canExportLastTranscript)
+        Button(controller.keyMomentExportTitle) { controller.exportKeyMomentClips() }   // #2950
+            .disabled(!controller.canExportKeyMomentClips)
         Button("Open last note") { controller.openLastNote() }
             .disabled(!controller.hasLastNote)
 

@@ -28,6 +28,9 @@ final class QuickNotesModel: ObservableObject {
     @Published var draft = ""
     @Published private(set) var isActive = false
 
+    /// "Mark key moment" button in the panel (Vikunja #2950); set by the capture controller.
+    var onMarkKeyMoment: (() -> Void)?
+
     private var workDir: URL?
     private var base: String?
     private var startedAt: Date?
@@ -184,6 +187,8 @@ private struct QuickNotesView: View {
             TextField("Note…  (Return to add, ! to flag)", text: $model.draft)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.commitDraft() }
+            Button { model.onMarkKeyMoment?() } label: { Label("Mark key moment", systemImage: "bookmark") }
+                .help("Drops a marker at this point; the note lists it and you can export a clip around it")
             Text("Saved on this Mac with the recording, hidden from screen sharing. The summary lists each note under Highlights.")
                 .font(.caption).foregroundStyle(.secondary)
         }

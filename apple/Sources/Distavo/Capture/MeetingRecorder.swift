@@ -48,6 +48,9 @@ final class MeetingRecorder {
 
     private(set) var isRecording = false
     private(set) var fileURL: URL?
+    /// When the device was started, i.e. when audio began going into the file: the
+    /// zero of the recording offsets that key-moment markers use (#2950).
+    private(set) var startedAt: Date?
 
     struct Outcome {
         let url: URL
@@ -169,6 +172,7 @@ final class MeetingRecorder {
             }
             ioProcID = procID
 
+            startedAt = Date()
             let startErr = AudioDeviceStart(aggregateID, procID)
             guard startErr == noErr else { throw CaptureError.coreAudio("start device", startErr) }
             isRecording = true

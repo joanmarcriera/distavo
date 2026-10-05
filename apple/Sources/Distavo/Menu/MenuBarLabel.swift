@@ -16,6 +16,7 @@ struct MenuBarLabel: View {
         case .idle:         return "waveform"
         case .recording:    return "record.circle"
         case .recordingSilent: return "record.circle"
+        case .recordingMarked: return "bookmark.circle.fill"   // #2950: brief cue that a marker landed
         case .loading:      return "waveform.badge.plus"
         case .transcribing: return "waveform.badge.magnifyingglass"
         case .done:         return "waveform.badge.checkmark"
@@ -27,6 +28,7 @@ struct MenuBarLabel: View {
         case .idle:         return .primary
         case .recording:    return .red
         case .recordingSilent: return .orange
+        case .recordingMarked: return .green
         case .loading:      return .secondary
         case .transcribing: return .orange
         case .done:         return .green

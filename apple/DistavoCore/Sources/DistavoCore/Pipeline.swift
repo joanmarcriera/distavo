@@ -449,6 +449,8 @@ public enum Pipeline {
                         workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
                     style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949
+            let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
+                segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.
@@ -463,8 +465,10 @@ public enum Pipeline {
                 }
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
-                let noteText = cleaned + provenanceFooter(from: result)
-                return (noteText, SummaryValidator.validate(noteText))
+                // Key moments (#2950) are appended after the model and excluded from validation.
+                let footer = provenanceFooter(from: result)
+                return (RecordingBookmarks.appending(keyMoments, to: cleaned) + footer,
+                        SummaryValidator.validate(cleaned + footer))
             }
 
             var (noteText, failures) = try await summariseAttempt()

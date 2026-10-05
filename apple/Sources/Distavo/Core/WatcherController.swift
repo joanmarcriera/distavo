@@ -14,7 +14,7 @@ final class WatcherController: ObservableObject {
     /// Drives the menu-bar glyph. Precedence (high→low): a live recording wins,
     /// then the current processing phase, then an unread new note, then idle.
     /// `recordingSilent` = recording, but a silence suggestion is pending (#2665).
-    enum IconState { case idle, recording, recordingSilent, loading, transcribing, done }
+    enum IconState { case idle, recording, recordingSilent, recordingMarked, loading, transcribing, done }
 
     @Published private(set) var status = "Idle"
     @Published private(set) var iconState: IconState = .idle
@@ -55,6 +55,11 @@ final class WatcherController: ObservableObject {
     private let notifier = Notifier()
     private var recordingCancellable: AnyCancellable?
     private var silenceCancellable: AnyCancellable?
+    private var keyMomentFlashCancellable: AnyCancellable?
+    /// What "Export Key Moment Clips…" can do, computed off the main thread and
+    /// cached (see WatcherController+KeyMoments) - the menu only reads this.
+    @Published var keyMomentExport: KeyMomentExportState = .noMarkers
+    var keyMomentRefresh: Task<Void, Never>?
     /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
     /// store handles updates).
     let updater: AppUpdater? = AppUpdaterFactory.make()
@@ -136,6 +141,9 @@ final class WatcherController: ObservableObject {
         // The pending-silence notice recolours the icon the same way.
         silenceCancellable = capture.$silenceNotice
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
+        keyMomentFlashCancellable = capture.keyMoments.$flash   // #2950: marker cue
+            .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
+        refreshKeyMomentExport()   // #2950: initial state from disk
         wireEmbeddedProgress()
         start()
     }
@@ -262,6 +270,9 @@ final class WatcherController: ObservableObject {
         hasLastTranscript = haveTranscript
     }
 
+    /// A user notification (for the KeyMoments extension, which cannot see `notifier`).
+    func postNotice(title: String, body: String) { notifier.notify(title: title, body: body) }
+
     func showSettings() { SettingsWindowController.shared.show(self) }
 
     /// Open the timestamped activity log in the user's default text viewer.
@@ -275,11 +286,13 @@ final class WatcherController: ObservableObject {
 
     func refreshActivity() {
         if capture.isRecording {
-            iconState = capture.silenceNotice != nil ? .recordingSilent : .recording
+            iconState = capture.silenceNotice != nil ? .recordingSilent
+                : (capture.keyMoments.flash ? .recordingMarked : .recording)   // #2950
         }
         else if processingActive { iconState = processingPhase }
         else if unseenDone { iconState = .done }
         else { iconState = .idle }
+        refreshKeyMomentExport()   // a recording/scan boundary or a marker may change it (#2950)
     }
 
     // MARK: Scanning
@@ -324,6 +337,7 @@ final class WatcherController: ObservableObject {
             store()?.clearTooShort(base)
             // Its Quick Notes (#2949) have nothing left to attach to.
             ScratchpadNotes.delete(workDir: Config.resolvePath(config.workDir), base: base)
+            RecordingBookmarks.delete(workDir: Config.resolvePath(config.workDir), base: base)   // #2950
             log("Moved too-short recording to the Bin: \(url.lastPathComponent)")
         } catch {
             log("Could not delete \(url.lastPathComponent): \(error.localizedDescription)")
@@ -1069,6 +1083,7 @@ final class WatcherController: ObservableObject {
         watchIntervalSeconds = newConfig.watchIntervalSeconds
         allowLocalOllama = newConfig.summarise.allowLocalFallback
         meetingDetection.configure()
+        capture.applyKeyMomentHotkeyConfig()   // #2950: live hotkey changes
         persist()
         if newConfig.summarise.allowLocalFallback && !wasAllowed { deferredBases.removeAll() }
         // New settings may fix a prior failure — clear failed markers and retry.

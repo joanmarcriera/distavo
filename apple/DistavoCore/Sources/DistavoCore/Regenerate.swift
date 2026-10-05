@@ -223,6 +223,10 @@ extension Pipeline {
         let previousText = try? String(contentsOf: notePath, encoding: .utf8)
         let footer = previousText.flatMap(provenanceFooter(in:)) ?? ""
 
+        let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
+            segments: TranscriptSegments.load(workDir: workDir, base: base)
+                ?? TranscriptSegments.load(workDir: workDir, base: sourceBase)) ?? ""   // #2950
+
         // 4. Summarise (one retry on a truncated answer, like `processOne`) and validate.
         deps.onPhase?(.summarising)
         do {
@@ -230,8 +234,9 @@ extension Pipeline {
                 let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
-                let text = cleaned + footer
-                return (text, SummaryValidator.validate(text))
+                // Key moments (#2950): re-appended after the model, outside validation.
+                return (RecordingBookmarks.appending(keyMoments, to: cleaned) + footer,
+                        SummaryValidator.validate(cleaned + footer))
             }
             var (noteText, failures) = try await attempt()
             if isRetryableTruncation(failures) { (noteText, failures) = try await attempt() }

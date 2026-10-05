@@ -12,7 +12,7 @@ final class MCPServerCoreTests: XCTestCase {
     func providers(search: [MCPSearchResult]? = nil) -> MCPProviders {
         MCPProviders(
             listNotes: { n in (0..<min(n, 3)).map { MCPNoteInfo(id: String(format: "%016x", $0 + 1), title: "T\($0)", date: "2026-10-0\($0 + 1)", modified: "2026-10-05T10:00:00Z") } },
-            readNote: { id in id == "0000000000000001" ? .found(markdown: "---\ntitle: T0\n---\n# T0\nbody", truncated: false) : .notFound },
+            readNote: { id in id == "0000000000000001" ? .found(markdown: "---\ntitle: T0\n---\n# T0\nbody") : .notFound },
             searchNotes: { _, _ in search },
             serverVersion: "9.9")
     }
@@ -424,8 +424,8 @@ final class MCPNoteCatalogTests: XCTestCase {
     func testGetNoteReturnsMarkdownWithFrontmatter() throws {
         try write("a.md", "---\ntitle: A\n---\n# A\nhello")
         let id = try XCTUnwrap(MCPNoteCatalog.list(notesDir: dir, limit: 5).first?.id)
-        guard case .found(let md, let truncated) = MCPNoteCatalog.read(id: id, notesDir: dir) else { return XCTFail() }
-        XCTAssertEqual(md, "---\ntitle: A\n---\n# A\nhello"); XCTAssertFalse(truncated)
+        guard case .found(let md) = MCPNoteCatalog.read(id: id, notesDir: dir) else { return XCTFail() }
+        XCTAssertEqual(md, "---\ntitle: A\n---\n# A\nhello")
     }
 
     func testBackupsHiddenFilesNonMarkdownAndSubfoldersAreInvisible() throws {
@@ -462,12 +462,67 @@ final class MCPNoteCatalogTests: XCTestCase {
         XCTAssertFalse(MCPNoteCatalog.isWellFormedID("0123456789ABCDEF"))
     }
 
-    func testOversizeNoteIsTruncatedAndSaysSo() throws {
+    func testOversizeNoteIsRefused() throws {
         try write("big.md", String(repeating: "a", count: MCPNoteCatalog.maxNoteBytes + 500))
-        let id = MCPNoteCatalog.list(notesDir: dir, limit: 1)[0].id
-        guard case .found(let md, let truncated) = MCPNoteCatalog.read(id: id, notesDir: dir) else { return XCTFail() }
-        XCTAssertTrue(truncated); XCTAssertTrue(md.contains("[truncated by Distavo"))
-        XCTAssertLessThan(md.utf8.count, MCPNoteCatalog.maxNoteBytes + 200)
+        try write("ok.md", String(repeating: "a", count: MCPNoteCatalog.maxNoteBytes), age: 50)
+        let list = MCPNoteCatalog.list(notesDir: dir, limit: 5)
+        XCTAssertEqual(MCPNoteCatalog.read(id: MCPNoteCatalog.id(forFileName: "big.md"), notesDir: dir), .tooLarge)
+        if case .found = MCPNoteCatalog.read(id: MCPNoteCatalog.id(forFileName: "ok.md"), notesDir: dir) {} else { XCTFail("at the cap is fine") }
+        XCTAssertEqual(list.count, 2, "oversize notes are still listed (head read only)")
+    }
+
+    func testNoteSwappedForASymlinkAfterListingIsRefused() throws {
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("secret-\(UUID().uuidString).md")
+        try "TOPSECRET".write(to: secret, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        let note = try write("a.md", "harmless")
+        let id = MCPNoteCatalog.id(forFileName: "a.md")
+        let r = MCPNoteCatalog.read(id: id, notesDir: dir, afterListing: {
+            try? FileManager.default.removeItem(at: note)
+            try? FileManager.default.createSymbolicLink(at: note, withDestinationURL: secret)
+        })
+        XCTAssertEqual(r, .notFound, "O_NOFOLLOW at open time: the swapped-in symlink is not followed")
+    }
+
+    func testNoteSwappedForAHardLinkAfterListingIsRefused() throws {
+        let secret = FileManager.default.temporaryDirectory.appendingPathComponent("secret-\(UUID().uuidString).md")
+        try "TOPSECRET".write(to: secret, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: secret) }
+        let note = try write("a.md", "harmless")
+        let r = MCPNoteCatalog.read(id: MCPNoteCatalog.id(forFileName: "a.md"), notesDir: dir, afterListing: {
+            try? FileManager.default.removeItem(at: note)
+            link(secret.path, note.path)
+        })
+        XCTAssertEqual(r, .notFound)
+    }
+
+    func testHardLinkedNoteIsNotListedOrReadable() throws {
+        let original = try write("a.md", "x")
+        try FileManager.default.linkItem(at: original, to: dir.appendingPathComponent("b.md"))
+        XCTAssertTrue(MCPNoteCatalog.list(notesDir: dir, limit: 5).isEmpty, "st_nlink != 1 is refused")
+        XCTAssertEqual(MCPNoteCatalog.read(id: MCPNoteCatalog.id(forFileName: "b.md"), notesDir: dir), .notFound)
+    }
+
+    func testFifoSwappedInIsRefusedWithoutHanging() throws {
+        let note = try write("a.md", "x")
+        let r = MCPNoteCatalog.read(id: MCPNoteCatalog.id(forFileName: "a.md"), notesDir: dir, afterListing: {
+            try? FileManager.default.removeItem(at: note)
+            mkfifo(note.path, 0o600)
+        })
+        XCTAssertEqual(r, .notFound)
+    }
+
+    func testUnsafeComponentsNeverReachOpenat() {
+        for bad in ["", ".hidden.md", "../a.md", "a/b.md", "a\0.md"] {
+            XCTAssertFalse(MCPNoteCatalog.isSafeComponent(bad), bad)
+            if case .refused = MCPNoteCatalog.readFile(dirfd: -1, name: bad, limit: 10, refuseOversize: true) {} else { XCTFail(bad) }
+        }
+    }
+
+    func testNotesFolderThatIsAFileOrMissingYieldsNothing() throws {
+        let f = try write("plain.md", "x")
+        XCTAssertTrue(MCPNoteCatalog.list(notesDir: f, limit: 5).isEmpty)
+        XCTAssertEqual(MCPNoteCatalog.read(id: "0123456789abcdef", notesDir: f), .notFound)
     }
 
     func testMissingFolderIsEmptyNotAnError() {

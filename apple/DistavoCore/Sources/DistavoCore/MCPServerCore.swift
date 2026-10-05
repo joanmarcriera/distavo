@@ -137,7 +137,8 @@ public enum MCPServerCore {
             }
             switch p.readNote(noteID) {
             case .notFound: return toolError(id, "No such note.")
-            case .found(let markdown, _): return toolText(id, markdown)
+            case .found(let markdown): return toolText(id, markdown)
+            case .tooLarge: return toolError(id, "This note is too large to return.")
             }
         case "search_notes":
             guard onlyKeys(args, ["query", "limit"]), let q = args["query"] as? String,

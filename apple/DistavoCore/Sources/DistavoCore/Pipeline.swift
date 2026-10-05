@@ -358,6 +358,9 @@ public enum Pipeline {
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         do {
+            // A re-run must never leave the previous run's timed transcript
+            // behind (#2943): export would pair it with the new note.
+            try? FileManager.default.removeItem(at: TranscriptSegments.url(workDir: workDir, base: base))
             let wavPath = workDir.appendingPathComponent("\(base).wav")
             deps.onPhase?(.converting)
 

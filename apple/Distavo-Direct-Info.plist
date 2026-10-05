@@ -10,6 +10,12 @@
        App Store / Setapp builds. -->
   <key>NSAudioCaptureUsageDescription</key>
   <string>Distavo records the meeting audio playing on this Mac (the other participants) when you choose Record meeting. The audio never leaves your Mac except to the transcription/summary engines you configured.</string>
+  <!-- Reminders export (Vikunja #2941): only asked the first time the user
+       chooses "Send to Reminders". -->
+  <key>NSRemindersFullAccessUsageDescription</key>
+  <string>Distavo adds the action items you choose to your Reminders. Nothing is sent anywhere else.</string>
+  <key>NSRemindersUsageDescription</key>
+  <string>Distavo adds the action items you choose to your Reminders. Nothing is sent anywhere else.</string>
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
   <!-- LocalNetworkPrompt browses this Bonjour type to trigger the macOS Local

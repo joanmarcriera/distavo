@@ -23,5 +23,10 @@
        the System Audio Recording TCC approval (NSAudioCaptureUsageDescription). -->
   <key>com.apple.security.device.audio-input</key>
   <true/>
+  <!-- Reminders export (Vikunja #2941). EventKit has no separate Reminders
+       entitlement: this Calendars key is the one the system checks for both
+       Calendar and Reminders under the App Sandbox. -->
+  <key>com.apple.security.personal-information.calendars</key>
+  <true/>
 </dict>
 </plist>

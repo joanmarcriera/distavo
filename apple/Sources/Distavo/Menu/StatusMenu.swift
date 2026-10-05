@@ -79,6 +79,7 @@ struct StatusMenu: View {
         Button("Compare…") { controller.compareRecordings() }
         Button("Regenerate Note…") { controller.showRegenerateNote() }
         Button("Search Notes…") { controller.showSearchNotes() }
+        Button("Rename Speakers…") { controller.showRenameSpeakers() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)
         Button(controller.hasLastNote && !controller.canExportLastTranscript

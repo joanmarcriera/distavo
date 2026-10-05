@@ -117,3 +117,32 @@ Needs a signed/launched build of each edition (Direct, App Store, Setapp); none 
 4. **URL scheme** (Terminal: `open distavo://...`): `open-latest-note` opens the note; `process-now` scans; `settings` opens Settings; `record/stop` stops. `record/start` MUST show "Start recording?" with Cancel as the default (press Return: nothing starts; Escape cancels), and opening the URL repeatedly while it is up must not stack alerts. Copy a multi-GB video through the Service: the menu bar stays responsive and a notification reports completion; no `.distavo-copy` file remains afterwards. `open "distavo://transcribe?path=/etc/hosts"`, `distavo://bogus` and `distavo://record%2Fstart` do nothing and leave a line in Console (`ignored unknown URL command`).
 5. Confirm `plutil -p Distavo.app/Contents/Info.plist` lists `CFBundleURLTypes` and `NSServices` in every edition.
 6. Existing users: nothing changes until one of these entry points is used (no new config keys, no new entitlements).
+## Rename Speakers (Vikunja #2944, phase 1)
+
+Unit tests cover detection, whole-token rewriting, swap/merge, atomic rollback and the regenerate flow;
+the window and notifications have not been opened in a real app. Use a Debug/signed build, not alongside
+your daily Distavo (shared config and data folder). Prerequisite: a note made on 1.17 (has
+`<base>.segments.json` and `<base>.transcript.clean.txt` in `~/Library/Application Support/Distavo/work`)
+with at least two speakers.
+
+1. Menu bar -> **Rename Speakers…** opens a window listing your notes (newest first); each detected speaker shows
+   its label, turn count, a sample line and a name field.
+2. Rename `SPEAKER_00` to a name and press **Apply**. A notification says speakers were renamed. The note
+   now has the name wherever the label was; `<base>.prev-<date>.md` holds the old note; the work folder has
+   `<base>.speaker-names.json` (`{"names": {"SPEAKER_00": "…"}}`).
+3. Menu -> **Export transcript as…** (SRT or HTML): the speakers carry the new names. **Regenerate Note…**
+   produces a note using the new names.
+4. Open the window again and rename the same speaker a second time: it composes (the sidecar still maps the
+   original `SPEAKER_00` to the latest name). Give two speakers the same name: they merge.
+5. Clearing a name field disables Apply; names with `[` or `]` are refused. Only label positions change (speaker headers, a `## Speakers` list, `**Name:**`, `(Name)`, Owner column / `owner: Name`) plus `SPEAKER_nn` anywhere outside code and links; a sentence that merely mentions the name is left alone, the title and footer too.
+5b. Give two speakers the same name: a confirmation "Merge X into Y? This cannot be undone from the app" appears, and `….pre-merge-…` copies of the transcript and timestamps appear in the work folder. After a plain rename the window offers **Reset to original labels**. With full-text search enabled, searching the new name finds the note.
+6. Open an older note without a segments file or cached transcript: speakers found in the note text are
+   still renamable; the missing files are skipped silently.
+7. Hand-edit the note first, then rename: your edits survive, only the speaker tokens change.
+8. Start a scan and press Apply while it runs: the rename waits for the scan (single-flight).
+9. `SPEAKER_1` vs `SPEAKER_10`: renaming one never touches the other (unit-tested; spot-check in a long note).
+
+10. Type a name: under the list the window shows how many note lines will change with a preview of up to 5; a line like `- Mark: the release date` shows up there so you can cancel.
+11. **Reset to original labels** resets the transcript, timestamps and mapping exactly. The note is restored to its pre-rename state only if you did not edit it since the last rename; otherwise it is left as it is and the notification says so. After a merge the button is replaced by a note and a "Show copies" button.
+
+Phase 2 (voice profiles) is not built; see `docs/voice-profiles-feasibility.md`.

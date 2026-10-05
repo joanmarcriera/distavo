@@ -853,6 +853,83 @@ final class WatcherController: ObservableObject {
         refreshActivity()
     }
 
+    /// "Rename Speakers…" (Vikunja #2944): pick a note, name its speakers.
+    func showRenameSpeakers() {
+        let notesDir = Config.resolvePath(config.notesDir)
+        let workDir = Config.resolvePath(config.workDir)
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: keys)) ?? []
+        let notes = urls
+            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
+            .compactMap { url -> (URL, Date)? in
+                guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
+                      let date = v.contentModificationDate else { return nil }
+                return (url, date)
+            }
+            .sorted { $0.1 > $1.1 }
+            .map { RenamableNote(base: $0.0.deletingPathExtension().lastPathComponent) }
+        let detect: (String) -> [DetectedSpeaker] = { base in
+            SpeakerRename.detectSpeakers(
+                note: try? String(contentsOf: notesDir.appendingPathComponent("\(base).md"), encoding: .utf8),
+                transcript: try? String(contentsOf: Pipeline.cachedTranscriptURL(workDir: workDir, base: base), encoding: .utf8),
+                segments: TranscriptSegments.load(workDir: workDir, base: base))
+        }
+        RenameSpeakersWindowController.shared.show(notes: Array(notes), detect: detect,
+                                                   resetMapping: { SpeakerRename.resetMapping(workDir: workDir, base: $0) },
+                                                   preview: { SpeakerRename.preview(mapping: $1, base: $0, notesDir: notesDir) },
+                                                   mergeCopies: { SpeakerRename.mergeCopies(workDir: workDir, base: $0) },
+                                                   onReset: { [weak self] base in
+            Task { [weak self] in await self?.resetSpeakers(base: base) }
+        }) { [weak self] base, mapping in
+            Task { [weak self] in await self?.renameSpeakers(base: base, mapping: mapping) }
+        }
+    }
+
+    /// "Reset to original labels": transcript, timestamps and mapping are reset exactly;
+    /// the note is restored only if it is untouched since the last rename.
+    func resetSpeakers(base: String) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let notesDir = Config.resolvePath(config.notesDir)
+        let workDir = Config.resolvePath(config.workDir)
+        do {
+            let result = try SpeakerRename.reset(base: base, notesDir: notesDir, workDir: workDir)
+            indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+            log("Reset speaker labels in \(base): \(result.message)")
+            notifier.notify(title: "Speaker labels reset", body: "\(base): \(result.message)")
+        } catch {
+            log("Speaker reset failed: \(base) — \(error.localizedDescription)")
+            notifier.notify(title: "Speakers not reset", body: "\(base): \(error.localizedDescription) Nothing was changed.")
+        }
+        refreshActivity()
+    }
+
+    /// Apply a speaker rename under the same single-flight lock as the scanner,
+    /// so it never rewrites a note while a scan or regenerate is writing it.
+    func renameSpeakers(base: String, mapping: [String: String]) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let notesDir = Config.resolvePath(config.notesDir)
+        let workDir = Config.resolvePath(config.workDir)
+        do {
+            let result = try SpeakerRename.apply(mapping: mapping, base: base, notesDir: notesDir, workDir: workDir)
+            if !result.changedFiles.isEmpty {
+                // Refresh the full-text index (#2942); a no-op unless search is enabled.
+                indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+            }
+            log("Renamed speakers in \(base): \(mapping.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: ", "))")
+            notifier.notify(title: result.changedFiles.isEmpty ? "Nothing to rename" : "✅ Speakers renamed",
+                            body: result.changedFiles.isEmpty ? "\(base) has no mention of those speakers."
+                                                              : "\(base) — the previous note was kept.")
+        } catch {
+            log("Speaker rename failed: \(base) — \(error.localizedDescription)")
+            notifier.notify(title: "Speakers not renamed", body: "\(base): \(error.localizedDescription) Nothing was changed.")
+        }
+        refreshActivity()
+    }
+
     func openLastNote() {
         guard let note = lastDone?.note, FileManager.default.fileExists(atPath: note.path) else {
             notifier.notify(title: "No note yet", body: "Process a recording first.")

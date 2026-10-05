@@ -198,8 +198,12 @@ extension Pipeline {
         let noteLanguage = resolveNoteLanguage(
             config: cfg, workDir: workDir, base: base,
             dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage)
+        // Speakers renamed after transcription (#2944): the transcript carries the
+        // new names, so the owner's label and the participants hint follow them.
+        let renamed = SpeakerNames.regenerateContext(
+            userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
         let context = NoteContext(
-            noteOwner: cfg.noteOwner, userSpeaker: cfg.userSpeaker, participants: participants,
+            noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
             meetingDate: sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             customInstruction: options.customInstruction,

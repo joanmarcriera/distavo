@@ -19,41 +19,72 @@ public enum NetworkScope {
     /// hosts return false. Pure string check, no DNS. (Kept as the fast path and
     /// for callers that must stay synchronous and network-free.)
     public static func isLocalNetworkHost(_ urlString: String) -> Bool {
-        guard let host = URLComponents(string: urlString)?.host, !host.isEmpty else { return false }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return false }
+        guard let host = hostOf(urlString), !host.isEmpty else { return false }
+        if host == "localhost" { return false }
+        // An IP literal is judged by its numeric range ONLY. Prefix tests on the raw
+        // string would also match public names like `10.evil.example` (security fix).
+        if let v4 = ipv4Bytes(host) { return v4[0] != 127 && isPrivateAddress(host) }
+        if ipv6Bytes(host) != nil { return isPrivateAddress(host) }
         if host.hasSuffix(".local") { return true }
-        if host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
-        if host.hasPrefix("172.") {
-            let parts = host.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) { return true }
-        }
         if !host.contains(".") { return true }  // bare hostname → likely a LAN name
         return false
+    }
+
+    /// The URL's host without IPv6 brackets or a trailing dot, lower-cased.
+    static func hostOf(_ urlString: String) -> String? {
+        guard var host = URLComponents(string: urlString)?.host else { return nil }
+        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
+        if host.hasSuffix(".") { host.removeLast() }
+        return host
+    }
+
+    /// Strict dotted-quad parse (`inet_pton`): "10.evil.example" and "10.1" are nil.
+    static func ipv4Bytes(_ s: String) -> [UInt8]? {
+        var addr = in_addr()
+        guard inet_pton(AF_INET, s, &addr) == 1 else { return nil }
+        return withUnsafeBytes(of: &addr) { Array($0) }
+    }
+
+    /// IPv6 literal (zone id stripped) as 16 bytes.
+    static func ipv6Bytes(_ s: String) -> [UInt8]? {
+        let bare = s.split(separator: "%").first.map(String.init) ?? s
+        var addr = in6_addr()
+        guard inet_pton(AF_INET6, bare, &addr) == 1 else { return nil }
+        return withUnsafeBytes(of: &addr) { Array($0) }
+    }
+
+    /// The IPv4 bytes of an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`), else nil.
+    private static func mappedV4(_ v6: [UInt8]) -> [UInt8]? {
+        guard v6[0..<10].allSatisfy({ $0 == 0 }), v6[10] == 0xff, v6[11] == 0xff else { return nil }
+        return Array(v6[12..<16])
+    }
+
+    /// True for a numeric loopback address (`127/8`, `::1`, `::ffff:127.x`).
+    public static func isLoopbackAddress(_ ip: String) -> Bool {
+        if let v4 = ipv4Bytes(ip) { return v4[0] == 127 }
+        guard let v6 = ipv6Bytes(ip) else { return false }
+        if v6 == [UInt8](repeating: 0, count: 15) + [1] { return true }
+        return mappedV4(v6)?[0] == 127
     }
 
     /// True if a numeric IP is in a private / link-local range that requires the
     /// Local Network permission. **Loopback (`127/8`, `::1`) returns false** — it
     /// needs no permission.
     public static func isPrivateAddress(_ ip: String) -> Bool {
-        // IPv4
-        let octets = ip.split(separator: ".")
-        if octets.count == 4 {
-            let nums = octets.compactMap { Int($0) }
-            if nums.count == 4, nums.allSatisfy({ (0...255).contains($0) }) {
-                switch (nums[0], nums[1]) {
-                case (10, _): return true
-                case (172, 16...31): return true
-                case (192, 168): return true
-                case (169, 254): return true          // link-local
-                default: return false                  // incl. 127.x loopback, public
-                }
+        func privateV4(_ o: [UInt8]) -> Bool {
+            switch (o[0], o[1]) {
+            case (10, _): return true
+            case (172, 16...31): return true
+            case (192, 168): return true
+            case (169, 254): return true          // link-local
+            default: return false                  // incl. 127.x loopback, public
             }
         }
-        // IPv6 (strip zone id, lowercase)
-        let v6 = ip.split(separator: "%").first.map(String.init)?.lowercased() ?? ip.lowercased()
-        if v6 == "::1" { return false }             // loopback
-        if v6.hasPrefix("fe80") { return true }     // link-local
-        if v6.hasPrefix("fc") || v6.hasPrefix("fd") { return true }  // ULA fc00::/7
+        if let v4 = ipv4Bytes(ip) { return privateV4(v4) }
+        guard let v6 = ipv6Bytes(ip) else { return false }
+        if let mapped = mappedV4(v6) { return privateV4(mapped) }
+        if v6[0] == 0xfe && (v6[1] & 0xc0) == 0x80 { return true }   // link-local fe80::/10
+        if (v6[0] & 0xfe) == 0xfc { return true }                      // ULA fc00::/7
         return false
     }
 
@@ -84,9 +115,12 @@ public enum NetworkScope {
     public static func isLocalOrResolvesLocal(_ urlString: String,
                                               resolver: HostResolver = systemResolver) -> Bool {
         if isLocalNetworkHost(urlString) { return true }
-        guard let host = URLComponents(string: urlString)?.host, !host.isEmpty,
-              host != "localhost", host != "127.0.0.1", host != "::1" else { return false }
-        return resolver(host).contains(where: isPrivateAddress)
+        guard let host = hostOf(urlString), !host.isEmpty, host != "localhost",
+              ipv4Bytes(host) == nil, ipv6Bytes(host) == nil else { return false }
+        // EVERY address must be private: a name that also resolves to a public
+        // address can send the request off the LAN.
+        let ips = resolver(host)
+        return !ips.isEmpty && ips.allSatisfy(isPrivateAddress)
     }
 
     /// True if any configured server is on the local network. The WhisperX URL
@@ -104,11 +138,9 @@ public enum NetworkScope {
     /// unreachable one usually just means nothing is installed/running on this
     /// Mac — an expected state, not an app failure.
     public static func isLoopbackHost(_ urlString: String) -> Bool {
-        guard var host = URLComponents(string: urlString)?.host, !host.isEmpty else { return false }
-        // Depending on SDK, an IPv6 literal may keep its brackets ("[::1]").
-        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if host == "localhost" || host == "::1" { return true }
-        return host.hasPrefix("127.")
+        guard let host = hostOf(urlString), !host.isEmpty else { return false }
+        if host == "localhost" { return true }
+        return isLoopbackAddress(host)   // IP literals only: `127.evil.example` is NOT loopback
     }
 
     /// How Test Connections should present an endpoint's result. Distinguishes

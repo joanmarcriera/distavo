@@ -74,8 +74,15 @@ public enum NetworkScope {
         return raw.isEmpty ? nil : ParsedHost(name: raw, zone: zone, bracketed: bracketed)
     }
 
-    /// The validated host name (see `parseHost`), or nil.
-    static func hostOf(_ urlString: String) -> String? { parseHost(urlString)?.name }
+    /// Host name for CLASSIFICATION-ONLY callers (permission pre-warning, diagnostics): the
+    /// strict `parseHost`, but userinfo is stripped first so `http://user:pw@192.168.0.5` is
+    /// classified exactly as the shipped app did. Ask never uses this — it uses the strict
+    /// parse, which rejects userinfo.
+    static func hostOf(_ urlString: String) -> String? {
+        guard var c = URLComponents(string: urlString) else { return nil }
+        c.user = nil; c.password = nil
+        return parseHost(c)?.name
+    }
 
     /// Numeric addresses `host` denotes the way the socket layer reads it
     /// (`getaddrinfo` with AI_NUMERICHOST): dotted quads AND the legacy decimal /
@@ -87,32 +94,41 @@ public enum NetworkScope {
         var result: UnsafeMutablePointer<addrinfo>?
         guard getaddrinfo(host, nil, &hints, &result) == 0 else { return nil }
         defer { if let result { freeaddrinfo(result) } }
-        let out = addressStrings(result)
-        return out.isEmpty ? nil : out
+        guard let out = addressStrings(result), !out.isEmpty else { return nil }
+        return out
     }
 
-    /// Numeric strings for a `getaddrinfo` result chain, trusting NOTHING in it: entries with
-    /// a nil `ai_addr`, a family other than IPv4/IPv6, or an `ai_addrlen` too short for that
-    /// family are skipped (never read), conversion failures are skipped, and an empty or nil
-    /// chain yields `[]` (callers refuse an empty result). The caller owns `freeaddrinfo`.
-    static func addressStrings(_ head: UnsafeMutablePointer<addrinfo>?) -> [String] {
+    /// What the system resolver returns when its answer could not be fully read and
+    /// classified. It is not an IP, so every classifier refuses it ("cannot verify").
+    static let unverifiableAnswer = "unverifiable-resolver-answer"
+
+    /// Most entries of a `getaddrinfo` chain that are read; a longer chain is not "mostly fine".
+    static let maxChainEntries = 64
+
+    /// Numeric strings for a `getaddrinfo` result chain, trusting NOTHING in it and failing
+    /// CLOSED: returns nil ("cannot verify") when ANY entry cannot be fully read — a nil
+    /// `ai_addr`, a family other than IPv4/IPv6, an `ai_addrlen` too short for its family, a
+    /// failed conversion — or when the chain is longer than `maxChainEntries` (or cyclic), so
+    /// an unvalidated remainder is never silently accepted. An empty or nil chain is `[]`
+    /// (callers refuse an empty result). The caller owns `freeaddrinfo`.
+    static func addressStrings(_ head: UnsafeMutablePointer<addrinfo>?) -> [String]? {
         var out: [String] = []
         var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
         var node = head
-        var hops = 0
-        while let n = node, hops < 64 {   // bounded: a corrupt (cyclic) chain cannot spin forever
-            hops += 1
-            defer { node = n.pointee.ai_next }
-            guard let addr = n.pointee.ai_addr else { continue }
+        var seen = 0
+        while let n = node {
+            seen += 1
+            if seen > maxChainEntries { return nil }
+            guard let addr = n.pointee.ai_addr else { return nil }
             let len = Int(n.pointee.ai_addrlen)
             switch n.pointee.ai_family {
-            case AF_INET: guard len >= MemoryLayout<sockaddr_in>.size else { continue }
-            case AF_INET6: guard len >= MemoryLayout<sockaddr_in6>.size else { continue }
-            default: continue
+            case AF_INET: guard len >= MemoryLayout<sockaddr_in>.size else { return nil }
+            case AF_INET6: guard len >= MemoryLayout<sockaddr_in6>.size else { return nil }
+            default: return nil
             }
-            if getnameinfo(addr, socklen_t(len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
-                out.append(String(cString: buf))
-            }
+            guard getnameinfo(addr, socklen_t(len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
+            out.append(String(cString: buf))
+            node = n.pointee.ai_next
         }
         return out
     }
@@ -176,7 +192,9 @@ public enum NetworkScope {
         var result: UnsafeMutablePointer<addrinfo>?
         guard getaddrinfo(host, nil, &hints, &result) == 0 else { return [] }
         defer { if let result { freeaddrinfo(result) } }
-        return addressStrings(result)
+        // An answer that cannot be fully read is reported as an unverifiable marker (never a
+        // partial list): it is not an IP, so the Ask guard refuses the whole resolution.
+        return addressStrings(result) ?? [unverifiableAnswer]
     }
 
     /// True if the URL is local by name, or resolves to a private address. Short-

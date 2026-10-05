@@ -76,6 +76,7 @@ struct StatusMenu: View {
         }
 
         Button("Process now") { controller.processNow() }
+        Button("Processing Queue…") { controller.showProcessingQueue() }
         Button("Process a recording with…") { controller.processRecordingWith() }
         Button("Compare…") { controller.compareRecordings() }
         Button("Regenerate Note…") { controller.showRegenerateNote() }

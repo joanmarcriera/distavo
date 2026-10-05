@@ -51,7 +51,7 @@ final class WatcherController: ObservableObject {
     @Published private(set) var modelProgress: String?
 
     private(set) var config: Config
-    private var deps: PipelineDeps
+    private(set) var deps: PipelineDeps   // read by WatcherController+Queue
     private let notifier = Notifier()
     private var recordingCancellable: AnyCancellable?
     private var silenceCancellable: AnyCancellable?
@@ -82,15 +82,17 @@ final class WatcherController: ObservableObject {
     private let needsOnboarding: Bool
     private let activityLog = ActivityLog()
 
-    private var isScanning = false
-    private var processingActive = false
+    private(set) var isScanning = false   // read by +Queue; written only here (see runExclusivePass)
+    private(set) var processingActive = false
     /// Which sub-phase the current scan is in (loading vs transcribing); only
     /// meaningful while `processingActive`.
-    private var processingPhase: IconState = .loading
+    private(set) var processingPhase: IconState = .loading
     private var unseenDone = false
     private var deferredBases: Set<String> = []
     private var lastDone: (base: String, note: URL?, transcript: URL?)?
     private var scanTask: Task<Void, Never>?
+    /// Queue window model (#2952); all logic lives in WatcherController+Queue.swift.
+    let queueModel = QueueModel()
 
     static let intervalChoices = [10, 20, 60, 300]
     /// "60s" → "1m"; shared by the menu and the settings picker.
@@ -141,6 +143,7 @@ final class WatcherController: ObservableObject {
     /// Update the current processing sub-phase from a pipeline stage boundary.
     private func handlePhase(_ phase: ProcessingPhase) {
         guard processingActive else { return }
+        queueModel.phase(phase)
         processingPhase = (phase == .converting) ? .loading : .transcribing
         refreshActivity()
     }
@@ -234,7 +237,7 @@ final class WatcherController: ObservableObject {
         reconcileSearchIndex()   // #2942, background
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
-            if !isPaused { await scanOnce() }
+            if !isPaused { await scanOnce(.automatic) }
             try? await Task.sleep(nanoseconds: UInt64(max(1, watchIntervalSeconds)) * 1_000_000_000)
         }
     }
@@ -264,13 +267,13 @@ final class WatcherController: ObservableObject {
     /// Open the timestamped activity log in the user's default text viewer.
     func openLog() { NSWorkspace.shared.open(activityLog.url) }
 
-    private func log(_ message: String) {
+    func log(_ message: String) {
         let entry = activityLog.append(message)
         recentActivity.append(entry)
         if recentActivity.count > 12 { recentActivity.removeFirst(recentActivity.count - 12) }
     }
 
-    private func refreshActivity() {
+    func refreshActivity() {
         if capture.isRecording {
             iconState = capture.silenceNotice != nil ? .recordingSilent : .recording
         }
@@ -281,7 +284,7 @@ final class WatcherController: ObservableObject {
 
     // MARK: Scanning
 
-    private func store() -> DistavoState.Store? {
+    func store() -> DistavoState.Store? {
         let workDir = Config.resolvePath(config.workDir)
         let notesDir = Config.resolvePath(config.notesDir)
         return try? DistavoState.Store(
@@ -292,7 +295,7 @@ final class WatcherController: ObservableObject {
 
     /// Re-read the failed set from disk so the menu reflects reality rather than
     /// only what happened since launch.
-    private func refreshFailedRecordings() {
+    func refreshFailedRecordings() {
         failedRecordings = store()?.failedBases() ?? []
         tooShortRecordings = store()?.tooShortBases() ?? []
     }
@@ -406,8 +409,12 @@ final class WatcherController: ObservableObject {
 
     /// Process all pending recordings (self-serializing so overlapping timer
     /// ticks and "Process now" can't double-process).
-    func scanOnce() async {
+    /// `trigger`: only the timer is `.automatic`; every user-initiated entry point
+    /// (Process now, Shortcuts/URL, Finder Service, Retry failed...) runs even while
+    /// "Pause watching" is on - pause holds automatic work only (`PausePolicy`).
+    func scanOnce(_ trigger: ScanTrigger = .userInitiated) async {
         if isScanning { return }
+        guard PausePolicy.mayStart(trigger, paused: isPaused) else { return }
         isScanning = true
         defer { isScanning = false }
 
@@ -423,13 +430,30 @@ final class WatcherController: ObservableObject {
         processingActive = true
         processingPhase = .loading
         refreshActivity()
-        for path in pending {
-            status = "Processing \(path.lastPathComponent)…"
-            log("Processing \(path.lastPathComponent)")
-            let result = await Pipeline.processOne(path: path, config: cfg, deps: deps)
-            handle(result, sourcePath: path)
-        }
+        await runQueueLoop(pending, config: cfg, trigger: trigger)   // sequential, pause-aware (+Queue)
         processingActive = false
+        if isPaused { status = "Paused" }   // a pause switched on mid-pass must not leave "Last note: …"
+        refreshFailedRecordings()
+        refreshActivity()
+    }
+
+    /// Helpers for WatcherController+Queue (it cannot write the private(set) state).
+    func setStatus(_ text: String) { status = text }
+
+    /// One processing pass under the single-flight lock for the +Queue extension
+    /// (waits for a running scan, like `runVariant`). `onlyIf` is re-checked once
+    /// the lock is held, so a pass with nothing to do never flashes the icon.
+    func runExclusivePass(onlyIf: () -> Bool, _ body: () async -> Void) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        guard onlyIf() else { return }
+        processingActive = true
+        processingPhase = .loading
+        refreshActivity()
+        await body()
+        processingActive = false
+        if isPaused { status = "Paused" }
         refreshFailedRecordings()
         refreshActivity()
     }
@@ -439,7 +463,8 @@ final class WatcherController: ObservableObject {
     /// (`runVariant` below) so a retry action's re-run never re-triggers
     /// itself — `runWhenDoneActions` also guards on `result.base` containing
     /// "@" for the same reason, belt and braces.
-    private func handle(_ result: ProcessResult, sourcePath: URL? = nil) {
+    func handle(_ result: ProcessResult, sourcePath: URL? = nil) {
+        queueModel.finish(result)
         switch result.status {
         case .done:
             status = "Last note: \(result.base)"
@@ -548,7 +573,7 @@ final class WatcherController: ObservableObject {
     /// The model + language sheet. Built-in engine: every catalog model plus
     /// Automatic; WhisperX server: its model sizes. Language: Automatic (the
     /// router picks) / Auto-detect within the model / a fixed language.
-    private func chooseVariant(for url: URL) -> ProcessVariant? {
+    func chooseVariant(for url: URL) -> ProcessVariant? {
         var chosen = config.transcribe
         let embedded = chosen.backend == "embedded" && HardwareProbe.supportsEmbeddedTranscription
 
@@ -619,13 +644,14 @@ final class WatcherController: ObservableObject {
     /// Run one variant under the same single-flight lock as the scanner, so
     /// it never overlaps a timer tick (the built-in engines share memory and
     /// the model folder).
-    private func runVariant(_ variant: ProcessVariant, on url: URL) async {
+    func runVariant(_ variant: ProcessVariant, on url: URL) async {
         while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
         isScanning = true
         defer { isScanning = false }
         let cfg = config
         processingActive = true
         processingPhase = .loading
+        queueBeginVariant(variant, on: url)
         status = "Processing \(url.lastPathComponent) with \(variant.suffix)…"
         log("Processing \(url.lastPathComponent) with \(variant.suffix)")
         refreshActivity()

@@ -320,7 +320,33 @@ public enum TranscriptEditStore {
 
     public struct StoreError: Error, LocalizedError, Equatable {
         public let message: String
+        /// True when the files on disk are not what the viewer loaded.
+        public var changedOnDisk = false
         public var errorDescription: String? { message }
+        public init(message: String, changedOnDisk: Bool = false) {
+            self.message = message; self.changedOnDisk = changedOnDisk
+        }
+    }
+
+    /// The bytes of the sidecar and cleaned transcript as the viewer read them.
+    /// `save`/`revert` refuse when the disk no longer matches (another feature
+    /// - a speaker rename, a re-run - rewrote them), so stale content is never
+    /// written back and the `.orig` snapshot is never taken from a changed file.
+    public struct Fingerprint: Equatable, Sendable {
+        var segments: Data?
+        var clean: Data?
+    }
+
+    public static func fingerprint(workDir: URL, base: String) -> Fingerprint {
+        Fingerprint(segments: try? Data(contentsOf: TranscriptSegments.url(workDir: workDir, base: base)),
+                    clean: try? Data(contentsOf: Pipeline.cachedTranscriptURL(workDir: workDir, base: base)))
+    }
+
+    private static func verify(_ expected: Fingerprint?, workDir: URL, base: String) throws {
+        guard let expected else { return }
+        if fingerprint(workDir: workDir, base: base) != expected {
+            throw StoreError(message: "the transcript changed on disk since it was opened", changedOnDisk: true)
+        }
     }
 
     public typealias Writer = (Data, URL) throws -> Void
@@ -355,7 +381,8 @@ public enum TranscriptEditStore {
     /// Persist `edited` as the transcript for `base`, keeping the pristine
     /// copies on first use. Does not touch the note.
     public static func save(_ edited: TranscriptSegments, workDir: URL, base: String,
-                            writer: Writer = atomicWriter) throws {
+                            expecting: Fingerprint? = nil, writer: Writer = atomicWriter) throws {
+        try verify(expecting, workDir: workDir, base: base)
         let segURL = TranscriptSegments.url(workDir: workDir, base: base)
         let cleanURL = Pipeline.cachedTranscriptURL(workDir: workDir, base: base)
         guard let currentSegments = try? Data(contentsOf: segURL) else {
@@ -382,7 +409,9 @@ public enum TranscriptEditStore {
 
     /// Put the pristine transcript back. The originals stay, so the transcript
     /// can be edited and reverted again.
-    public static func revert(workDir: URL, base: String, writer: Writer = atomicWriter) throws {
+    public static func revert(workDir: URL, base: String, expecting: Fingerprint? = nil,
+                              writer: Writer = atomicWriter) throws {
+        try verify(expecting, workDir: workDir, base: base)
         guard let origSegments = try? Data(contentsOf: originalSegmentsURL(workDir: workDir, base: base)) else {
             throw StoreError(message: "no original transcript was kept for \(base)")
         }

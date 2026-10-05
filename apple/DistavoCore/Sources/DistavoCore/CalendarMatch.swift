@@ -59,13 +59,19 @@ public enum CalendarMatcher {
     /// Required fraction of the SHORTER of (recording, event) that must overlap.
     public static let minOverlapFraction = 0.5
 
+    /// Minimum overlap / union (Jaccard) of recording and event. A long block
+    /// (a 9-17 "Focus" slot) that merely contains the recording scores near 0
+    /// and is never used, even when it is the only candidate; the real
+    /// 30-minute meeting recorded with a couple of minutes of slack scores ~0.85.
+    public static let minScore = 0.25
+
     /// The best event for a recording spanning `start...end`, or nil.
     ///
     /// Ignored: all-day events, declined/cancelled events, empty titles, and
     /// events from calendars outside `calendarIDs` (empty = all). A qualifying
-    /// event overlaps at least `max(5 min, 50 % of the shorter duration)`.
-    /// Among those the largest overlap wins; a tie goes to the event whose
-    /// start is closest to the recording's start.
+    /// event overlaps at least `max(5 min, 50 % of the shorter duration)` AND
+    /// scores at least `minScore`. The best score (overlap / union) wins; a
+    /// tie goes to the event whose start is closest to the recording's start.
     public static func best(recordingStart start: Date, recordingEnd end: Date,
                             candidates: [CalendarCandidate],
                             calendarIDs: [String] = [],
@@ -73,7 +79,7 @@ public enum CalendarMatcher {
                             maxAttendees: Int = CalendarAttendees.defaultCap) -> CalendarMatch? {
         let recDuration = end.timeIntervalSince(start)
         guard recDuration > 0 else { return nil }
-        var best: (c: CalendarCandidate, overlap: TimeInterval, startGap: TimeInterval)?
+        var best: (c: CalendarCandidate, score: Double, startGap: TimeInterval)?
         for c in candidates {
             guard !c.isAllDay, c.status == .normal,
                   CalendarTitle.displayTitle(c.title) != nil,
@@ -83,13 +89,15 @@ public enum CalendarMatcher {
             let overlap = min(end, c.end).timeIntervalSince(max(start, c.start))
             let needed = max(minOverlapSeconds, minOverlapFraction * min(recDuration, evDuration))
             guard overlap >= needed else { continue }
+            let score = overlap / (recDuration + evDuration - overlap)
+            guard score >= minScore else { continue }
             let gap = abs(c.start.timeIntervalSince(start))
             if let b = best {
-                if overlap > b.overlap || (overlap == b.overlap && gap < b.startGap) {
-                    best = (c, overlap, gap)
+                if score > b.score + 1e-9 || (abs(score - b.score) <= 1e-9 && gap < b.startGap) {
+                    best = (c, score, gap)
                 }
             } else {
-                best = (c, overlap, gap)
+                best = (c, score, gap)
             }
         }
         guard let chosen = best?.c, let title = CalendarTitle.displayTitle(chosen.title) else { return nil }
@@ -105,13 +113,22 @@ public enum CalendarTitle {
     /// UTF-8 byte cap for the title part of a file name.
     public static let maxFileNameBytes = 120
     /// Character cap for the note's `# ` heading.
-    public static let maxDisplayChars = 200
+    public static let maxDisplayChars = 120
 
-    /// The title as shown in the note heading: control characters and
-    /// newlines dropped, whitespace collapsed, trimmed, capped. nil if empty.
+    /// The title as shown in the note heading. Calendar titles are written by
+    /// whoever sent the invitation, so this is deliberately strict: control
+    /// characters and newlines dropped, HTML tags removed, Markdown links and
+    /// images reduced to their text, backticks and angle brackets removed,
+    /// leading `#` stripped, whitespace collapsed, capped. nil if nothing
+    /// is left. The title is used ONLY for this heading and the file name; it
+    /// is never put into the model prompt.
     public static func displayTitle(_ raw: String) -> String? {
-        let flat = raw.unicodeScalars.map { (isControl($0) ? " " : String($0)) }.joined()
-        let collapsed = flat.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        var t = raw.unicodeScalars.map { (isControl($0) ? " " : String($0)) }.joined()
+        t = t.replacingOccurrences(of: #"<[^>]*>"#, with: "", options: .regularExpression)
+        t = t.replacingOccurrences(of: #"!?\[([^\]]*)\]\([^)]*\)"#, with: "$1", options: .regularExpression)
+        for c in ["<", ">", "`", "[", "]"] { t = t.replacingOccurrences(of: c, with: "") }
+        var collapsed = t.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        while collapsed.hasPrefix("#") { collapsed = String(collapsed.dropFirst()).trimmingCharacters(in: .whitespaces) }
         let capped = String(collapsed.prefix(maxDisplayChars)).trimmingCharacters(in: .whitespaces)
         return capped.isEmpty ? nil : capped
     }
@@ -129,7 +146,12 @@ public enum CalendarTitle {
     /// caller then keeps the original name).
     public static func fileNameComponent(_ raw: String) -> String? {
         guard let display = displayTitle(raw) else { return nil }
-        var s = String(display.map { "/\\:".contains($0) ? "-" : $0 })
+        // ASCII only, so `DistavoState.baseFor` keeps the words readable
+        // (accented letters would each become `_`). Titles with no Latin
+        // letters or digits (CJK, Hebrew, emoji only) give nil: no rename.
+        let folded = asciiFolded(display)
+        guard folded.contains(where: { $0.isASCII && ($0.isLetter || $0.isNumber) }) else { return nil }
+        var s = String(folded.map { "/\\:".contains($0) ? "-" : $0 })
         s = trimEdges(s)
         var out = "", bytes = 0
         for ch in s {
@@ -139,6 +161,29 @@ public enum CalendarTitle {
         }
         out = trimEdges(out)
         return out.isEmpty ? nil : out
+    }
+
+    /// Diacritics and typographic punctuation to plain ASCII: `ó`→`o`, `ñ`→`n`,
+    /// `ç`→`c`, `l·l`→`ll`, `’` removed, `'` → space, dashes → `-`, `ß`→`ss`.
+    /// Whatever has no ASCII equivalent (CJK, emoji, …) is dropped.
+    static func asciiFolded(_ s: String) -> String {
+        let table: [Character: String] = [
+            "ß": "ss", "æ": "ae", "Æ": "AE", "œ": "oe", "Œ": "OE", "ø": "o", "Ø": "O", "đ": "d", "Đ": "D",
+            "ł": "l", "Ł": "L", "ŀ": "l", "Ŀ": "L", "ð": "d", "Ð": "D", "þ": "th", "Þ": "Th", "ı": "i",
+            "·": "", "\u{2019}": "", "\u{2018}": "", "\u{02BC}": "", "\u{201C}": "", "\u{201D}": "",
+            "\u{201E}": "", "'": " ", "\u{2013}": "-", "\u{2014}": "-", "\u{2212}": "-", "\u{2010}": "-",
+            "\u{2011}": "-", "\u{2012}": "-", "\u{2015}": "-", "\u{00A0}": " ", "\u{2026}": "...",
+        ]
+        var out = ""
+        for ch in s {
+            if let m = table[ch] { out += m; continue }
+            for u in String(ch).decomposedStringWithCanonicalMapping.unicodeScalars {
+                if u.isASCII { out.unicodeScalars.append(u) }
+                else if let m = table[Character(u)] { out += m }
+                // combining marks and everything else without an ASCII form: dropped
+            }
+        }
+        return out.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
 
     private static func trimEdges(_ s: String) -> String {
@@ -161,11 +206,10 @@ public enum CalendarTitle {
     }
 
     /// The base `DistavoState.baseFor` will derive for `<stem>.<ext>` placed
-    /// directly in the recordings folder (spaces become `_`, etc.). Foundation's
-    /// file URLs hand `baseFor` the canonically *decomposed* name, so an accented
-    /// letter becomes its base letter plus `_` (Reunio_), hence the NFD step.
+    /// directly in the recordings folder (spaces become `_`, etc.). The stem is
+    /// ASCII (`fileNameComponent` folds it), so this is exactly what `baseFor` gives.
     public static func predictedBase(stem: String) -> String {
-        DistavoState.sanitizeJoined(stem.decomposedStringWithCanonicalMapping)
+        DistavoState.sanitizeJoined(stem)
     }
 
     /// Replace the note's first `# ` heading with the event title. A note
@@ -184,7 +228,7 @@ public enum CalendarTitle {
 
 public enum CalendarAttendees {
     public static let defaultCap = 15
-    static let maxNameChars = 80
+    static let maxNameChars = 60
 
     /// Display names only: `mailto:` stripped, e-mail-only entries skipped
     /// (names are never invented from an address), de-duplicated, the note
@@ -192,16 +236,42 @@ public enum CalendarAttendees {
     public static func clean(_ names: [String], owner: String, cap: Int = defaultCap) -> [String] {
         var seen = Set<String>(), out: [String] = []
         for raw in names {
-            var name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if name.lowercased().hasPrefix("mailto:") { name = String(name.dropFirst(7)) }
-            name = String(name.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-                .joined(separator: " ").prefix(maxNameChars))
-            guard !name.isEmpty, !name.contains("@"), !isOwner(name, owner: owner) else { continue }
+            guard let name = plausibleName(raw), !isOwner(name, owner: owner) else { continue }
             let key = fold(name)
             if seen.insert(key).inserted { out.append(name) }
             if out.count >= cap { break }
         }
         return out
+    }
+
+    public static let maxNameWords = 6
+    private static let injectionWords = ["ignore previous", "ignore all", "disregard", "instruction", "system prompt",
+                                         "you are", "assistant", "as an ai"]
+
+    /// An attendee name safe to hand to the model: the invitation's sender
+    /// wrote it, so it must look like a person's display name or it is dropped.
+    /// Single line, control characters and `{}<>[]` and backticks removed, at
+    /// most `maxNameChars` characters and `maxNameWords` words, at least one
+    /// letter; anything with a URL, `@`, `#`, `*`, `|` or a phrase that reads
+    /// like an instruction is rejected outright (not truncated). `mailto:` is
+    /// stripped first, and an address-only entry is skipped.
+    static func plausibleName(_ raw: String) -> String? {
+        var name = raw.unicodeScalars.map { u -> String in
+            (u.value < 0x20 || u.value == 0x7F || (0x80...0x9F).contains(u.value)
+                || u.properties.generalCategory == .format || u == "\u{2028}" || u == "\u{2029}") ? " " : String(u)
+        }.joined()
+        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name.lowercased().hasPrefix("mailto:") { name = String(name.dropFirst(7)) }
+        for c in ["{", "}", "<", ">", "[", "]", "`"] { name = name.replacingOccurrences(of: c, with: "") }
+        let words = name.split(whereSeparator: { $0.isWhitespace })
+        name = words.joined(separator: " ")
+        let lower = name.lowercased()
+        guard !name.isEmpty, name.count <= maxNameChars, words.count <= maxNameWords,
+              name.contains(where: { $0.isLetter }),
+              !name.contains("@"), !lower.contains("http"), !lower.contains("://"), !lower.contains("www."),
+              !lower.contains(".com"), !name.contains(where: { "#*|\\".contains($0) }),
+              !injectionWords.contains(where: { lower.contains($0) }) else { return nil }
+        return name
     }
 
     private static func fold(_ s: String) -> String {
@@ -288,8 +358,12 @@ public enum CalendarLookup {
                         deps: PipelineDeps) async -> CalendarMatch? {
         guard config.calendar.enabled else { return nil }
         if let stored = CalendarMatchStore.load(workDir: workDir, base: sourceBase) { return stored }
+        // Only with trustworthy recording-time evidence (the recorder's own file
+        // name or the media's embedded creation date); a file's creation or
+        // modification date is usually the copy/download time, so without
+        // evidence there is no lookup and no sidecar.
         guard let lookup = deps.calendarLookup,
-              let start = Pipeline.meetingDate(for: path),
+              let start = await deps.recordingStart(path),
               let seconds = await deps.audioDurationSeconds(path), seconds > 0 else { return nil }
         let end = start.addingTimeInterval(seconds)
         let candidates = await lookup(start, end)
@@ -310,7 +384,9 @@ public enum CalendarLookup {
     /// The participants text for the prompt, calendar attendees merged in.
     static func participants(_ existing: String?, match: CalendarMatch?, config: Config) -> String? {
         guard let match, config.calendar.attendeesAsParticipants else { return existing }
-        return CalendarAttendees.mergedParticipants(existing: existing, attendees: match.attendees)
+        // Re-sanitised: the sidecar is data on disk, never trusted to be clean.
+        return CalendarAttendees.mergedParticipants(
+            existing: existing, attendees: CalendarAttendees.clean(match.attendees, owner: ""))
     }
 }
 
@@ -344,21 +420,40 @@ public enum CalendarRename {
         return nil
     }
 
-    /// Move every top-level work-dir file keyed on `oldBase` (`<oldBase>.*` -
-    /// enumerated, not a fixed list) to `newBase`, and point a bookmarks
-    /// sidecar's `source` at the new file name. All-or-nothing: on any failure
-    /// everything already moved is moved back and the error is thrown.
-    /// `move` is injectable for failure tests.
+    /// Test seams for the steps of `moveSidecars`.
+    public struct Steps {
+        public var copy: (URL, URL) throws -> Void = { try FileManager.default.copyItem(at: $0, to: $1) }
+        /// Renames the audio `.part` (the commit point).
+        public var commit: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+        /// Runs right after a successful commit, before the old sidecars are removed.
+        public var afterCommit: () -> Void = {}
+        public init() {}
+    }
+
+    /// Re-key a recording that is still an audio `.part` from `oldBase` to
+    /// `newBase`: every top-level work-dir file `<oldBase>.*` (enumerated, not a
+    /// fixed list) is COPIED to the new base, a bookmarks sidecar's `source` is
+    /// pointed at the new file name, then the audio part is renamed (the single
+    /// commit point), and only then are the old sidecars removed.
+    ///
+    /// Crash-safe by construction: at every instant the `.part` on disk has a
+    /// complete sidecar set under ITS OWN base, so startup recovery
+    /// (`MeetingRecorder.recoverOrphanedRecordings`, which finalises a
+    /// `.wav.part` under the part's own name) never loses participants, notes
+    /// or key moments. A crash before the commit leaves harmless stray copies
+    /// under the unused new base; after it, stray old sidecars. Any thrown
+    /// error removes the copies and leaves everything as it was.
     public static func moveSidecars(
         workDir: URL, oldBase: String, newBase: String,
         oldSource: String, newSource: String,
+        part: (from: URL, to: URL)? = nil,
         fm: FileManager = .default,
-        move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }
+        steps: Steps = Steps()
     ) throws {
         let names = ((try? fm.contentsOfDirectory(atPath: workDir.path)) ?? [])
             .filter { $0.hasPrefix(oldBase + ".") }
-        var moved: [(from: URL, to: URL)] = []
-        func rollback() { for m in moved.reversed() { try? fm.moveItem(at: m.to, to: m.from) } }
+        var olds: [URL] = [], copies: [URL] = []
+        func undo() { for c in copies { try? fm.removeItem(at: c) } }
         for name in names {
             let from = workDir.appendingPathComponent(name)
             var isDir: ObjCBool = false
@@ -366,16 +461,21 @@ public enum CalendarRename {
             let to = workDir.appendingPathComponent(newBase + name.dropFirst(oldBase.count))
             do {
                 if fm.fileExists(atPath: to.path) { throw Failure.collision(to.lastPathComponent) }
-                try move(from, to)
-                moved.append((from, to))
-            } catch { rollback(); throw error }
+                try steps.copy(from, to)
+                copies.append(to); olds.append(from)
+            } catch { undo(); throw error }
         }
         // Bookmarks remember the recording file name for clip export.
         if let bm = RecordingBookmarks.load(workDir: workDir, base: newBase), bm.source == oldSource {
             var fixed = bm
             fixed.source = newSource
-            do { try fixed.save(workDir: workDir, base: newBase) } catch { rollback(); throw error }
+            do { try fixed.save(workDir: workDir, base: newBase) } catch { undo(); throw error }
         }
+        if let part {
+            do { try steps.commit(part.from, part.to) } catch { undo(); throw error }
+        }
+        steps.afterCommit()
+        for old in olds { try? fm.removeItem(at: old) }
     }
 
     /// Everything the recorder needs before it publishes the finished take:
@@ -387,7 +487,7 @@ public enum CalendarRename {
                                recordingsDir: URL, workDir: URL, notesDir: URL,
                                timeZone: TimeZone = .current,
                                fm: FileManager = .default,
-                               move: (URL, URL) throws -> Void = { try FileManager.default.moveItem(at: $0, to: $1) }) -> URL? {
+                               steps: Steps = Steps()) -> URL? {
         guard let stem = CalendarTitle.recordingStem(date: recordingStart, title: match.title, timeZone: timeZone),
               let target = uniqueTarget(folder: recording.deletingLastPathComponent(), stem: stem,
                                         ext: recording.pathExtension, workDir: workDir,
@@ -396,9 +496,12 @@ public enum CalendarRename {
         let newBase = DistavoState.baseFor(recordingsDir: recordingsDir, path: target)
         guard oldBase != newBase else { return nil }
         do {
+            // `recording` is still `<name>.wav.part` on disk: rename it with the sidecars.
+            let part = fm.fileExists(atPath: recording.path + ".part")
+                ? (from: URL(fileURLWithPath: recording.path + ".part"), to: URL(fileURLWithPath: target.path + ".part")) : nil
             try moveSidecars(workDir: workDir, oldBase: oldBase, newBase: newBase,
                              oldSource: recording.lastPathComponent, newSource: target.lastPathComponent,
-                             fm: fm, move: move)
+                             part: part, fm: fm, steps: steps)
         } catch { return nil }
         return target
     }

@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 public enum ProcessStatus: String, Equatable {
     case done
@@ -180,6 +181,10 @@ public struct PipelineDeps {
     /// default) keeps the calendar feature inert and DistavoCore EventKit-free;
     /// the app layer wires it to EventKit, returning [] when access is missing.
     public var calendarLookup: ((_ start: Date, _ end: Date) async -> [CalendarCandidate])?
+    /// When a recording actually started, from trustworthy evidence only: the
+    /// built-in recorder's file name or the media's embedded creation date -
+    /// never the filesystem creation/modification date (Vikunja #2946).
+    public var recordingStart: (URL) async -> Date?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -189,9 +194,11 @@ public struct PipelineDeps {
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
-        calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil
+        calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
+        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) }
     ) {
         self.calendarLookup = calendarLookup
+        self.recordingStart = recordingStart
         self.convertToWav = convertToWav
         self.transcribe = transcribe
         self.ollamaReachable = ollamaReachable
@@ -604,11 +611,28 @@ public enum Pipeline {
     /// a phone recording or a dropped export usually keeps; nil if neither.
     static func meetingDate(for url: URL, timeZone: TimeZone = .current) -> Date? {
         let stem = url.deletingPathExtension().lastPathComponent
-        if let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression),
-           let date = recorderNameFormatter(timeZone).date(from: String(stem[range])) {
-            return date
-        }
+        if let date = recorderNameDate(stem, timeZone: timeZone) { return date }
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
+    }
+
+    /// The start time in a built-in recorder name ("Meeting 2026-09-16 16.13.08"),
+    /// anchored at the start so an event title such as "10.30.00 Standup" in a
+    /// calendar-renamed file ("2026-10-05 10.30.00 Standup") can never pass for one.
+    static func recorderNameDate(_ stem: String, timeZone: TimeZone = .current) -> Date? {
+        guard let range = stem.range(of: #"^Meeting \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#,
+                                     options: .regularExpression) else { return nil }
+        return recorderNameFormatter(timeZone).date(from: String(stem[range].dropFirst("Meeting ".count)))
+    }
+
+    /// Recording start from trustworthy evidence: the recorder's file name, else
+    /// the media's embedded creation date (AVAsset common metadata). nil when
+    /// neither exists - filesystem dates are NOT evidence.
+    public static func recordingStartEvidence(_ url: URL) async -> Date? {
+        if let d = recorderNameDate(url.deletingPathExtension().lastPathComponent) { return d }
+        let asset = AVURLAsset(url: url)
+        guard let item = try? await asset.load(.creationDate),
+              let date = try? await item.load(.dateValue) else { return nil }
+        return date
     }
 
     /// The router's detections from the transcribe result, formatted for the

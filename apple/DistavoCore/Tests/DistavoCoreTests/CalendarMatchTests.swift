@@ -31,6 +31,7 @@ final class CalendarMatchTests: XCTestCase {
 
     func testFullOverlapMatches() {
         XCTAssertEqual(best(0, 60, [ev("Standup", 0, 60)])?.title, "Standup")
+        XCTAssertEqual(best(0, 60, [ev("Reunió d'equip", 0, 60)])?.title, "Reunió d'equip", "the real title keeps its accents")
     }
 
     func testNoCandidatesOrEmptyRecordingIsNil() {
@@ -43,14 +44,25 @@ final class CalendarMatchTests: XCTestCase {
         // 60-min recording, 60-min event: needs 30 min.
         XCTAssertNil(best(0, 60, [ev("A", 31, 91)]), "29 min of overlap is below 50 % of 60")
         XCTAssertNotNil(best(0, 60, [ev("A", 30, 90)]), "exactly 30 min qualifies")
-        // Short event inside a long recording: 50 % of the SHORTER (the event, 20 min) = 10 min.
-        XCTAssertNotNil(best(0, 120, [ev("Quick sync", 50, 70)]))
-        // 4-min event fully inside: overlap 4 min < 5-min floor.
-        XCTAssertNil(best(0, 120, [ev("Tiny", 50, 54)]))
+        // Short event inside the recording: 50 % of the SHORTER (the event, 20 min) = 10 min.
+        XCTAssertNotNil(best(0, 60, [ev("Quick sync", 20, 40)]))
+        // 4-min event fully inside a 12-min recording: overlap 4 min < 5-min floor.
+        XCTAssertNil(best(0, 12, [ev("Tiny", 4, 8)]))
         // 5-min event fully inside: exactly the floor.
-        XCTAssertNotNil(best(0, 120, [ev("Five", 50, 55)]))
+        XCTAssertNotNil(best(0, 12, [ev("Five", 4, 9)]))
+        // Qualifies on overlap but is a small part of a long recording: score below the minimum.
+        XCTAssertNil(best(0, 120, [ev("Quick sync", 50, 70)]))
         // Touching only at the edge.
         XCTAssertNil(best(0, 60, [ev("Later", 60, 120)]))
+    }
+
+    func testLongBlockDoesNotBeatTheRealMeeting() {
+        // 14:00-14:30 meeting recorded 13:58-14:33; a 9-17 "Focus" block overlaps 35 min, the meeting 30.
+        // Minutes after 09:00: Focus 0-480, meeting 300-330, recording 298-333.
+        let f = ev("Focus", 0, 480), m = ev("Real meeting", 300, 330)
+        XCTAssertEqual(best(298, 333, [f, m])?.title, "Real meeting")
+        XCTAssertEqual(best(298, 333, [m, f])?.title, "Real meeting")
+        XCTAssertNil(best(298, 333, [f]), "a huge block alone is NOT used (score 35/480)")
     }
 
     func testAllDayDeclinedCancelledAndEmptyTitlesAreIgnored() {
@@ -104,7 +116,11 @@ final class CalendarMatchTests: XCTestCase {
         XCTAssertEqual(CalendarTitle.fileNameComponent("Weekly sync"), "Weekly sync")
         XCTAssertEqual(CalendarTitle.fileNameComponent("Q3/Q4: plan\\draft"), "Q3-Q4- plan-draft")
         XCTAssertEqual(CalendarTitle.fileNameComponent("  a   b\tc  "), "a b c")
-        XCTAssertEqual(CalendarTitle.fileNameComponent("Reunió d'equip 🎉"), "Reunió d'equip 🎉")
+        XCTAssertEqual(CalendarTitle.fileNameComponent("Reunió d'equip 🎉"), "Reunio d equip")
+        XCTAssertEqual(CalendarTitle.fileNameComponent("Reunió d’equip"), "Reunio dequip", "typographic apostrophe removed")
+        XCTAssertEqual(CalendarTitle.fileNameComponent("Revisió de l·lèxic — ñandú, façade"), "Revisio de llexic - nandu, facade")
+        XCTAssertEqual(CalendarTitle.fileNameComponent("A – B"), "A - B")
+        XCTAssertEqual(CalendarTitle.fileNameComponent("Straße Œuvre"), "Strasse OEuvre")
     }
 
     func testHostileTitles() {
@@ -125,6 +141,10 @@ final class CalendarMatchTests: XCTestCase {
         XCTAssertNil(CalendarTitle.fileNameComponent("..."))
         XCTAssertNil(CalendarTitle.fileNameComponent(" . "))
         XCTAssertNil(CalendarTitle.fileNameComponent("\u{0}\u{1}"))
+        for nonLatin in ["会議のタイトル", "פגישת צוות", "Встреча", "—–-", "🎉🎉", "·’"] {
+            XCTAssertNil(CalendarTitle.fileNameComponent(nonLatin), nonLatin)
+        }
+        XCTAssertEqual(CalendarTitle.fileNameComponent("会議 Q3"), "Q3")
         XCTAssertEqual(CalendarTitle.fileNameComponent(".hidden"), "hidden")
         XCTAssertEqual(CalendarTitle.fileNameComponent("trail. . "), "trail")
         XCTAssertEqual(CalendarTitle.fileNameComponent("line1\nline2"), "line1 line2")
@@ -132,15 +152,13 @@ final class CalendarMatchTests: XCTestCase {
     }
 
     func testUTF8ByteCapIsOnACharacterBoundary() {
-        let long = String(repeating: "é", count: 200)             // 2 bytes each
+        let long = String(repeating: "é", count: 200)             // folds to ASCII e
         let out = CalendarTitle.fileNameComponent(long)!
-        XCTAssertLessThanOrEqual(out.utf8.count, CalendarTitle.maxFileNameBytes)
-        XCTAssertEqual(out.utf8.count, 120)
-        XCTAssertTrue(out.allSatisfy { $0 == "é" })
-        let emoji = String(repeating: "🎉", count: 100)             // 4 bytes each
-        XCTAssertEqual(CalendarTitle.fileNameComponent(emoji)!.utf8.count, 120)
+        XCTAssertEqual(out.utf8.count, CalendarTitle.maxFileNameBytes)
+        XCTAssertTrue(out.allSatisfy { $0 == "e" })
+        XCTAssertNil(CalendarTitle.fileNameComponent(String(repeating: "🎉", count: 100)), "no Latin letters: no rename")
         // Cutting can expose a trailing space/dot: it must be trimmed afterwards.
-        let tricky = String(repeating: "a", count: 119) + " bcd"
+        let tricky = String(repeating: "a", count: 119) + " bcd"   // ASCII already
         XCTAssertEqual(CalendarTitle.fileNameComponent(tricky), String(repeating: "a", count: 119))
     }
 
@@ -158,7 +176,7 @@ final class CalendarMatchTests: XCTestCase {
     func testPredictedBaseEqualsBaseForOfTheRenamedFile() {
         let dir = URL(fileURLWithPath: "/tmp/recs")
         let titles = ["Event Title", "Q3/Q4: plan", "Reunió d'equip 🎉", "Weekly - sync.", "a  b",
-                      "Trailing dash -", String(repeating: "x", count: 300), "(1:1) Marc & Ada"]
+                      "Trailing dash -", String(repeating: "x", count: 300), "(1:1) Marc & Ada", "Revisió l·lèxica — ñ ç"]
         for t in titles {
             guard let stem = CalendarTitle.recordingStem(date: t0, title: t) else { XCTFail(t); continue }
             let url = dir.appendingPathComponent("\(stem).wav")
@@ -265,16 +283,92 @@ final class CalendarMatchTests: XCTestCase {
         let before = names(work)
         var calls = 0
         struct Boom: Error {}
+        var steps = CalendarRename.Steps()
+        steps.copy = { from, to in
+            calls += 1
+            if calls == 3 { throw Boom() }
+            try FileManager.default.copyItem(at: from, to: to)
+        }
         XCTAssertThrowsError(try CalendarRename.moveSidecars(
-            workDir: work, oldBase: "old", newBase: "new", oldSource: "old.wav", newSource: "new.wav",
-            move: { from, to in
-                calls += 1
-                if calls == 3 { throw Boom() }
-                try FileManager.default.moveItem(at: from, to: to)
-            }))
-        XCTAssertEqual(names(work), before, "every moved file went back")
+            workDir: work, oldBase: "old", newBase: "new", oldSource: "old.wav", newSource: "new.wav", steps: steps))
+        XCTAssertEqual(names(work), before, "the copies were removed, the originals untouched")
         XCTAssertEqual(RecordingBookmarks.load(workDir: work, base: "old")?.source, "old.wav")
         XCTAssertEqual(try String(contentsOf: work.appendingPathComponent("old.b.json")), "b.json")
+    }
+
+    /// What startup recovery would do at an instant: finalise the `.wav.part` under its own name and
+    /// look for its sidecars under THAT base. Consistent = the full sidecar set is there.
+    private func recoveryState(rec: URL, work: URL, sidecars: [String]) -> (base: String, complete: Bool)? {
+        guard let partName = names(rec).first(where: { $0.hasSuffix(".wav.part") }) else { return nil }
+        let wav = rec.appendingPathComponent(String(partName.dropLast(5)))
+        let base = DistavoState.baseFor(recordingsDir: rec, path: wav)
+        return (base, sidecars.allSatisfy { FileManager.default.fileExists(atPath: work.appendingPathComponent("\(base).\($0)").path) })
+    }
+
+    func testPartAndSidecarsMoveTogetherAndRecoveryIsConsistentAtEveryInstant() throws {
+        let root = tempDir()
+        let rec = root.appendingPathComponent("recs"), work = root.appendingPathComponent("work"), notes = root.appendingPathComponent("notes")
+        for d in [rec, work, notes] { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+        let original = rec.appendingPathComponent("Meeting 2026-10-05 10.00.00.wav")
+        let part = URL(fileURLWithPath: original.path + ".part")
+        try touch(part, "audio")
+        let oldBase = DistavoState.baseFor(recordingsDir: rec, path: original)
+        let sidecars = ["scratchpad.json", "speakers.json", "bookmarks.json", "language.json"]
+        for sc in sidecars { try touch(work.appendingPathComponent("\(oldBase).\(sc)"), sc) }
+        let match = CalendarMatch(title: "Event Title", start: at(0), end: at(60))
+        let utc = TimeZone(identifier: "UTC")!
+        var utcCal = Calendar(identifier: .gregorian); utcCal.timeZone = utc
+        let start = utcCal.date(from: DateComponents(year: 2026, month: 10, day: 5, hour: 10))!
+
+        var snapshots: [(String, (base: String, complete: Bool)?)] = []
+        var steps = CalendarRename.Steps()
+        steps.copy = { from, to in
+            snapshots.append(("before copy", self.recoveryState(rec: rec, work: work, sidecars: sidecars)))
+            try FileManager.default.copyItem(at: from, to: to)
+        }
+        steps.commit = { from, to in
+            snapshots.append(("before commit", self.recoveryState(rec: rec, work: work, sidecars: sidecars)))
+            try FileManager.default.moveItem(at: from, to: to)
+        }
+        steps.afterCommit = {
+            snapshots.append(("after commit", self.recoveryState(rec: rec, work: work, sidecars: sidecars)))
+        }
+        let target = CalendarRename.prepare(recording: original, match: match, recordingStart: start, recordingsDir: rec,
+                                            workDir: work, notesDir: notes, timeZone: utc, steps: steps)
+        XCTAssertEqual(target?.lastPathComponent, "2026-10-05 Event Title.wav")
+        for (when, state) in snapshots {
+            XCTAssertEqual(state?.complete, true, "crash \(when): the part has all sidecars under its own base")
+        }
+        XCTAssertEqual(snapshots.last?.1?.base, "2026-10-05_Event_Title", "after the commit recovery uses the new name")
+        XCTAssertEqual(snapshots.first?.1?.base, oldBase)
+        XCTAssertEqual(names(rec), ["2026-10-05 Event Title.wav.part"])
+        XCTAssertFalse(names(work).contains { $0.hasPrefix(oldBase + ".") }, "old sidecars cleaned up")
+    }
+
+    func testFailureBeforeDuringAndAtCommitLeavesTheOriginalConsistent() throws {
+        for failAt in ["copy", "commit"] {
+            let root = tempDir()
+            let rec = root.appendingPathComponent("recs"), work = root.appendingPathComponent("work"), notes = root.appendingPathComponent("notes")
+            for d in [rec, work, notes] { try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true) }
+            let original = rec.appendingPathComponent("Meeting 2026-10-05 10.00.00.wav")
+            try touch(URL(fileURLWithPath: original.path + ".part"), "audio")
+            let oldBase = DistavoState.baseFor(recordingsDir: rec, path: original)
+            let sidecars = ["scratchpad.json", "speakers.json"]
+            for sc in sidecars { try touch(work.appendingPathComponent("\(oldBase).\(sc)"), sc) }
+            struct Boom: Error {}
+            var steps = CalendarRename.Steps()
+            if failAt == "copy" {
+                var n = 0
+                steps.copy = { from, to in n += 1; if n == 2 { throw Boom() }; try FileManager.default.copyItem(at: from, to: to) }
+            } else {
+                steps.commit = { _, _ in throw Boom() }
+            }
+            let r = CalendarRename.prepare(recording: original, match: CalendarMatch(title: "T", start: at(0), end: at(60)),
+                                           recordingStart: t0, recordingsDir: rec, workDir: work, notesDir: notes, steps: steps)
+            XCTAssertNil(r, failAt)
+            XCTAssertEqual(names(rec), ["Meeting 2026-10-05 10.00.00.wav.part"], failAt)
+            XCTAssertEqual(names(work), sidecars.map { "\(oldBase).\($0)" }.sorted(), "\(failAt): no stray copies")
+        }
     }
 
     func testMoveSidecarsRefusesToOverwrite() throws {
@@ -331,7 +425,7 @@ final class CalendarMatchTests: XCTestCase {
         let m4 = CalendarMatch(title: "Other", start: at(0), end: at(60))
         let failed = CalendarRename.prepare(recording: original4, match: m4, recordingStart: start,
                                             recordingsDir: rec, workDir: work, notesDir: notes, timeZone: utc,
-                                            move: { _, _ in throw Boom() })
+                                            steps: { var st = CalendarRename.Steps(); st.copy = { _, _ in throw Boom() }; return st }())
         XCTAssertNil(failed)
         XCTAssertTrue(names(work).contains("\(ob4).speakers.json"))
         // An unusable title keeps the original name too.
@@ -554,6 +648,43 @@ final class CalendarMatchTests: XCTestCase {
         let note = try String(contentsOf: env.notes.appendingPathComponent("\(base).md"), encoding: .utf8)
         XCTAssertTrue(note.hasPrefix("# From recorder"))
         XCTAssertTrue(seen.prompts[0].contains("Other participants: Zed"))
+    }
+
+    func testDroppedFileWithoutRecordingTimeEvidenceIsNeverMatched() async throws {
+        let ref = try await baseline("memo.m4a")
+        let env = try makeEnv()
+        let url = try recording(env, "memo.m4a")      // filesystem dates say "now": that is not evidence
+        let seen = Seen()
+        let now = Date()
+        let events = [CalendarCandidate(title: "Event Title", start: now.addingTimeInterval(-600), end: now.addingTimeInterval(3000),
+                                        attendees: ["Ada Lovelace"])]
+        _ = await Pipeline.processOne(path: url, config: env.config, deps: deps(seen, events: events),
+                                      stableChecks: 1, stableDelay: 0)
+        let base = DistavoState.baseFor(recordingsDir: env.recordings, path: url)
+        XCTAssertEqual(seen.lookups, 0, "no evidence, no lookup")
+        XCTAssertNil(CalendarMatchStore.load(workDir: env.work, base: base))
+        XCTAssertNil(SpeakerHints.load(workDir: env.work, base: base))
+        XCTAssertEqual(seen.prompts[0], ref.prompt)
+        XCTAssertEqual(try String(contentsOf: env.notes.appendingPathComponent("\(base).md"), encoding: .utf8), ref.note)
+    }
+
+    func testDroppedFileWithMediaCreationDateIsMatched() async throws {
+        let env = try makeEnv()
+        let url = try recording(env, "memo.m4a")
+        let seen = Seen()
+        var d = deps(seen, events: [standup(local(10), local(11))])
+        d.recordingStart = { _ in self.local(10) }       // e.g. AVAsset creation metadata
+        _ = await Pipeline.processOne(path: url, config: env.config, deps: d, stableChecks: 1, stableDelay: 0)
+        let base = DistavoState.baseFor(recordingsDir: env.recordings, path: url)
+        XCTAssertEqual(CalendarMatchStore.load(workDir: env.work, base: base)?.title, "Event Title")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "dropped files are never renamed")
+    }
+
+    func testRenamedStemWithTimeLikeTitleIsNotMistakenForARecorderName() {
+        XCTAssertNil(Pipeline.recorderNameDate("2026-10-05 10.30.00 Standup"))
+        XCTAssertNil(Pipeline.recorderNameDate("2026-10-05 Event Title"))
+        XCTAssertNotNil(Pipeline.recorderNameDate("Meeting 2026-10-05 10.30.00"))
+        XCTAssertNil(Pipeline.meetingDate(for: URL(fileURLWithPath: "/nonexistent/2026-10-05 10.30.00 Standup.wav")))
     }
 
     func testProcessingNeverRenamesTheRecording() async throws {

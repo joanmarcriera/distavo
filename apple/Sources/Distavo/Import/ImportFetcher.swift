@@ -7,9 +7,15 @@ import DistavoCore
 /// `FeedParser`); this class only applies them as the bytes arrive:
 ///  - ephemeral session: no cookies, no cache, no stored credentials; authentication
 ///    challenges other than TLS server trust are cancelled;
-///  - redirects go through `ImportURLPolicy.redirect` (<= 5, no https->http, no public->LAN pivot);
+///  - the start URL and EVERY redirect target go through the same checks: `ImportURLPolicy.validate`
+///    (https, public DNS name, no user info) and `checkDestination`, which resolves the name once and
+///    requires EVERY address to be public (`ImportResolver` = getaddrinfo). <= 5 redirects. The URLSession
+///    connection re-resolves the name (not pinned; https keeps the host name so TLS must match it, see
+///    ImportURL.swift); the system proxy, if configured, is honoured;
 ///  - the response is classified from its headers BEFORE any body is kept;
-///  - the size cap is enforced on every received chunk, never trusted from Content-Length;
+///  - the size cap is enforced on every received (decoded) chunk by `ImportStreamGuard`, never trusted
+///    from Content-Length, and `Accept-Encoding: identity` is sent so no compression is requested; the file
+///    type is decided from its magic bytes, not the URL extension or Content-Type;
 ///  - a media file is written into a fresh private (0700) temp folder with an exclusive create,
 ///    under a name from the URL path (never Content-Disposition) via the shared sanitiser;
 ///  - timeouts: 30 s idle, 2 h overall; cancellable.
@@ -41,12 +47,18 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
     private var directory: URL?
     private var fileURL: URL?
     private var received: Int64 = 0
+    private var streamGuard = ImportStreamGuard()
     private var failure: Failure?
     private var onProgress: (@Sendable (Int64) -> Void)?
 
     /// Fetch `url` (already validated by the caller). Cancel the surrounding Task, or call `cancel()`.
     func fetch(_ url: URL, onProgress: (@Sendable (Int64) -> Void)? = nil) async throws -> Outcome {
-        try await withTaskCancellationHandler {
+        // The same validator + public-address check as every other hop, BEFORE any request is made.
+        let vetted = await Task.detached { ImportURLPolicy.vetStart(url.absoluteString, resolver: ImportResolver.resolve) }.value
+        guard case .success(let url) = vetted else {
+            throw Failure(message: "That address is not a public internet address Distavo will download from.")
+        }
+        return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (c: CheckedContinuation<Outcome, Error>) in
                 queue.addOperation { [self] in
                     continuation = c
@@ -61,7 +73,7 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
                     cfg.timeoutIntervalForRequest = 30
                     cfg.timeoutIntervalForResource = 7200
                     cfg.waitsForConnectivity = false
-                    cfg.httpAdditionalHeaders = ["User-Agent": "Distavo URL import"]
+                    cfg.httpAdditionalHeaders = ["User-Agent": "Distavo URL import", "Accept-Encoding": "identity"]
                     let s = URLSession(configuration: cfg, delegate: self, delegateQueue: queue)
                     session = s
                     var req = URLRequest(url: url)
@@ -82,13 +94,17 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
                     willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest,
                     completionHandler: @escaping (URLRequest?) -> Void) {
         let from = task.currentRequest?.url ?? originalURL ?? request.url!
-        switch ImportURLPolicy.redirect(from: from, to: request.url, count: redirects) {
-        case .follow(let url):
-            redirects += 1
-            completionHandler(URLRequest(url: url))   // rebuilt from the validated URL, headers not carried
-        case .refuse(let why):
-            refusedRedirect = why
-            completionHandler(nil)                    // the 3xx itself becomes the response -> classified as an error
+        let count = redirects, target = request.url
+        // Resolution blocks, so it runs off the session queue; the completion handler may be called from any thread.
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            switch ImportURLPolicy.vetRedirect(from: from, to: target, count: count, resolver: ImportResolver.resolve) {
+            case .follow(let url):
+                queue.addOperation { redirects += 1 }
+                completionHandler(URLRequest(url: url))   // rebuilt from the validated URL, headers not carried
+            case .refuse(let why):
+                queue.addOperation { refusedRedirect = why }
+                completionHandler(nil)                    // the 3xx itself becomes the response -> classified as an error
+            }
         }
     }
 
@@ -135,9 +151,11 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
             guard received <= Int64(ImportURLPolicy.maxFeedBytes) else { fail("The feed is too large."); dataTask.cancel(); return }
             feedBuffer.append(data)
         case .media?:
-            // Enforced on the bytes actually received, whatever the headers claimed.
-            guard ImportURLPolicy.withinCap(received: received) else {
-                fail("The file is larger than the 2 GB limit."); dataTask.cancel(); return
+            // Cap and file type are judged on the bytes actually received, whatever the headers claimed.
+            switch streamGuard.accept(data) {
+            case .tooLarge: fail("The file is larger than the 2 GB limit."); dataTask.cancel(); return
+            case .notMedia: fail("The download is not an audio or video file."); dataTask.cancel(); return
+            case .ok: break
             }
             do { try handle?.write(contentsOf: data) } catch { fail("Could not write the download to disk."); dataTask.cancel(); return }
             onProgress?(received)
@@ -165,6 +183,7 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
             }
         case .media(let name)?:
             try? handle?.close(); handle = nil
+            guard streamGuard.finish() == .ok else { cleanup(); finish(.failure(Failure(message: "The download is not an audio or video file."))); return }
             guard received > 0, let fileURL, let directory else { cleanup(); finish(.failure(Failure(message: "The download was empty."))); return }
             finish(.success(.file(url: fileURL, name: name, directory: directory)))
         case nil:
@@ -201,6 +220,29 @@ final class ImportFetcher: NSObject, URLSessionDataDelegate, @unchecked Sendable
         guard let c = continuation else { return }
         continuation = nil
         c.resume(with: result)
+    }
+}
+
+/// getaddrinfo, returning numeric address strings (nil on failure so callers fail closed).
+enum ImportResolver {
+    static func resolve(_ host: String) -> [String]? {
+        var hints = addrinfo()
+        hints.ai_family = AF_UNSPEC
+        hints.ai_socktype = SOCK_STREAM
+        var list: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &list) == 0, let first = list else { return nil }
+        defer { freeaddrinfo(list) }
+        var out: [String] = []
+        var cursor: UnsafeMutablePointer<addrinfo>? = first
+        while let ai = cursor {
+            var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            guard getnameinfo(ai.pointee.ai_addr, ai.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 else {
+                return nil   // an address we cannot read is a failure, not a skip
+            }
+            out.append(String(cString: buf))
+            cursor = ai.pointee.ai_next
+        }
+        return out.isEmpty ? nil : out
     }
 }
 #endif

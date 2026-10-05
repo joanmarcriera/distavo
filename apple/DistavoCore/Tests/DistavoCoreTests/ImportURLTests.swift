@@ -15,18 +15,20 @@ final class ImportURLTests: XCTestCase {
 
     // MARK: URL validation
 
-    func testHTTPSAccepted() {
-        let v = valid("  https://example.com/pod/ep1.mp3?x=1  ")
+    func testHTTPSPublicNameAccepted() {
+        let v = valid("  https://Example.com/pod/ep1.mp3?x=1  ")
         XCTAssertEqual(v?.url.absoluteString, "https://example.com/pod/ep1.mp3?x=1")
-        XCTAssertEqual(v?.isInsecureLocal, false)
+        XCTAssertEqual(valid("https://cdn.example.co.uk:8443")?.url.absoluteString, "https://cdn.example.co.uk:8443/")
+        XCTAssertNil(valid("https://example.com/a.mp3#frag")?.url.fragment, "fragment dropped")
     }
 
     func testRejectedSchemesAndShapes() {
         XCTAssertEqual(problem(""), .empty)
         XCTAssertEqual(problem("   "), .empty)
-        XCTAssertEqual(problem("ftp://example.com/a.mp3"), .notHTTPS)
-        XCTAssertEqual(problem("file:///etc/passwd"), .notHTTPS)
-        XCTAssertEqual(problem("javascript:alert(1)"), .notHTTPS)
+        for s in ["ftp://example.com/a.mp3", "file:///etc/passwd", "javascript:alert(1)", "http://example.com/a.mp3",
+                  "gopher://example.com/", "data:audio/mp3;base64,AAAA", "HTTP://example.com/a.mp3"] {
+            XCTAssertEqual(problem(s), .notHTTPS, s)
+        }
         XCTAssertEqual(problem("example.com/a.mp3"), .malformed)
         XCTAssertEqual(problem("https://user:pw@example.com/a.mp3"), .hasCredentials)
         XCTAssertEqual(problem("https://user@example.com/a.mp3"), .hasCredentials)
@@ -39,46 +41,151 @@ final class ImportURLTests: XCTestCase {
         XCTAssertEqual(problem("https://example.com/" + String(repeating: "a", count: 3000)), .tooLong)
     }
 
-    func testHTTPOnlyForLoopbackAndLANLiterals() {
-        for ok in ["http://localhost:8080/a.mp3", "http://127.0.0.1/a.mp3", "http://192.168.0.5:9000/a.mp3", "http://10.1.2.3/a.mp3",
-                   "http://172.16.0.1/a", "http://172.31.255.255/a", "http://169.254.1.1/a", "http://[::1]:80/a.mp3",
-                   "http://[fd00::1]/a.mp3", "http://nas.local/a.mp3"] {
-            XCTAssertEqual(valid(ok)?.isInsecureLocal, true, ok)
-        }
-        for bad in ["http://example.com/a.mp3", "http://8.8.8.8/a.mp3", "http://172.32.0.1/a", "http://172.15.0.1/a",
-                    "http://192.169.0.1/a", "http://localhost.evil.com/a", "http://127.0.0.1.evil.com/a", "http://[2001:db8::1]/a",
-                    "http://0x7f.1/a", "http://2130706433/a"] {
-            XCTAssertEqual(problem(bad), .insecureNotLocal, bad)
+    func testIPLiteralsInEveryNotationAndLocalNamesAreRefused() {
+        for host in ["127.0.0.1", "10.0.0.1", "192.168.1.1", "8.8.8.8", "2130706433", "0x7f.0.0.1", "0177.0.0.1", "127.1", "0x7f000001",
+                     "[::1]", "[fd00::1]", "[2001:db8::1]", "[::ffff:127.0.0.1]", "localhost", "LOCALHOST", "nas.local", "foo.localhost",
+                     "router.lan", "printer.home.arpa", "svc.internal", "intranet", "host", "1.2.3.4.5", "a.b.123", "-bad.example.com",
+                     "bad-.example.com", "a..example.com", "ex_ample.com", "x.t", "evil.test"] {
+            let p = problem("https://\(host)/a.mp3")
+            XCTAssertTrue(p == .notAPublicName || p == .malformed || p == .noHost, "\(host) -> \(String(describing: p))")
         }
     }
 
-    func testReturnedURLIsRebuiltFromParsedComponents() {
-        XCTAssertEqual(valid("HTTPS://Example.COM:8443")?.url.absoluteString, "https://example.com:8443/")
-        XCTAssertNil(valid("https://example.com/a.mp3#frag")?.url.fragment, "fragment dropped")
+    // MARK: destination vetting (injected resolver)
+
+    private func dest(_ addrs: [String]?, host: String = "cdn.example.com") -> Result<Void, ImportURLPolicy.DestinationProblem> {
+        ImportURLPolicy.checkDestination(URL(string: "https://\(host)/a.mp3")!, resolver: { _ in addrs })
     }
 
-    // MARK: redirects
+    func testPublicAddressesPass() {
+        XCTAssertNoThrow(try dest(["93.184.216.34"]).get())
+        XCTAssertNoThrow(try dest(["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]).get())
+        XCTAssertNoThrow(try dest(["1.1.1.1", "8.8.4.4", "172.32.0.1", "100.128.0.1", "192.169.0.1", "198.20.0.1"]).get())
+    }
 
-    func testRedirectPolicy() {
+    func testEveryNonPublicClassIsRefused() {
+        let bad = ["127.0.0.1", "127.255.255.254", "0.0.0.0", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.0.5", "169.254.169.254",
+                   "100.64.0.1", "100.127.255.255", "224.0.0.1", "239.255.255.250", "255.255.255.255", "240.0.0.1", "192.0.0.1", "192.0.2.1",
+                   "198.18.0.1", "198.51.100.7", "203.0.113.9",
+                   "::1", "::", "fe80::1", "fe80::1%en0", "fc00::1", "fd12:3456::1", "ff02::1", "2001:db8::1", "2002:7f00:1::", "64:ff9b::7f00:1",
+                   "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:192.168.1.1", "::127.0.0.1", "2001:0:4136:e378:8000:63bf:3fff:fdd2"]
+        for a in bad { XCTAssertEqual(dest([a]).failureValue, .notPublic, a) }
+    }
+
+    func testMixedPublicAndPrivateAnswersAreRefused() {
+        XCTAssertEqual(dest(["93.184.216.34", "127.0.0.1"]).failureValue, .notPublic, "one bad address poisons the name (rebinding)")
+        XCTAssertEqual(dest(["127.0.0.1", "93.184.216.34"]).failureValue, .notPublic)
+        XCTAssertEqual(dest(["93.184.216.34", "::1"]).failureValue, .notPublic)
+        XCTAssertEqual(dest(["93.184.216.34", "10.0.0.1", "8.8.8.8"]).failureValue, .notPublic)
+    }
+
+    func testResolverFailureFailsClosed() {
+        XCTAssertEqual(dest(nil).failureValue, .unresolvable)
+        XCTAssertEqual(dest([]).failureValue, .unresolvable)
+        XCTAssertEqual(dest(["not-an-address"]).failureValue, .notPublic)
+        XCTAssertEqual(dest([""]).failureValue, .notPublic)
+        XCTAssertEqual(dest(["93.184.216.34", "garbage"]).failureValue, .notPublic)
+    }
+
+    func testStartVettingRunsTheSameValidatorAndResolver() {
+        let public1: ImportURLPolicy.Resolver = { _ in ["93.184.216.34"] }
+        let rebinding: ImportURLPolicy.Resolver = { _ in ["93.184.216.34", "127.0.0.1"] }
+        XCTAssertNotNil(try? ImportURLPolicy.vetStart("https://example.com/a.mp3", resolver: public1).get())
+        if case .failure(.invalid(.notHTTPS)) = ImportURLPolicy.vetStart("http://example.com/a.mp3", resolver: public1) {} else { XCTFail() }
+        if case .failure(.invalid(.notAPublicName)) = ImportURLPolicy.vetStart("https://127.0.0.1/a.mp3", resolver: public1) {} else { XCTFail() }
+        if case .failure(.destination(.notPublic)) = ImportURLPolicy.vetStart("https://example.com/a.mp3", resolver: rebinding) {} else { XCTFail() }
+    }
+
+    // MARK: redirects (every hop is vetted like the first request)
+
+    func testRedirectHopsAreVettedWithTheSameRules() {
         let from = URL(string: "https://cdn.example.com/a.mp3")!
-        func decide(_ to: String?, _ n: Int = 0, from f: URL? = nil) -> ImportURLPolicy.RedirectDecision {
-            ImportURLPolicy.redirect(from: f ?? from, to: to.flatMap { URL(string: $0) }, count: n)
+        let table: [String: [String]] = ["good.example.org": ["93.184.216.34"], "rebind.example.org": ["93.184.216.34", "127.0.0.1"],
+                                         "lan.example.org": ["192.168.1.1"], "meta.example.org": ["169.254.169.254"]]
+        let resolver: ImportURLPolicy.Resolver = { table[$0] }
+        func vet(_ to: String?, _ n: Int = 0) -> ImportURLPolicy.RedirectDecision {
+            ImportURLPolicy.vetRedirect(from: from, to: to.flatMap { URL(string: $0) }, count: n, resolver: resolver)
         }
-        XCTAssertEqual(decide("https://other.example.com/b.mp3"), .follow(URL(string: "https://other.example.com/b.mp3")!))
-        XCTAssertEqual(decide("https://other.example.com/b.mp3", 4), .follow(URL(string: "https://other.example.com/b.mp3")!))
-        if case .refuse(let r) = decide("https://other.example.com/b.mp3", 5) { XCTAssertTrue(r.contains("too many")) } else { XCTFail() }
-        if case .refuse(let r) = decide("http://other.example.com/b.mp3") { XCTAssertTrue(r.contains("not an acceptable")) } else { XCTFail("plain http to a public host") }
-        if case .refuse(let r) = decide("http://192.168.0.1/b.mp3") { XCTAssertTrue(r.contains("https to http")) } else { XCTFail("downgrade") }
-        if case .refuse = decide("https://127.0.0.1/b.mp3") {} else { XCTFail("public -> loopback pivot") }
-        if case .refuse = decide("https://192.168.1.1/b.mp3") {} else { XCTFail("public -> LAN pivot") }
-        if case .refuse = decide("https://localhost/b.mp3") {} else { XCTFail("public -> localhost pivot") }
-        if case .refuse = decide("file:///etc/passwd") {} else { XCTFail("file") }
-        if case .refuse = decide("https://u:p@example.com/x") {} else { XCTFail("credentials") }
-        if case .refuse = decide(nil) {} else { XCTFail("nil target") }
-        // A LAN origin may redirect within the LAN over http, but not downgrade from https.
-        let lan = URL(string: "http://192.168.0.5/a.mp3")!
-        XCTAssertEqual(decide("http://192.168.0.6/b.mp3", from: lan), .follow(URL(string: "http://192.168.0.6/b.mp3")!))
-        if case .refuse = decide("http://192.168.0.6/b.mp3", from: URL(string: "https://nas.local/a.mp3")!) {} else { XCTFail("https->http on LAN") }
+        XCTAssertEqual(vet("https://good.example.org/b.mp3"), .follow(URL(string: "https://good.example.org/b.mp3")!))
+        XCTAssertEqual(vet("https://good.example.org/b.mp3", 4), .follow(URL(string: "https://good.example.org/b.mp3")!))
+        let refused: [(String?, Int)] = [
+            ("https://good.example.org/b.mp3", 5), ("http://good.example.org/b.mp3", 0), ("https://rebind.example.org/b", 0),
+            ("https://lan.example.org/b", 0), ("https://meta.example.org/latest", 0), ("https://127.0.0.1/b", 0),
+            ("https://localhost/b", 0), ("https://[::1]/b", 0), ("https://10.0.0.1/b", 0), ("file:///etc/passwd", 0),
+            ("ftp://good.example.org/b", 0), ("https://u:p@good.example.org/b", 0), ("https://unknown.example.org/b", 0), (nil, 0),
+        ]
+        for (to, n) in refused {
+            if case .refuse = vet(to, n) {} else { XCTFail("must refuse \(to ?? "nil") at hop \(n)") }
+        }
+    }
+
+    func testHostileRedirectChainStopsAtFirstBadHopAndAtFiveHops() {
+        let resolver: ImportURLPolicy.Resolver = { host in host == "evil.example.org" ? ["127.0.0.1"] : ["93.184.216.34"] }
+        func walk(_ chain: [String]) -> Int? {   // index of the first refused hop, nil if all followed
+            var current = URL(string: "https://start.example.com/x")!
+            for (i, next) in chain.enumerated() {
+                switch ImportURLPolicy.vetRedirect(from: current, to: URL(string: next), count: i, resolver: resolver) {
+                case .follow(let u): current = u
+                case .refuse: return i
+                }
+            }
+            return nil
+        }
+        XCTAssertNil(walk((0..<5).map { "https://h\($0).example.com/" }))
+        XCTAssertEqual(walk((0..<9).map { "https://h\($0).example.com/" }), 5, "sixth redirect refused")
+        XCTAssertEqual(walk(["https://a.example.com/", "https://evil.example.org/", "https://b.example.com/"]), 1)
+        XCTAssertEqual(walk(["https://a.example.com/", "http://b.example.com/"]), 1, "downgrade")
+        XCTAssertEqual(walk(["https://a.example.com/", "https://192.168.0.1/"]), 1)
+    }
+
+    // MARK: streaming guard
+
+    private let wav = Data("RIFF".utf8) + Data([0x24, 0, 0, 0]) + Data("WAVEfmt ".utf8)
+
+    func testStreamGuardEnforcesTheCapWhateverTheHeadersSaid() {
+        var g = ImportStreamGuard(limit: 1000)
+        XCTAssertEqual(g.accept(wav), .ok)
+        XCTAssertEqual(g.accept(Data(count: 900)), .ok)
+        XCTAssertEqual(g.accept(Data(count: 100)), .tooLarge)
+        // A never-ending body is cut off at the cap, in bounded steps.
+        var endless = ImportStreamGuard(limit: 1_000_000)
+        var chunks = 0, verdict = ImportStreamGuard.Verdict.ok
+        while verdict == .ok && chunks < 10_000 {
+            verdict = endless.accept(chunks == 0 ? wav + Data(count: 65_536) : Data(count: 65_536)); chunks += 1
+        }
+        XCTAssertEqual(verdict, .tooLarge)
+        XCTAssertLessThan(chunks, 20)
+        XCTAssertEqual(ImportURLPolicy.maxDownloadBytes, 2_147_483_648)
+    }
+
+    func testStreamGuardJudgesTheTypeByMagicBytesNotByNameOrContentType() {
+        func verdict(_ d: Data) -> ImportStreamGuard.Verdict { var g = ImportStreamGuard(); return g.accept(d + Data(count: 64)) }
+        XCTAssertEqual(verdict(wav), .ok)
+        XCTAssertEqual(verdict(Data("ID3".utf8) + Data([4, 0, 0, 0, 0, 0, 0, 0, 0, 0])), .ok)
+        XCTAssertEqual(verdict(Data([0xff, 0xfb, 0x90, 0x00] + [UInt8](repeating: 0, count: 10))), .ok)
+        XCTAssertEqual(verdict(Data([0, 0, 0, 0x20]) + Data("ftypM4A ".utf8)), .ok)
+        XCTAssertEqual(verdict(Data("OggS".utf8) + Data(count: 12)), .ok)
+        XCTAssertEqual(verdict(Data("fLaC".utf8) + Data(count: 12)), .ok)
+        XCTAssertEqual(verdict(Data([0x1a, 0x45, 0xdf, 0xa3]) + Data(count: 12)), .ok)
+        XCTAssertEqual(verdict(Data("<!DOCTYPE html><html>".utf8)), .notMedia)
+        XCTAssertEqual(verdict(Data("MZ".utf8) + Data(count: 30)), .notMedia, "an .exe named .mp3")
+        XCTAssertEqual(verdict(Data("#!/bin/sh\nrm -rf ~\n".utf8)), .notMedia)
+        XCTAssertEqual(verdict(Data("PK".utf8) + Data([3, 4]) + Data(count: 20)), .notMedia)
+        var g = ImportStreamGuard()
+        XCTAssertEqual(g.accept(Data("<ht".utf8)), .ok)
+        XCTAssertEqual(g.accept(Data("ml>12345678".utf8)), .notMedia)
+        var tiny = ImportStreamGuard(); _ = tiny.accept(Data("abc".utf8)); XCTAssertEqual(tiny.finish(), .notMedia)
+    }
+
+    func testFeedEnclosuresPointingAtLocalOrForeignSchemesAreDropped() throws {
+        let urls = ["https://127.0.0.1/a.mp3", "https://10.0.0.5/a.mp3", "https://192.168.1.1/a.mp3", "https://169.254.169.254/latest",
+                    "https://localhost:11434/api", "https://[::1]/a.mp3", "http://example.com/a.mp3", "file:///etc/passwd",
+                    "ftp://example.com/a.mp3", "https://u:p@example.com/a.mp3", "https://2130706433/a.mp3", "https://0x7f.1/a.mp3",
+                    "//example.com/a.mp3", "/a.mp3"]
+        var xml = "<rss><channel>"
+        for (i, u) in urls.enumerated() { xml += "<item><title>t\(i)</title><enclosure url=\"\(u)\" type=\"audio/mpeg\"/></item>" }
+        xml += "<item><title>ok</title><enclosure url=\"https://cdn.example.com/ok.mp3\" type=\"audio/mpeg\"/></item></channel></rss>"
+        XCTAssertEqual(try FeedParser.parse(Data(xml.utf8)).get().map(\.title), ["ok"])
     }
 
     // MARK: response classification

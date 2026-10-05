@@ -30,7 +30,7 @@ None of this could be exercised without launching the app. Use a **Direct** buil
 
 1. Menu -> Import from URL...: paste a direct `https` mp3; it downloads, is queued, the temp folder is gone.
 2. Paste a podcast RSS URL: episode list (newest 15); pick one; it downloads.
-3. Refusals: `http://example.com/a.mp3`, `https://user:pw@host/a.mp3`, an HTML page, a >2 GB file (cap message appears when reached).
-4. A server redirecting https -> http, or a public host redirecting to `https://192.168.x.x/`: refused.
-5. Cancel mid-download: temp folder removed, nothing queued.
-6. `http://192.168.x.x/file.mp3` on the LAN: warning shown; works or is blocked by ATS (record which).
+3. Refusals: `http://example.com/a.mp3`, `https://user:pw@host/a.mp3`, `https://127.0.0.1/a.mp3`, `https://localhost/`, `https://2130706433/`, an HTML page, an `.exe` renamed `.mp3` (magic bytes), a >2 GB file (cap message when reached).
+4. A server redirecting to `http://...`, or to `https://192.168.x.x/`; a DNS name you control that answers `127.0.0.1` (or one public and one private address): all refused before any request to the private address (watch with `nc -l 127.0.0.1 PORT`: nothing arrives).
+5. A feed whose enclosure is `https://127.0.0.1/...` or `file:///...`: not listed.
+6. Cancel mid-download: temp folder (`$TMPDIR/distavo-import-*`) removed, nothing queued.

@@ -22,14 +22,6 @@ final class ImportURLModel: ObservableObject {
     @Published var selected: Int = 0
     private var task: Task<Void, Never>?
 
-    /// Plain-http warning for the current text, if it is an allowed local http address.
-    var insecureWarning: String? {
-        if case .success(let v) = ImportURLPolicy.validate(urlText), v.isInsecureLocal {
-            return "This address is not encrypted (http). It is allowed because it is on this Mac or your local network."
-        }
-        return nil
-    }
-
     var busy: Bool { if case .fetching = phase { return true }; if case .downloading = phase { return true }; return false }
 
     func start() {
@@ -38,7 +30,7 @@ final class ImportURLModel: ObservableObject {
         case .failure(let p): phase = .failed(Self.describe(p)); return
         case .success(let v):
             phase = .fetching; episodes = []
-            run(v.url, fromFeed: false)
+            run(v.url, fromFeed: false)   // the fetcher re-vets it (validator + public-address check) before any request
         }
     }
 
@@ -89,9 +81,9 @@ final class ImportURLModel: ObservableObject {
         case .tooLong: return "That address is too long."
         case .malformed: return "That does not look like a web address."
         case .notHTTPS: return "Only https addresses are supported."
+        case .notAPublicName: return "Only public internet addresses (a normal web site name) are supported, not this Mac, your network or numeric addresses."
         case .hasCredentials: return "Addresses with a user name or password are not supported."
         case .noHost: return "That address has no host name."
-        case .insecureNotLocal: return "Plain http is only allowed for addresses on this Mac or your local network. Use https."
         }
     }
 }
@@ -108,9 +100,6 @@ struct ImportURLView: View {
                 .textFieldStyle(.roundedBorder)
                 .disabled(model.busy)
                 .onSubmit { model.start() }
-            if let warning = model.insecureWarning {
-                Label(warning, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
-            }
             if case .choosing = model.phase {
                 Picker("Episode", selection: $model.selected) {
                     ForEach(Array(model.episodes.enumerated()), id: \.offset) { i, e in Text(e.title).tag(i) }

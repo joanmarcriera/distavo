@@ -421,6 +421,30 @@ final class WatcherController: ObservableObject {
         if changed { persist() }
     }
 
+    /// Second copy of a finished note in the configured vault folder (Vikunja #2954). Runs off
+    /// the main actor (the vault may be a slow or network folder); a missing vault or any
+    /// failure is logged and notified but NEVER affects the recording. Variant runs
+    /// (`<base>@…`) are comparison artefacts and are not exported.
+    private func exportToVault(_ result: ProcessResult) {
+        let notes = config.notes
+        guard notes.hasVault, !result.base.contains("@"), let note = result.notePath else { return }
+        let workDir = Config.resolvePath(config.workDir)
+        let base = result.base
+        Task.detached(priority: .utility) { [weak self] in
+            let outcome = SandboxFolders.withVaultAccess(path: notes.vaultDir) { path -> VaultExport.Outcome in
+                var scoped = notes
+                scoped.vaultDir = path
+                return VaultExport.export(note: note, base: base, notes: scoped, workDir: workDir)
+            }
+            await MainActor.run { [weak self] in
+                self?.log("Vault copy of \(base): \(outcome.message)")
+                if case .skipped(let why) = outcome {
+                    self?.notifier.notify(title: "Note not copied to your vault", body: "\(base): \(why)")
+                }
+            }
+        }
+    }
+
     /// Process all pending recordings (self-serializing so overlapping timer
     /// ticks and "Process now" can't double-process).
     /// `trigger`: only the timer is `.automatic`; every user-initiated entry point
@@ -502,6 +526,7 @@ final class WatcherController: ObservableObject {
             }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
+            exportToVault(result)
             if let sourcePath { runWhenDoneActions(result, sourcePath: sourcePath) }
         case .tooShort:
             status = "Too short: \(result.base)"
@@ -925,6 +950,7 @@ final class WatcherController: ObservableObject {
             indexForSearch(base: base, note: result.notePath)   // #2942
             logTasksReport(result.notePath)                     // #2941
             notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
+            exportToVault(result)
         default:
             status = "Idle"
             log("Regenerate not done: \(base) — \(result.message)")

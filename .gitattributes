@@ -1,0 +1,2 @@
+# Each 1.17 task appends its own section; keep both sides instead of conflicting.
+docs/manual-checks-1.17.md merge=union

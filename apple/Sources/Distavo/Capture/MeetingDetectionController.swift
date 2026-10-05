@@ -5,28 +5,27 @@ import DistavoCore
 
 /// Meeting auto-detect (Vikunja #2945): once a second, while the feature is
 /// enabled in Settings, notice that a listed meeting app (Zoom, Teams, FaceTime,
-/// ...) is running AND some process is capturing from the default input device,
-/// and offer to start the built-in recorder. The decision is `MeetingDetector`
-/// (pure, in DistavoCore); this class only gathers observations and shows the
-/// offer.
+/// ...) is capturing from the microphone and offer to start the built-in
+/// recorder. The decision is `MeetingDetector` (pure, in DistavoCore); this class
+/// only gathers observations and shows the offer.
 ///
-/// What it touches, all without a permission prompt or an entitlement:
-///  - `NSWorkspace.shared.runningApplications` / `frontmostApplication`
-///    (bundle ids only);
-///  - Core Audio `kAudioDevicePropertyDeviceIsRunningSomewhere` on the default
-///    input device - a yes/no flag, it never opens the microphone, starts a
-///    capture, or hears audio.
+/// What it reads, all read-only metadata queries (no stream, tap, aggregate
+/// device or capture, and - expected, UNVERIFIED in the sandbox - no TCC prompt):
+///  - `NSWorkspace` running/frontmost applications (bundle ids only);
+///  - Core Audio's per-process objects (macOS 14.2+): for each, its bundle id,
+///    pid and `kAudioProcessPropertyIsRunningInput`. This identifies WHICH
+///    process captures the mic; the device-level "running somewhere" flag is
+///    not used because it is also true while output plays (headset music).
 /// No private API, Accessibility or AppleScript. Nothing is recorded until the
-/// user clicks Record, which goes through the same path as the menu's item.
+/// user clicks Record.
 ///
 /// Zero cost when off: `configure()` creates the timer only while
 /// `config.meetingDetection.enabled` (and the recorder is supported), and
 /// invalidates it otherwise - no timer, no observers, no polling.
 @MainActor
 final class MeetingDetectionController: ObservableObject {
-    /// Non-nil while an offer is pending, e.g. "Zoom call detected". Drives the
-    /// menu-bar fallback (a transient "Record" / "Not now" menu item) used
-    /// whether or not the notification could be shown.
+    /// Non-nil while an offer is pending, e.g. "Zoom is using the microphone".
+    /// Drives the menu-bar fallback (a transient "Record" / "Not now" item).
     @Published private(set) var pendingOffer: String?
 
     private let configProvider: () -> Config
@@ -38,8 +37,10 @@ final class MeetingDetectionController: ObservableObject {
 
     private var detector: MeetingDetector?
     private var timer: Timer?
+    /// Listed bundle id the pending offer is about (used for "Not now").
     private var offeredApp: String?
-    private var wasMicInUse = false
+    /// The offer came from the mic-unknown fallback (no app is named).
+    private var offerWasFallback = false
 
     init(configProvider: @escaping () -> Config,
          isRecording: @escaping () -> Bool,
@@ -55,7 +56,7 @@ final class MeetingDetectionController: ObservableObject {
         self.log = log
     }
 
-    /// Whether the feature is active for this config (also hidden below macOS 14.4,
+    /// Whether the feature is active for this config (hidden below macOS 14.4,
     /// where there is no built-in recorder to offer).
     private var active: Bool {
         MeetingCaptureController.isSupported && configProvider().meetingDetection.enabled
@@ -67,9 +68,11 @@ final class MeetingDetectionController: ObservableObject {
         if active {
             if timer == nil {
                 detector = MeetingDetector(policy: MeetingDetectionPolicy(config: configProvider().meetingDetection))
-                timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                let t = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
                     MainActor.assumeIsolated { self?.tick() }
                 }
+                t.tolerance = 0.5   // lets macOS coalesce the wake-ups
+                timer = t
                 log("Meeting detection on")
             }
         } else if timer != nil || pendingOffer != nil {
@@ -84,36 +87,49 @@ final class MeetingDetectionController: ObservableObject {
     private func tick() {
         guard var detector else { return }
         detector.policy = MeetingDetectionPolicy(config: configProvider().meetingDetection)
-        let mic = Self.defaultInputIsRunningSomewhere()
-        // The episode is over once the mic goes idle: withdraw a stale offer.
-        if mic == false, wasMicInUse { dismissOffer() }
-        wasMicInUse = mic == true
-        let running = NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        let recording = isRecording()
+        let capturing = Self.capturingBundleIDs()
+        // A pending offer is stale once a recording runs (started by any route)
+        // or its app stopped capturing (the call/mic episode ended).
+        if pendingOffer != nil {
+            let stillCapturing = offeredApp.map { app in
+                capturing?.contains { detector.policy.listedApp(forCapturing: $0) == app } ?? true
+            } ?? false
+            if recording || (!offerWasFallback && !stillCapturing) { dismissOffer() }
+        }
         let event = detector.observe(MeetingObservation(
-            runningBundleIDs: Set(running),
+            runningBundleIDs: Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)),
             frontmostBundleID: NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
-            micInUse: mic, isRecording: isRecording(), now: Date()))
+            capturingBundleIDs: capturing, isRecording: recording,
+            now: ProcessInfo.processInfo.systemUptime))
         self.detector = detector
-        if case .offerRecording(let app) = event { present(app: app) }
+        switch event {
+        case .none: break
+        case .offerRecording(let app): present(app: app, name: Self.name(for: app), fallback: false)
+        case .offerPossibleCall(let frontmost): present(app: frontmost, name: nil, fallback: true)
+        }
     }
 
-    private func present(app: String) {
-        let name = NSWorkspace.shared.runningApplications
-            .first { $0.bundleIdentifier == app }?.localizedName
+    private static func name(for app: String) -> String {
+        NSWorkspace.shared.runningApplications.first { $0.bundleIdentifier == app }?.localizedName
             ?? MeetingDetectionConfig.displayName(forBundleID: app)
+    }
+
+    private func present(app: String, name: String?, fallback: Bool) {
+        let headline = name.map { "\($0) is using the microphone" } ?? "A call may be in progress"
         offeredApp = app
-        pendingOffer = "\(name) call detected"
-        log("Meeting detected (\(app)) - offered to record")
+        offerWasFallback = fallback
+        pendingOffer = headline
+        log("Meeting offer: \(headline) (\(app))")
         Task { [weak self] in
-            // Notification when allowed; the menu item above is the fallback.
-            if await Notifier.notificationsAllowed() {
-                self?.notifyOffer("\(name) call detected — record it?",
-                                  "Nothing is recorded unless you choose Record.")
+            // Notification when allowed; the menu item is the fallback.
+            if await Notifier.notificationsAllowed(), self?.pendingOffer == headline {
+                self?.notifyOffer(headline, "Record this call? Nothing is recorded unless you choose Record.")
             }
         }
     }
 
-    /// "Record" (notification button or menu item).
+    /// "Record" (notification button or menu item): a start-only action.
     func accept() {
         guard pendingOffer != nil else { return }
         dismissOffer()
@@ -125,27 +141,49 @@ final class MeetingDetectionController: ObservableObject {
     /// "Not now": snooze that app for the configured time.
     func decline() {
         if let app = offeredApp {
-            detector?.snooze(app: app, at: Date())
+            detector?.snooze(app: app, at: ProcessInfo.processInfo.systemUptime)
             log("Meeting offer declined - snoozed \(app) for \(configProvider().meetingDetection.snoozeMinutes) min")
         }
         dismissOffer()
     }
 
+    /// Clear the menu item AND withdraw the delivered notification.
     private func dismissOffer() {
         pendingOffer = nil
         offeredApp = nil
+        offerWasFallback = false
         clearNotification()
     }
 
-    // MARK: Core Audio
+    // MARK: Core Audio (per-process input state)
 
-    /// Is any process capturing from the default input device? `nil` when it
-    /// cannot be read (no input device, Core Audio error) - the policy then
-    /// applies its mic-unknown rules. Read-only property query; no TCC prompt.
-    static func defaultInputIsRunningSomewhere() -> Bool? {
-        guard let device = try? AudioObjectID.readDefaultInputDevice(), device.isValid else { return nil }
-        guard let running: UInt32 = try? device.read(
-            kAudioDevicePropertyDeviceIsRunningSomewhere, defaultValue: UInt32(0)) else { return nil }
-        return running != 0
+    /// Bundle ids of processes currently capturing input, Distavo excluded;
+    /// `nil` when the per-process API is unavailable or errors. A process whose
+    /// Core Audio bundle id is empty falls back to `NSRunningApplication` by pid.
+    /// Helper processes (e.g. `com.microsoft.teams2.helper`) are mapped to their
+    /// listed app by `MeetingDetectionPolicy.listedApp`.
+    static func capturingBundleIDs() -> Set<String>? {
+        guard #available(macOS 14.4, *) else { return nil }
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyProcessObjectList,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(.system, &address, 0, nil, &size) == noErr else { return nil }
+        var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(.system, &address, 0, nil, &size, &objects) == noErr else { return nil }
+
+        let me = ProcessInfo.processInfo.processIdentifier
+        var ids = Set<String>()
+        for object in objects where object.isValid {
+            guard let running: UInt32 = try? object.read(kAudioProcessPropertyIsRunningInput, defaultValue: UInt32(0)),
+                  running != 0 else { continue }
+            let pid: pid_t? = try? object.read(kAudioProcessPropertyPID, defaultValue: pid_t(0))
+            if pid == me { continue }
+            var bundle = (try? object.read(kAudioProcessPropertyBundleID, defaultValue: "" as CFString)).map { $0 as String } ?? ""
+            if bundle.isEmpty, let pid { bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier ?? "" }
+            if !bundle.isEmpty { ids.insert(bundle) }
+        }
+        return ids
     }
 }

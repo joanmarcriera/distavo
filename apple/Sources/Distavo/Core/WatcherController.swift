@@ -75,7 +75,7 @@ final class WatcherController: ObservableObject {
     lazy var meetingDetection = MeetingDetectionController(
         configProvider: { [weak self] in self?.config ?? Config() },
         isRecording: { [weak self] in self?.capture.isRecording ?? false },
-        startRecording: { [weak self] in self?.capture.toggle() },
+        startRecording: { [weak self] in self?.capture.startIfIdle() },
         notifyOffer: { [weak self] title, body in self?.notifier.notifyMeeting(title: title, body: body) },
         clearNotification: { [weak self] in self?.notifier.removeMeetingNotification() },
         log: { [weak self] message in self?.log(message) })

@@ -71,6 +71,11 @@ struct StatusMenu: View {
         Button("Regenerate Note…") { controller.showRegenerateNote() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)
+        Button(controller.hasLastNote && !controller.canExportLastTranscript
+               ? "Export transcript as… (no timestamps saved)" : "Export transcript as…") {
+            controller.exportLastTranscript()
+        }
+        .disabled(!controller.canExportLastTranscript)
         Button("Open last note") { controller.openLastNote() }
             .disabled(!controller.hasLastNote)
 

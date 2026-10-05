@@ -235,14 +235,15 @@ public enum Prompt {
         return "\(f.string(from: date)) (\(timeZone.identifier))"
     }
 
-    /// Replacement for the "Use British English." rule when the meeting's
-    /// dominant language is Catalan or Spanish (Vikunja #2147, epic note
-    /// language). Section headings stay in English on purpose — the
+    /// Replacement for the "Use British English." rule when the note should be
+    /// written in another language (Vikunja #2147, #2956): hand-written native
+    /// text for Catalan and Spanish, a generic English-worded instruction
+    /// naming the language (via `WhisperLanguageCatalog`) for every other
+    /// catalog code. Section headings stay in English on purpose — the
     /// `SummaryValidator` and downstream tooling key on the heading text, not
     /// on the note's prose language — and quoted excerpts must stay verbatim
-    /// in whatever language was actually spoken. Every other code (including
-    /// nil, "en", or anything unrecognised) returns nil and the prompt is
-    /// untouched.
+    /// in whatever language was actually spoken. nil, "en", "auto" and anything
+    /// not in the catalog return nil and the prompt is untouched.
     static func languageInstruction(for code: String?) -> String? {
         switch code {
         case "ca":
@@ -252,7 +253,9 @@ public enum Prompt {
             return "Escribe las notas en español; mantén los encabezados de sección en inglés. " +
                    "Conserva textualmente, en el idioma hablado, los fragmentos citados."
         default:
-            return nil
+            guard let name = NoteLanguage.genericName(for: code) else { return nil }
+            return "Write the notes in \(name); keep the section headings in English. " +
+                   "Keep quoted excerpts verbatim, in the language actually spoken."
         }
     }
 
@@ -264,8 +267,9 @@ public enum Prompt {
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : template
-        // Only "ca"/"es" change anything — nil, "en", or any other code
-        // leaves the prompt byte-identical to before this feature.
+        // nil, "en" and unrecognised codes leave the prompt byte-identical to
+        // before this feature; any other catalog language replaces the
+        // "Use British English." rule.
         if let instruction = languageInstruction(for: noteLanguage) {
             base = base.replacingOccurrences(of: "Use British English.", with: instruction)
         }

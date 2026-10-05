@@ -111,6 +111,21 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertEqual(cfg.summarise.noteLanguage, "auto")
     }
 
+    /// A fixed target language (Vikunja #2956) is just another string value:
+    /// kept verbatim, and `auto`/`en`/missing keep their meaning.
+    func testFixedTargetNoteLanguageIsKeptAndLegacyValuesUnchanged() throws {
+        XCTAssertEqual(try decode(#"{"summarise": {"note_language": "fr"}}"#).summarise.noteLanguage, "fr")
+        XCTAssertEqual(try decode(#"{"summarise": {"note_language": "en"}}"#).summarise.noteLanguage, "en")
+        XCTAssertEqual(try decode(#"{"summarise": {"note_language": "auto"}}"#).summarise.noteLanguage, "auto")
+        // An unknown value survives decoding and resolves like "en".
+        let odd = try decode(#"{"summarise": {"note_language": "klingon"}}"#)
+        XCTAssertEqual(odd.summarise.noteLanguage, "klingon")
+        XCTAssertNil(NoteLanguage.resolve(setting: odd.summarise.noteLanguage, perRecording: nil, detected: "fr"))
+        // Round-trips through encode.
+        let data = try JSONEncoder().encode(try decode(#"{"summarise": {"note_language": "fr"}}"#))
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains(#""note_language":"fr""#))
+    }
+
     /// Only a fresh install (no config file yet) gets "auto".
     func testFreshInstallGetsAutoNoteLanguage() {
         let cfg = Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 16 << 30)

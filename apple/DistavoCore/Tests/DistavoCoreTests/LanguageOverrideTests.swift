@@ -98,6 +98,49 @@ final class LanguageOverrideTests: XCTestCase {
         XCTAssertEqual(applied.language, EmbeddedModelCatalog.automaticID)
     }
 
+    // MARK: per-recording note language (Vikunja #2956)
+
+    /// A sidecar written before #2956 (only `code`) decodes unchanged: no note override.
+    func testOldSidecarDecodesWithNoNoteLanguage() throws {
+        let workDir = tempDir()
+        try #"{"code":"ca"}"#.write(to: LanguageOverride.url(workDir: workDir, base: "old"),
+                                    atomically: true, encoding: .utf8)
+        let loaded = LanguageOverride.load(workDir: workDir, base: "old")
+        XCTAssertEqual(loaded, LanguageOverride(code: "ca"))
+        XCTAssertNil(loaded?.noteLanguage)
+    }
+
+    /// A code-only save does not grow a note_language key (old readers see the same file shape).
+    func testCodeOnlySaveOmitsNoteLanguageKey() throws {
+        let workDir = tempDir()
+        try LanguageOverride(code: "ca").save(workDir: workDir, base: "x")
+        let text = try String(contentsOf: LanguageOverride.url(workDir: workDir, base: "x"), encoding: .utf8)
+        XCTAssertFalse(text.contains("note_language"), text)
+    }
+
+    func testNoteOnlySidecarRoundTripsAndLeavesSpokenLanguageAlone() throws {
+        let workDir = tempDir()
+        try LanguageOverride(noteLanguage: "fr").save(workDir: workDir, base: "n")
+        let loaded = LanguageOverride.load(workDir: workDir, base: "n")
+        XCTAssertEqual(loaded?.noteLanguage, "fr")
+        XCTAssertEqual(loaded?.code, "")
+        var config = TranscribeConfig()
+        config.language = EmbeddedModelCatalog.automaticID
+        let applied = LanguageOverride.applying(to: config, workDir: workDir, wavBase: "n")
+        XCTAssertEqual(applied.language, EmbeddedModelCatalog.automaticID, "no spoken override in a note-only sidecar")
+    }
+
+    func testBothHalvesCoexistAndBadNoteLanguageIsDropped() throws {
+        let workDir = tempDir()
+        try LanguageOverride(code: "ca", noteLanguage: "en").save(workDir: workDir, base: "b")
+        XCTAssertEqual(LanguageOverride.load(workDir: workDir, base: "b"),
+                       LanguageOverride(code: "ca", noteLanguage: "en"))
+        try LanguageOverride(code: "ca", noteLanguage: "klingon").save(workDir: workDir, base: "c")
+        XCTAssertEqual(LanguageOverride.load(workDir: workDir, base: "c"), LanguageOverride(code: "ca"))
+        try LanguageOverride(noteLanguage: "klingon").save(workDir: workDir, base: "d")
+        XCTAssertNil(LanguageOverride.load(workDir: workDir, base: "d"))
+    }
+
     func testApplyingResolvesAVariantsSourceBase() throws {
         let workDir = tempDir()
         try LanguageOverride(code: "ca").save(workDir: workDir, base: "meeting")

@@ -439,6 +439,114 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(result.status, .done)
     }
 
+    // MARK: Note language beyond Catalan/Spanish (Vikunja #2956)
+
+    /// Runs one French-detected fixture meeting through the pipeline with the
+    /// given setting (and optional per-recording sidecar) and returns the
+    /// `NoteContext` the summariser received.
+    private func summariserContext(
+        noteLanguage: String, detected: String = "fr", sidecar: LanguageOverride? = nil,
+        spokenLanguage: String? = nil, detections: Bool = true
+    ) async throws -> NoteContext {
+        var (cfg, input) = try makeEnv()
+        cfg.summarise.noteLanguage = noteLanguage
+        if let spokenLanguage { cfg.transcribe.language = spokenLanguage }
+        if let sidecar {
+            try sidecar.save(workDir: Config.resolvePath(cfg.workDir), base: "demo")
+        }
+        var seen: NoteContext?
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(transcribe: { _, _ in
+                var r: [String: Any] = ["segments": [["speaker": "SPEAKER_00", "text": "bonjour"]]]
+                if detections { r["detections"] = [["code": detected, "probability": 0.93]] }
+                return r
+            }, summarise: { _, _, _, context in
+                seen = context
+                return PipelineTests.validNote
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        return try XCTUnwrap(seen)
+    }
+
+    /// Acceptance: a French meeting set to "original language" yields a French
+    /// prompt with English headings; set to English it yields the untouched prompt.
+    func testFrenchMeetingAutoWritesFrenchAndEnglishSettingStaysEnglish() async throws {
+        let auto = try await summariserContext(noteLanguage: "auto")
+        XCTAssertEqual(auto.noteLanguage, "fr")
+        let frenchPrompt = auto.prompt(transcript: "bonjour")
+        XCTAssertTrue(frenchPrompt.contains("Write the notes in French; keep the section headings in English."))
+
+        let english = try await summariserContext(noteLanguage: "en")
+        XCTAssertNil(english.noteLanguage)
+        XCTAssertTrue(english.prompt(transcript: "bonjour").contains("Use British English."))
+    }
+
+    func testFixedTargetLanguageIgnoresDetection() async throws {
+        let ctx = try await summariserContext(noteLanguage: "es", detected: "fr")
+        XCTAssertEqual(ctx.noteLanguage, "es")
+        XCTAssertTrue(ctx.prompt(transcript: "x").contains("Escribe las notas en español"))
+        // ... even with no detection at all (WhisperX).
+        let noDetection = try await summariserContext(noteLanguage: "de", detections: false)
+        XCTAssertEqual(noDetection.noteLanguage, "de")
+    }
+
+    func testUnknownNoteLanguageValueBehavesLikeEnglish() async throws {
+        let ctx = try await summariserContext(noteLanguage: "klingon")
+        XCTAssertNil(ctx.noteLanguage)
+    }
+
+    func testPerRecordingNoteLanguageBeatsTheSetting() async throws {
+        let forcedEnglish = try await summariserContext(
+            noteLanguage: "auto", sidecar: LanguageOverride(noteLanguage: "en"))
+        XCTAssertNil(forcedEnglish.noteLanguage)
+        let forcedGerman = try await summariserContext(
+            noteLanguage: "en", sidecar: LanguageOverride(noteLanguage: "de"))
+        XCTAssertEqual(forcedGerman.noteLanguage, "de")
+        // A spoken-language-only sidecar (the pre-#2956 shape) changes nothing here.
+        let spokenOnly = try await summariserContext(
+            noteLanguage: "en", sidecar: LanguageOverride(code: "ca"))
+        XCTAssertNil(spokenOnly.noteLanguage)
+    }
+
+    /// With no detection, "auto" follows a spoken language the owner fixed.
+    func testAutoFallsBackToFixedSpokenLanguageWhenNothingWasDetected() async throws {
+        let ctx = try await summariserContext(
+            noteLanguage: "auto", spokenLanguage: "fr", detections: false)
+        XCTAssertEqual(ctx.noteLanguage, "fr")
+        let stillEnglish = try await summariserContext(noteLanguage: "auto", detections: false)
+        XCTAssertNil(stillEnglish.noteLanguage)   // default spoken language "en"
+    }
+
+    /// The Gemma (MLX) and Foundation Models paths build their prompt through
+    /// `SummaryDriver` from the same `NoteContext.noteLanguage`; prove both
+    /// carry the French rule (Gemma also the end-of-turn block).
+    func testFrenchReachesGemmaAndFoundationModelsPrompts() async throws {
+        let ctx = try await summariserContext(noteLanguage: "auto")
+        // Gemma route (GemmaSummariser): language + end-of-turn block.
+        let gemma = SummaryRequest(
+            transcript: "bonjour", noteOwner: ctx.noteOwner, userSpeaker: ctx.userSpeaker,
+            participants: ctx.participants, style: ctx.promptStyle, meetingDate: ctx.meetingDate,
+            noteLanguage: ctx.noteLanguage,
+            endOfTurnBlock: EndOfTurnBlock.build(
+                noteLanguage: ctx.noteLanguage, style: ctx.promptStyle,
+                noteOwner: ctx.noteOwner, ownerSpeaker: ctx.userSpeaker))
+        let gemmaPrompt = SummaryDriver.finalPrompt(gemma, transcript: "bonjour")
+        XCTAssertTrue(gemmaPrompt.contains("Write the notes in French; keep the section headings in English."))
+        XCTAssertTrue(gemmaPrompt.contains("write ALL the prose of the notes in FRENCH"))
+        // Foundation Models route (when the model supports French): language rule only.
+        let apple = SummaryRequest(
+            transcript: "bonjour", noteOwner: ctx.noteOwner, userSpeaker: ctx.userSpeaker,
+            noteLanguage: "fr")
+        let applePrompt = SummaryDriver.finalPrompt(apple, transcript: "bonjour")
+        XCTAssertTrue(applePrompt.contains("Write the notes in French; keep the section headings in English."))
+        // ... and unsupported -> nil -> the untouched English prompt.
+        let appleEnglish = SummaryRequest(
+            transcript: "bonjour", noteOwner: ctx.noteOwner, userSpeaker: ctx.userSpeaker, noteLanguage: nil)
+        XCTAssertTrue(SummaryDriver.finalPrompt(appleEnglish, transcript: "bonjour").contains("Use British English."))
+    }
+
     func testSuccessWritesNoteAndMarksDone() async throws {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(

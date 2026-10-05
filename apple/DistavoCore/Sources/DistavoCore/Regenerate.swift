@@ -192,7 +192,10 @@ extension Pipeline {
         //    which are not cached).
         let sourceBase = LanguageOverride.sourceBase(from: base)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
-        let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Calendar match saved at processing time (#2946); regenerate never looks the calendar up.
+        let calendarMatch = config.calendar.enabled ? CalendarMatchStore.load(workDir: workDir, base: sourceBase) : nil
+        let participants = CalendarLookup.participants(
+            hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines), match: calendarMatch, config: cfg)
         // Same resolution as processOne; the detected language comes from the
         // meta sidecar (absent for notes processed before #2947).
         let noteLanguage = resolveNoteLanguage(
@@ -252,6 +255,7 @@ extension Pipeline {
                     transcriptPath: transcriptPath)
             }
 
+            if let calendarMatch { noteText = CalendarTitle.retitle(note: noteText, title: calendarMatch.title) }   // #2946
             // 5. Keep the old version, then write the new one.
             try FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
             var backup: URL?

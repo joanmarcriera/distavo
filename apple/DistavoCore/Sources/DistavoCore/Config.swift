@@ -340,6 +340,9 @@ public struct Config: Codable, Equatable {
     /// Key-moment markers and clips (Vikunja #2950). Hotkey off, 15 s / 30 s for
     /// any config predating it; see `RecordingOptions`.
     public var recording: RecordingOptions
+    /// Calendar-aware titling and attendees (Vikunja #2946). OFF for any config
+    /// predating it and for fresh installs; see `CalendarConfig`.
+    public var calendar: CalendarConfig
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -357,6 +360,7 @@ public struct Config: Codable, Equatable {
         case whenDone = "when_done"
         case meetingDetection = "meeting_detection"
         case recording
+        case calendar
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -377,7 +381,8 @@ public struct Config: Codable, Equatable {
                 benchmark: [BenchmarkResult] = [],
                 whenDone: [WhenDoneAction] = [],
                 meetingDetection: MeetingDetectionConfig = .init(),
-                recording: RecordingOptions = .init()) {
+                recording: RecordingOptions = .init(),
+                calendar: CalendarConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -393,6 +398,7 @@ public struct Config: Codable, Equatable {
         self.whenDone = whenDone
         self.meetingDetection = meetingDetection
         self.recording = recording
+        self.calendar = calendar
     }
 
     public init(from decoder: Decoder) throws {
@@ -434,6 +440,7 @@ public struct Config: Codable, Equatable {
         }
         meetingDetection = (try? c.decodeIfPresent(MeetingDetectionConfig.self, forKey: .meetingDetection)).flatMap { $0 } ?? d.meetingDetection
         recording = (try? c.decodeIfPresent(RecordingOptions.self, forKey: .recording)).flatMap { $0 } ?? d.recording
+        calendar = (try? c.decodeIfPresent(CalendarConfig.self, forKey: .calendar)).flatMap { $0 } ?? d.calendar
     }
 
     /// Valid range for the silence-minute settings.

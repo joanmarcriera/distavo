@@ -176,6 +176,10 @@ public struct PipelineDeps {
     /// Optional stage-boundary progress. Defaults to nil so tests and callers
     /// that don't care are unaffected (preserves the DI seam).
     public var onPhase: (@Sendable (ProcessingPhase) -> Void)?
+    /// Calendar events overlapping `[start, end]` (Vikunja #2946). nil (the
+    /// default) keeps the calendar feature inert and DistavoCore EventKit-free;
+    /// the app layer wires it to EventKit, returning [] when access is missing.
+    public var calendarLookup: ((_ start: Date, _ end: Date) async -> [CalendarCandidate])?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -184,8 +188,10 @@ public struct PipelineDeps {
         summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String,
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
-        audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) }
+        audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
+        calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil
     ) {
+        self.calendarLookup = calendarLookup
         self.convertToWav = convertToWav
         self.transcribe = transcribe
         self.ollamaReachable = ollamaReachable
@@ -367,10 +373,14 @@ public enum Pipeline {
         // (keyed by the recording, so a variant run gets it too): its speaker
         // count is authoritative for diarisation, and the participants text
         // goes into the prompt.
+        // Calendar event for this recording (#2946); nil when off / no match.
+        let calendarMatch = await CalendarLookup.resolve(
+            path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
-        let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let participants = CalendarLookup.participants(
+            hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines), match: calendarMatch, config: config)
 
         do {
             // A re-run must never leave the previous run's timed transcript
@@ -503,6 +513,7 @@ public enum Pipeline {
                                      transcriptPath: transcriptPath,
                                      detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
+            if let calendarMatch { noteText = CalendarTitle.retitle(note: noteText, title: calendarMatch.title) }   // #2946
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
             state.markDone(base)
             var message = "note written"

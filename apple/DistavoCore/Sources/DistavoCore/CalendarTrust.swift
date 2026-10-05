@@ -8,31 +8,40 @@ import Foundation
 // these values and drops what `isTrusted` rejects.
 
 /// The user's own response to an event.
-public enum CalendarSelfStatus: Equatable, Sendable {
+public enum CalendarSelfStatus: Equatable, Sendable, CaseIterable {
     case accepted, tentative, pending, declined, unknown
 }
 
 /// What kind of calendar an event lives in.
-public enum CalendarKind: Equatable, Sendable {
+public enum CalendarKind: Equatable, Sendable, CaseIterable {
     /// A writable calendar of the user's own account (local, iCloud/CalDAV, Exchange).
     case owned
     /// A subscribed or otherwise read-only calendar (other people's, holidays, sports).
     case subscribed
     /// The system birthday calendar.
     case birthday
+    /// A calendar type this build does not recognise (including any future EventKit value).
+    case unknown
 }
 
 public enum CalendarTrust {
-    /// - Calendars other than the user's own writable ones: never.
-    /// - Declined: never. (Cancelled events are filtered separately.)
-    /// - The user organises it, or it has no attendees (the user's own entry): yes.
-    /// - Otherwise only when the user accepted or tentatively accepted it;
-    ///   pending / needs-action invitations and an unknown status with an
-    ///   organiser other than the user are rejected.
+    /// An ALLOW-LIST: an event is trusted only when it is on one of the user's own
+    /// writable calendars (`.owned`) AND the user has not declined it AND one of
+    ///  - the user organises it,
+    ///  - it has no attendees (the user's own entry), or
+    ///  - the user's own response is accepted or tentative.
+    /// Everything else - pending / needs-action, an unknown status with someone
+    /// else organising (including a missing organiser while attendees exist),
+    /// declined, subscribed / birthday / unknown calendars, and any value the
+    /// mapping could not name - is NOT used. New enum cases must be added
+    /// to an allowing branch explicitly; they never become trusted by default.
     public static func isTrusted(selfStatus: CalendarSelfStatus, isOrganiser: Bool,
                                  hasAttendees: Bool, calendarKind: CalendarKind) -> Bool {
-        guard calendarKind == .owned, selfStatus != .declined else { return false }
-        if isOrganiser || !hasAttendees { return true }
-        return selfStatus == .accepted || selfStatus == .tentative
+        guard calendarKind == .owned else { return false }
+        switch selfStatus {
+        case .declined: return false
+        case .accepted, .tentative: return true
+        case .pending, .unknown: return isOrganiser || !hasAttendees
+        }
     }
 }

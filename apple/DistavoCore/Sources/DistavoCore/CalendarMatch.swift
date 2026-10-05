@@ -244,34 +244,51 @@ public enum CalendarAttendees {
         return out
     }
 
-    public static let maxNameWords = 6
-    private static let injectionWords = ["ignore previous", "ignore all", "disregard", "instruction", "system prompt",
-                                         "you are", "assistant", "as an ai"]
+    public static let maxNameWords = 5
+    /// Punctuation a person's display name may contain besides letters, marks,
+    /// digits and spaces.
+    static let namePunctuation: Set<Unicode.Scalar> = [".", "'", "\u{2019}", "-", "\u{00B7}"]
 
-    /// An attendee name safe to hand to the model: the invitation's sender
-    /// wrote it, so it must look like a person's display name or it is dropped.
-    /// Single line, control characters and `{}<>[]` and backticks removed, at
-    /// most `maxNameChars` characters and `maxNameWords` words, at least one
-    /// letter; anything with a URL, `@`, `#`, `*`, `|` or a phrase that reads
-    /// like an instruction is rejected outright (not truncated). `mailto:` is
-    /// stripped first, and an address-only entry is skipped.
+    /// An attendee name safe to hand to the model, by ALLOW-LIST: the invitation's
+    /// sender wrote it, so rather than hunting for bad content it must have the
+    /// shape of a display name or it is dropped (never repaired).
+    ///
+    /// After NFKC normalisation (full-width and compatibility look-alikes fold
+    /// to plain letters) every whitespace character - including U+2028/2029/0085 -
+    /// becomes one space and control, format, bidi and zero-width characters are
+    /// removed. What remains may contain only Unicode letters, marks, decimal
+    /// digits, spaces and `. ' ’ - ·`; any other character (so no `@`, `:`, `/`,
+    /// `#`, `*`, `_`, brackets, braces, angle brackets, backticks, pipes, ...)
+    /// drops the name. Then 1...`maxNameWords` words, at most `maxNameChars`
+    /// characters, at least one letter. `mailto:` and address-only entries fail
+    /// the character rule. The result still goes only into the participants
+    /// field, like hand-typed participants.
     static func plausibleName(_ raw: String) -> String? {
-        var name = raw.unicodeScalars.map { u -> String in
-            (u.value < 0x20 || u.value == 0x7F || (0x80...0x9F).contains(u.value)
-                || u.properties.generalCategory == .format || u == "\u{2028}" || u == "\u{2029}") ? " " : String(u)
-        }.joined()
-        name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if name.lowercased().hasPrefix("mailto:") { name = String(name.dropFirst(7)) }
-        for c in ["{", "}", "<", ">", "[", "]", "`"] { name = name.replacingOccurrences(of: c, with: "") }
-        let words = name.split(whereSeparator: { $0.isWhitespace })
-        name = words.joined(separator: " ")
-        let lower = name.lowercased()
-        guard !name.isEmpty, name.count <= maxNameChars, words.count <= maxNameWords,
-              name.contains(where: { $0.isLetter }),
-              !name.contains("@"), !lower.contains("http"), !lower.contains("://"), !lower.contains("www."),
-              !lower.contains(".com"), !name.contains(where: { "#*|\\".contains($0) }),
-              !injectionWords.contains(where: { lower.contains($0) }) else { return nil }
-        return name
+        var cleaned = String.UnicodeScalarView()
+        for u in raw.precomposedStringWithCompatibilityMapping.unicodeScalars {
+            if u.properties.isWhitespace { cleaned.append(" "); continue }
+            switch u.properties.generalCategory {
+            case .control, .format, .lineSeparator, .paragraphSeparator, .surrogate, .privateUse, .unassigned:
+                continue                                      // removed, not replaced
+            default:
+                cleaned.append(u)
+            }
+        }
+        let words = String(cleaned).split(separator: " ")
+        let name = words.joined(separator: " ")
+        guard !words.isEmpty, words.count <= maxNameWords, name.count <= maxNameChars else { return nil }
+        var hasLetter = false
+        for u in name.unicodeScalars {
+            switch u.properties.generalCategory {
+            case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter:
+                hasLetter = true
+            case .nonspacingMark, .spacingMark, .enclosingMark, .decimalNumber:
+                break
+            default:
+                guard u == " " || namePunctuation.contains(u) else { return nil }
+            }
+        }
+        return hasLetter ? name : nil
     }
 
     private static func fold(_ s: String) -> String {

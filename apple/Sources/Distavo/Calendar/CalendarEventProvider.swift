@@ -77,9 +77,12 @@ final class EventKitCalendarProvider: CalendarEventProviding, @unchecked Sendabl
             let me = event.attendees?.first(where: { $0.isCurrentUser })
             let kind: CalendarKind
             switch event.calendar?.type {
+            case .local?, .calDAV?, .exchange?:
+                kind = (event.calendar?.allowsContentModifications ?? false) ? .owned : .subscribed
+            case .subscription?: kind = .subscribed
             case .birthday?: kind = .birthday
-            case .subscription?, nil: kind = .subscribed
-            default: kind = (event.calendar?.allowsContentModifications ?? false) ? .owned : .subscribed
+            case nil: kind = .unknown
+            @unknown default: kind = .unknown        // fail closed
             }
             let selfStatus: CalendarSelfStatus
             switch me?.participantStatus {
@@ -87,7 +90,8 @@ final class EventKitCalendarProvider: CalendarEventProviding, @unchecked Sendabl
             case .tentative?: selfStatus = .tentative
             case .pending?: selfStatus = .pending
             case .declined?: selfStatus = .declined
-            default: selfStatus = .unknown
+            case nil: selfStatus = .unknown
+            default: selfStatus = .unknown           // delegated, completed, in-process, future values
             }
             guard event.status != .canceled,
                   CalendarTrust.isTrusted(selfStatus: selfStatus, isOrganiser: event.organizer?.isCurrentUser ?? false,

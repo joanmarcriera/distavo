@@ -409,6 +409,29 @@ final class FileDownloadDelegate: NSObject, URLSessionDownloadDelegate, @uncheck
 /// downloads wait instead of deleting files mid-read. The pipeline summarises
 /// one recording at a time, so this never stalls transcription.
 public enum GemmaSummariser {
+    /// One generic completion on a downloaded model (Vikunja #2948, "Ask Your
+    /// Notes"): the prompt is sent as given, no note post-processing. Exclusive
+    /// like `summarise`, so it never overlaps a note generation or a download.
+    public static func complete(
+        prompt: String, modelID: String, maxOutputTokens: Int,
+        root: URL = EmbeddedModelStore.modelsDirectory
+    ) async throws -> String {
+        try await ModelCoordinator.shared.withExclusiveAccess {
+            let model = EmbeddedSummaryModelCatalog.model(id: modelID)
+            guard model.engine == .mlx, SummaryModelStore.isVerified(model, root: root) else {
+                throw RetryableDependencyError("\(model.displayName) is not downloaded yet.")
+            }
+            let generator = MLXGemmaGenerator(
+                modelDirectory: SummaryModelStore.directory(for: model, root: root), modelID: model.id,
+                contextSize: model.contextCap ?? 8192)
+            defer { generator.unload() }
+            let text = try await generator.generate(prompt, maxOutputTokens: maxOutputTokens)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { throw LocalSummaryError("The local model returned an empty answer.") }
+            return text
+        }
+    }
+
     public static func summarise(
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,

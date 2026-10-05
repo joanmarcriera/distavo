@@ -682,8 +682,8 @@ final class WatcherController: ObservableObject {
                             body: "This recording was processed before Distavo saved timestamps. Process it again to export subtitles or a formatted transcript.")
             return
         }
-        if let outcome = TranscriptExporter.run(base: base, transcript: transcript) {
-            notifier.notify(title: outcome.title, body: outcome.body)
+        TranscriptExporter.run(base: base, transcript: transcript) { [weak self] title, body in
+            self?.notifier.notify(title: title, body: body)
         }
     }
 

@@ -680,11 +680,41 @@ final class CalendarMatchTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "dropped files are never renamed")
     }
 
-    func testRenamedStemWithTimeLikeTitleIsNotMistakenForARecorderName() {
-        XCTAssertNil(Pipeline.recorderNameDate("2026-10-05 10.30.00 Standup"))
-        XCTAssertNil(Pipeline.recorderNameDate("2026-10-05 Event Title"))
-        XCTAssertNotNil(Pipeline.recorderNameDate("Meeting 2026-10-05 10.30.00"))
-        XCTAssertNil(Pipeline.meetingDate(for: URL(fileURLWithPath: "/nonexistent/2026-10-05 10.30.00 Standup.wav")))
+    /// main's `meetingDate` name rule, copied verbatim, as the oracle.
+    private func mainRule(_ stem: String, _ tz: TimeZone) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = tz; f.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        if let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression),
+           let date = f.date(from: String(stem[range])) { return date }
+        return nil
+    }
+
+    func testMeetingDateNameShapesMatchMain() {
+        let tz = TimeZone(identifier: "Europe/London")!
+        let stems = ["Meeting 2026-09-16 16.13.08", "2026-09-16 16.13.08", "voice 2026-09-16 16.13.08 copy",
+                     "sub__Meeting_2026-09-16_16.13.08", "sub__Meeting 2026-09-16 16.13.08", "Meeting 2026-09-16 16.13.08 2",
+                     "2026-10-05 10.30.00 Standup", "2026-10-05 Event Title", "memo", "Meeting 2026-13-45 99.99.99", ""]
+        for stem in stems {
+            let url = URL(fileURLWithPath: "/nonexistent/\(stem).wav")
+            XCTAssertEqual(Pipeline.meetingDate(for: url, timeZone: tz), mainRule(stem, tz), stem)
+            XCTAssertEqual(Pipeline.recorderNameDate(stem, timeZone: tz), mainRule(stem, tz), stem)
+        }
+        XCTAssertNotNil(Pipeline.meetingDate(for: URL(fileURLWithPath: "/x/2026-09-16 16.13.08.m4a")), "bare name still dated")
+    }
+
+    func testCalendarRenamedTimeLikeTitleUsesTheSidecarStart() async throws {
+        let env = try makeEnv()
+        let url = try recording(env, "2026-10-05 10.30.00 Standup.wav")   // renamed file, title looks like a time
+        let base = DistavoState.baseFor(recordingsDir: env.recordings, path: url)
+        let recStart = local(10)
+        try CalendarMatchStore.save(CalendarMatch(title: "10.30.00 Standup", start: recStart, end: local(11),
+                                                  recordingStart: recStart), workDir: env.work, base: base)
+        final class Box: @unchecked Sendable { var date: Date? }
+        let box = Box()
+        var d = deps(Seen(), events: nil)
+        d.summarise = { _, _, _, ctx in box.date = ctx.meetingDate; return PipelineTests.validNote }
+        _ = await Pipeline.processOne(path: url, config: env.config, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(box.date, recStart, "the sidecar's own start, not the 10.30.00 in the title")
     }
 
     func testProcessingNeverRenamesTheRecording() async throws {

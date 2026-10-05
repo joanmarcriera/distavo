@@ -207,7 +207,7 @@ extension Pipeline {
             userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
         let context = NoteContext(
             noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
-            meetingDate: sourcePath.flatMap { meetingDate(for: $0) },
+            meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             customInstruction: options.customInstruction,
             // The glossary reaches the prompt exactly as in `processOne`. The cached

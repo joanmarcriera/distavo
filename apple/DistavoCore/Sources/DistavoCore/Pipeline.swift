@@ -454,7 +454,7 @@ public enum Pipeline {
                 config: config, workDir: workDir, base: base, dominantCode: dominantCode)
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
-                participants: participants, meetingDate: meetingDate(for: path),
+                participants: participants, meetingDate: calendarMatch?.recordingStart ?? meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 glossary: transcribeConfig.vocabulary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
@@ -615,13 +615,13 @@ public enum Pipeline {
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
     }
 
-    /// The start time in a built-in recorder name ("Meeting 2026-09-16 16.13.08"),
-    /// anchored at the start so an event title such as "10.30.00 Standup" in a
-    /// calendar-renamed file ("2026-10-05 10.30.00 Standup") can never pass for one.
+    /// The start time in a recorder-style name, exactly as before #2946 (any
+    /// position, with or without the "Meeting " prefix). A calendar-renamed file is
+    /// covered by its sidecar's `recordingStart`, which callers prefer.
     static func recorderNameDate(_ stem: String, timeZone: TimeZone = .current) -> Date? {
-        guard let range = stem.range(of: #"^Meeting \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#,
-                                     options: .regularExpression) else { return nil }
-        return recorderNameFormatter(timeZone).date(from: String(stem[range].dropFirst("Meeting ".count)))
+        guard let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression)
+        else { return nil }
+        return recorderNameFormatter(timeZone).date(from: String(stem[range]))
     }
 
     /// Recording start from trustworthy evidence: the recorder's file name, else

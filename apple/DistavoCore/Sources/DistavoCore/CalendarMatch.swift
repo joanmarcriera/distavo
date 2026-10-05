@@ -42,12 +42,17 @@ public struct CalendarMatch: Codable, Equatable, Sendable {
     public var start: Date
     public var end: Date
     public var attendees: [String]
+    /// When the RECORDING started (nil in sidecars written before this field). It is
+    /// the meeting date for the prompt, so a calendar-renamed file whose title looks
+    /// like a time never has its date guessed from the file name.
+    public var recordingStart: Date?
 
     public static let currentVersion = 1
 
-    public init(title: String, start: Date, end: Date, attendees: [String] = []) {
+    public init(title: String, start: Date, end: Date, attendees: [String] = [], recordingStart: Date? = nil) {
         self.version = Self.currentVersion
         self.title = title; self.start = start; self.end = end; self.attendees = attendees
+        self.recordingStart = recordingStart
     }
 }
 
@@ -103,7 +108,8 @@ public enum CalendarMatcher {
         guard let chosen = best?.c, let title = CalendarTitle.displayTitle(chosen.title) else { return nil }
         return CalendarMatch(
             title: title, start: chosen.start, end: chosen.end,
-            attendees: CalendarAttendees.clean(chosen.attendees, owner: ownerName, cap: maxAttendees))
+            attendees: CalendarAttendees.clean(chosen.attendees, owner: ownerName, cap: maxAttendees),
+            recordingStart: start)
     }
 }
 

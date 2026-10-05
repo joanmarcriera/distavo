@@ -184,6 +184,7 @@ public enum SpeakerRename {
     /// listed. All three inputs are optional. Labels are NFC-normalised.
     public static func detectSpeakers(note: String?, transcript: String?,
                                       segments: TranscriptSegments?) -> [DetectedSpeaker] {
+        let note = note.map(NoteFrontmatter.strip)   // frontmatter is not prose (#2954)
         var order: [String] = []
         var turns: [String: Int] = [:]
         var sample: [String: String] = [:]
@@ -329,6 +330,15 @@ public enum SpeakerRename {
     /// ("Transcribed on this Mac with …") is never touched.
     static func rewriteNote(_ text: String, mapping: [String: String]) -> String {
         guard !mapping.isEmpty, !text.isEmpty else { return text }
+        // YAML frontmatter (#2954) is not prose: only the `attendees:` entries that exactly
+        // match a renamed name change; every other key is untouched, so a speaker called
+        // "title" or "date" cannot corrupt the block. The body is rewritten as before.
+        if let block = NoteFrontmatter.split(text).block {
+            let rest = String(text.dropFirst(block.count))
+            if text.hasPrefix(block) {
+                return NoteFrontmatter.renamingAttendees(in: block, mapping: mapping) + rewriteNote(rest, mapping: mapping)
+            }
+        }
         var body = text
         var footer = ""
         if let f = Pipeline.provenanceFooter(in: text), text.hasSuffix(f) {

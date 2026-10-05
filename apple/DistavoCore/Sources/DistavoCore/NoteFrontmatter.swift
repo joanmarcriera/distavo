@@ -128,14 +128,16 @@ public enum NoteFrontmatter {
         var text = Substring(note)
         if text.hasPrefix("\u{FEFF}") { text = text.dropFirst() }
         let lines = text.components(separatedBy: "\n")
-        func fence(_ l: String) -> Bool { l.trimmingCharacters(in: .whitespacesAndNewlines) == "---" }
+        // A fence is exactly `---` at column 0 (trailing spaces / CR allowed): an indented
+        // `  ---` inside a hand-written block scalar must not close the block.
+        func fence(_ l: String) -> Bool { isFence(l) }
         guard lines.count >= 2, fence(lines[0]) else { return (nil, note) }
         var close: Int?
         var sawKey = false
         for i in 1..<lines.count {
             let raw = lines[i]
             let l = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
-            if fence(l) || l.trimmingCharacters(in: .whitespaces) == "..." { close = i; break }
+            if fence(l) || (l.hasPrefix("...") && l.trimmingCharacters(in: .whitespaces) == "...") { close = i; break }
             if l.trimmingCharacters(in: .whitespaces).isEmpty || l.hasPrefix("#") || l.hasPrefix(" ") || l.hasPrefix("\t") || l.hasPrefix("- ") {
                 if !sawKey && !(l.trimmingCharacters(in: .whitespaces).isEmpty || l.hasPrefix("#")) { return (nil, note) }
                 continue
@@ -186,6 +188,10 @@ public enum NoteFrontmatter {
         return out
     }
 
+    private static func isFence(_ line: String) -> Bool {
+        line.hasPrefix("---") && line.dropFirst(3).allSatisfy { $0 == " " || $0 == "\t" || $0 == "\r" }
+    }
+
     private static func keyName(of line: String) -> String? {
         guard let r = line.range(of: #"^[A-Za-z_][A-Za-z0-9_.-]*(?=\s*:(\s|$))"#, options: .regularExpression) else { return nil }
         return String(line[r])
@@ -198,7 +204,7 @@ public enum NoteFrontmatter {
         var inside = false
         for raw in block.components(separatedBy: "\n") {
             let line = raw.trimmingCharacters(in: CharacterSet(charactersIn: "\r"))
-            if line.trimmingCharacters(in: .whitespaces) == "---" { inside.toggle(); continue }
+            if isFence(line) { inside.toggle(); continue }
             guard inside else { continue }
             if let key = keyName(of: line) { groups.append((key, [line])) }
             else if !groups.isEmpty { groups[groups.count - 1].lines.append(line) }
@@ -213,6 +219,44 @@ public enum NoteFrontmatter {
     }
 
     // MARK: Attendees
+
+    /// Items of a one-line flow sequence `[a, "b: c"]` (quotes and `\\`/`\"` escapes honoured);
+    /// nil when `text` is not a flow sequence.
+    static func flowItems(_ text: String) -> [String]? {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        guard t.hasPrefix("["), t.hasSuffix("]") else { return nil }
+        var items: [String] = [], cur = "", quoted = false, wasQuoted = false, escaped = false
+        func flush() {
+            let v = cur.trimmingCharacters(in: .whitespaces)
+            if wasQuoted || !v.isEmpty { items.append(wasQuoted ? unescape(cur) : v) }
+            cur = ""; wasQuoted = false
+        }
+        for ch in t.dropFirst().dropLast() {
+            if quoted {
+                if escaped { cur.append("\\"); cur.append(ch); escaped = false }
+                else if ch == "\\" { escaped = true }
+                else if ch == "\"" { quoted = false }
+                else { cur.append(ch) }
+            } else if ch == "\"" { quoted = true; wasQuoted = true; cur = "" }
+            else if ch == "," { flush() }
+            else { cur.append(ch) }
+        }
+        flush()
+        return items
+    }
+
+    /// `block` with the entries of its `attendees:` list that exactly equal (canonical
+    /// Unicode equivalence) a key of `mapping` replaced by the mapped name. Nothing else changes.
+    public static func renamingAttendees(in block: String, mapping: [String: String]) -> String {
+        let map = Dictionary(mapping.map { ($0.key.precomposedStringWithCanonicalMapping, $0.value) },
+                             uniquingKeysWith: { a, _ in a })
+        return block.components(separatedBy: "\n").map { line -> String in
+            guard keyName(of: line) == "attendees", let colon = line.firstIndex(of: ":"),
+                  let items = flowItems(String(line[line.index(after: colon)...])) else { return line }
+            let renamed = items.map { map[$0.precomposedStringWithCanonicalMapping] ?? $0 }
+            return renamed == items ? line : "attendees: " + list(renamed)
+        }.joined(separator: "\n")
+    }
 
     /// Attendee names from the free-text participants description the owner gave
     /// after recording ("Edward (Cambridge University) — interviewer; Marc (me)").

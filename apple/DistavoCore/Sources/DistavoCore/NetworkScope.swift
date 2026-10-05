@@ -23,19 +23,75 @@ public enum NetworkScope {
         if host == "localhost" { return false }
         // An IP literal is judged by its numeric range ONLY. Prefix tests on the raw
         // string would also match public names like `10.evil.example` (security fix).
-        if let v4 = ipv4Bytes(host) { return v4[0] != 127 && isPrivateAddress(host) }
-        if ipv6Bytes(host) != nil { return isPrivateAddress(host) }
+        if let nums = numericAddresses(host) {
+            return nums.allSatisfy { isPrivateAddress($0) && !isLoopbackAddress($0) }
+        }
         if host.hasSuffix(".local") { return true }
         if !host.contains(".") { return true }  // bare hostname → likely a LAN name
         return false
     }
 
-    /// The URL's host without IPv6 brackets or a trailing dot, lower-cased.
-    static func hostOf(_ urlString: String) -> String? {
-        guard var host = URLComponents(string: urlString)?.host else { return nil }
-        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]")).lowercased()
-        if host.hasSuffix(".") { host.removeLast() }
-        return host
+    /// The host the connection will use, parsed ONCE from the URL's percent-ENCODED host
+    /// (never from a decoded or re-parsed string), or nil when the URL is rejected.
+    ///
+    /// - `name`: lower-case, no brackets, no zone id, no trailing dot.
+    /// - A `%` is accepted only inside a bracketed IPv6 literal as `%25<zone>` where the
+    ///   address is link-local (fe80::/10) and the zone is `[A-Za-z0-9._~-]+`; any other
+    ///   host containing `%` (encoded or decoded) is rejected, as is a bracketed
+    ///   non-IPv6 host, an unbracketed host containing `:`, and any userinfo.
+    struct ParsedHost: Equatable {
+        let name: String
+        let zone: String?
+        let bracketed: Bool
+    }
+
+    static func parseHost(_ urlString: String) -> ParsedHost? {
+        guard let c = URLComponents(string: urlString), c.user == nil, c.password == nil,
+              var raw = c.percentEncodedHost, !raw.isEmpty else { return nil }
+        let bracketed = raw.hasPrefix("[") && raw.hasSuffix("]")
+        if raw.hasPrefix("[") != raw.hasSuffix("]") { return nil }
+        if bracketed { raw = String(raw.dropFirst().dropLast()) }
+        var zone: String?
+        if raw.contains("%") {
+            guard bracketed, let r = raw.range(of: "%25") else { return nil }
+            let z = String(raw[r.upperBound...])
+            raw = String(raw[..<r.lowerBound])
+            guard !z.isEmpty, !raw.contains("%"), !z.contains("%"),
+                  z.unicodeScalars.allSatisfy({ ($0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains(Character($0)))) || "._~-".unicodeScalars.contains($0) }),
+                  let v6 = ipv6Bytes(raw), v6[0] == 0xfe, (v6[1] & 0xc0) == 0x80 else { return nil }
+            zone = z
+        }
+        if bracketed { guard ipv6Bytes(raw) != nil else { return nil } }
+        else if raw.contains(":") { return nil }
+        raw = raw.lowercased()
+        if raw.hasSuffix(".") { raw.removeLast() }
+        return raw.isEmpty ? nil : ParsedHost(name: raw, zone: zone, bracketed: bracketed)
+    }
+
+    /// The validated host name (see `parseHost`), or nil.
+    static func hostOf(_ urlString: String) -> String? { parseHost(urlString)?.name }
+
+    /// Numeric addresses `host` denotes the way the socket layer reads it
+    /// (`getaddrinfo` with AI_NUMERICHOST): dotted quads AND the legacy decimal /
+    /// octal / hex forms (`2130706433`, `0x7f.1`, `010.0.0.1`) are normalised to their
+    /// canonical address. nil when `host` is a name (needs resolving).
+    static func numericAddresses(_ host: String) -> [String]? {
+        var hints = addrinfo(ai_flags: AI_NUMERICHOST, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
+                             ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var result: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &result) == 0, let head = result else { return nil }
+        defer { freeaddrinfo(head) }
+        var out: [String] = []
+        var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        var node = Optional(head)
+        while let n = node {
+            if let addr = n.pointee.ai_addr,
+               getnameinfo(addr, n.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
+                out.append(String(cString: buf))
+            }
+            node = n.pointee.ai_next
+        }
+        return out.isEmpty ? nil : out
     }
 
     /// Strict dotted-quad parse (`inet_pton`): "10.evil.example" and "10.1" are nil.
@@ -47,6 +103,7 @@ public enum NetworkScope {
 
     /// IPv6 literal (zone id stripped) as 16 bytes.
     static func ipv6Bytes(_ s: String) -> [UInt8]? {
+        // A zone id is NOT stripped here: `parseHost` is the only place that accepts one.
         let bare = s.split(separator: "%").first.map(String.init) ?? s
         var addr = in6_addr()
         guard inet_pton(AF_INET6, bare, &addr) == 1 else { return nil }
@@ -116,7 +173,7 @@ public enum NetworkScope {
                                               resolver: HostResolver = systemResolver) -> Bool {
         if isLocalNetworkHost(urlString) { return true }
         guard let host = hostOf(urlString), !host.isEmpty, host != "localhost",
-              ipv4Bytes(host) == nil, ipv6Bytes(host) == nil else { return false }
+              numericAddresses(host) == nil else { return false }
         // EVERY address must be private: a name that also resolves to a public
         // address can send the request off the LAN.
         let ips = resolver(host)
@@ -140,7 +197,9 @@ public enum NetworkScope {
     public static func isLoopbackHost(_ urlString: String) -> Bool {
         guard let host = hostOf(urlString), !host.isEmpty else { return false }
         if host == "localhost" { return true }
-        return isLoopbackAddress(host)   // IP literals only: `127.evil.example` is NOT loopback
+        // Numeric forms only: `127.evil.example` is NOT loopback, `2130706433` is.
+        guard let nums = numericAddresses(host) else { return false }
+        return nums.allSatisfy(isLoopbackAddress)
     }
 
     /// How Test Connections should present an endpoint's result. Distinguishes

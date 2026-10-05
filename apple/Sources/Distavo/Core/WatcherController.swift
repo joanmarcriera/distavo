@@ -319,6 +319,8 @@ final class WatcherController: ObservableObject {
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             store()?.clearTooShort(base)
+            // Its Quick Notes (#2949) have nothing left to attach to.
+            ScratchpadNotes.delete(workDir: Config.resolvePath(config.workDir), base: base)
             log("Moved too-short recording to the Bin: \(url.lastPathComponent)")
         } catch {
             log("Could not delete \(url.lastPathComponent): \(error.localizedDescription)")

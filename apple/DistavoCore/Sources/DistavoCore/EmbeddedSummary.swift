@@ -91,7 +91,8 @@ public struct EmbeddedSummaryBudget: Equatable {
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
                              style: Prompt.Style = .classic, extraInstructions: String? = nil,
                              noteLanguage: String? = nil, customInstruction: String? = nil,
-                             glossary: [String] = [], template: SummaryTemplate? = nil)
+                             glossary: [String] = [], template: SummaryTemplate? = nil,
+                             scratchpad: ScratchpadNotes? = nil)
         -> EmbeddedSummaryBudget {
         // nil `noteLanguage` leaves the measured prompt (so the budget) exactly
         // as before; a language swaps in its longer rule. A summary template
@@ -100,7 +101,7 @@ public struct EmbeddedSummaryBudget: Equatable {
                                         userSpeaker: userSpeaker, style: style,
                                         noteLanguage: noteLanguage,
                                         customInstruction: customInstruction, glossary: glossary,
-                                        template: template)
+                                        template: template, scratchpad: scratchpad)
         // The end-of-user-turn block rides in the final prompt, so its tokens
         // come out of the transcript budget too.
         let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -206,13 +207,13 @@ public enum EmbeddedSummaryPlanner {
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
         style: Prompt.Style = .classic, extraInstructions: String? = nil,
         noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
-        template: SummaryTemplate? = nil
+        template: SummaryTemplate? = nil, scratchpad: ScratchpadNotes? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
             extraInstructions: extraInstructions, noteLanguage: noteLanguage,
             customInstruction: customInstruction, glossary: glossary,
-            template: template)
+            template: template, scratchpad: scratchpad)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

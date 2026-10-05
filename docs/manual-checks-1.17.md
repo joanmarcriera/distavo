@@ -232,3 +232,24 @@ Editing
 Not covered by unit tests: all of the above window behaviour, AVPlayer seek latency, the highlight cadence,
 auto-scroll, and the App Store sandbox read of the recording. Speaker relabelling is supported by the edit
 model (`SegmentEdit.speaker`) but there is no UI for it in this version.
+
+## Quick Notes while recording (#2949)
+
+Needs a launched build (any edition) with a real recording; the panel, focus and the model's behaviour cannot be exercised headless. Unit tests cover the sidecar, the prompt block, the budget, the Highlights safety net and `processOne`/`regenerate` plumbing only.
+
+1. Menu bar shows **Quick Notes…** only while a recording runs (under "Stop and delete recording"). Idle: absent. macOS < 14.4: the whole recorder section is hidden, so it is too.
+2. Start recording, open Quick Notes. The panel floats above the meeting window and takes typing without pulling focus from the call app. Type `ask about notice period`, Return -> a line stamped with the elapsed time appears above the field. Type `!decision: option B`, Return -> shown with a filled star. Edit a line in place, toggle a star, delete a line.
+3. While recording, `~/Library/Application Support/Distavo/work/<base>.scratchpad.json` exists and follows each edit (`<base>` = the recording name with spaces as `_`/as `DistavoState.baseFor` writes it; the `.wav.part` sits in the recordings folder). Deleting every line removes the file.
+4. Stop. The panel closes; the sidecar stays. When the note is written it contains a `## Highlights` section directly after `# Meeting notes`, one bullet per typed line (flagged ones start with a star), ideally with what the meeting said about each. Repeat with a model that ignores instructions (or Apple's on-device model): the section must still appear with the lines verbatim and their mm:ss.
+5. **Regenerate Note…** on that note keeps the Highlights (the sidecar is reused).
+6. **Stop and delete recording** after typing a note: `<base>.scratchpad.json` is gone and the panel closes.
+7. Crash recovery: type a note, `kill -9` Distavo mid-recording, relaunch. The `.wav.part` is recovered to `<name>.wav` and the note it produces carries the Highlights.
+8. A recording with no notes typed: no sidecar, no Highlights section, summary prompt unchanged.
+9. On-device (Apple) model with 20 long lines: the note still generates (lines are capped at 20 lines / 140 chars / 800 chars total).
+
+### Quick Notes follow-ups (#2949)
+
+10. Type a note but do NOT press Return, then Stop (and, separately, let the silence auto-stop fire): the note is still in the sidecar and the Highlights. **Stop and delete recording** discards an unsent draft too.
+11. Screen sharing: share your screen in Zoom/Meet while the panel is open; participants must NOT see the Quick Notes panel (`sharingType = .none`). The panel's footer says it is hidden from screen sharing.
+12. Edits are written after about half a second of quiet (off the main thread); typing stays smooth in a long session, and Stop flushes everything.
+13. Move a too-short recording to the Bin from the menu: its `<base>.scratchpad.json` is removed.

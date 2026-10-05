@@ -50,6 +50,9 @@ final class MeetingCaptureController: ObservableObject {
     /// Removes that notification (sound resumed, Keep, or any stop).
     private let clearSilenceNotification: () -> Void
 
+    /// Typed notes for the current recording (Vikunja #2949; see QuickNotes.swift).
+    let quickNotes = QuickNotesModel()
+
     private var silenceMonitor: SilenceMonitor?
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
     private var timer: Timer?
@@ -121,6 +124,9 @@ final class MeetingCaptureController: ObservableObject {
         }
     }
 
+    /// "Quick Notes…" menu item: open the floating notes panel (recording only).
+    func showQuickNotes() { quickNotes.showPanel() }
+
     func toggle() {
         if isRecording { stop(reason: .manual) } else { Task { await start() } }
     }
@@ -147,6 +153,7 @@ final class MeetingCaptureController: ObservableObject {
         let name = recorder.discard()
         self.recorder = nil
         isRecording = false
+        quickNotes.endAndDelete()
         log("Meeting recording deleted on request: \(name ?? "?") (\(elapsedLabel))")
         notify("Recording deleted", "Nothing was saved or transcribed.")
     }
@@ -170,6 +177,11 @@ final class MeetingCaptureController: ObservableObject {
         self.recorder = recorder
         isRecording = true
         startedAt = Date()
+        if let url = recorder.fileURL {   // Quick Notes are keyed on the recording's final base
+            quickNotes.begin(workDir: Config.resolvePath(configProvider().workDir),
+                             base: DistavoState.baseFor(recordingsDir: folderProvider(), path: url),
+                             startedAt: Date())
+        }
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
@@ -227,6 +239,7 @@ final class MeetingCaptureController: ObservableObject {
         let outcome = recorder.stop(deferFinalize: ask)
         self.recorder = nil
         isRecording = false
+        quickNotes.end()   // keeps the sidecar, closes the panel
 
         guard let outcome else { return }
         log("Meeting recording saved: \(outcome.url.lastPathComponent) (\(elapsedLabel))")

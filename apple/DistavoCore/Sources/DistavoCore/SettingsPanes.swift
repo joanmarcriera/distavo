@@ -54,7 +54,8 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
                     "language pack", "speakers", "diarize", "download", "benchmark", "disk"]
         case .notes:
             return ["prompt", "facts first", "classic", "write notes in", "note language", "owner",
-                    "speaker label", "your name", "english"]
+                    "speaker label", "your name", "english", "language", "original language",
+                    "translate", "french", "german", "always write"]
         case .summaries:
             return ["ollama", "backend", "server", "local", "apple intelligence", "on-device", "gemma",
                     "summary model", "bigger model", "fallback"]

@@ -113,12 +113,12 @@ public struct NoteContext: Equatable, Sendable {
     /// When the recording started, when known (recorder filename or file date).
     public var meetingDate: Date?
     public var promptStyle: Prompt.Style
-    /// ISO code of the meeting's dominant detected language ("ca"/"es"/…),
-    /// set only when `summarise.note_language` is "auto" (Vikunja #2147).
-    /// nil for the "en" setting (default for any config predating the key)
-    /// or when no detection is available — the prompt is then byte-identical
-    /// to before this feature. Ollama-only: the app layer never routes the
-    /// embedded (Foundation Models) path through this.
+    /// The resolved note language (`NoteLanguage.resolve`): the meeting's
+    /// detected language under "auto", or a fixed target code (Vikunja #2147,
+    /// #2956). nil for "en" (default for any config predating the key), an
+    /// unknown value, or no detection — the prompt is then byte-identical to
+    /// before the feature. Honoured by Ollama and Gemma; Apple's on-device
+    /// model gets it only for languages it reports supporting.
     public var noteLanguage: String?
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
@@ -376,7 +376,7 @@ public enum Pipeline {
             let result = try await deps.transcribe(wavPath, transcribeConfig)
             let detectedLanguages = detectedLanguages(from: result)
             // Computed unconditionally (unlike `noteLanguage` below, which
-            // only fires for `note_language == "auto"`) so `ProcessResult`
+            // only uses it for "auto") so `ProcessResult`
             // always reports it when available — `retryTranscribeBigger`
             // needs it regardless of the note-language setting (#2205).
             let dominantCode = dominantLanguageCode(from: result)
@@ -390,11 +390,25 @@ public enum Pipeline {
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
 
             deps.onPhase?(.summarising)
-            // "auto" follows the meeting's dominant detected language for the
-            // Ollama prompt (Vikunja #2147); "en" (the default for any config
-            // predating the key) always leaves noteLanguage nil, so the
-            // prompt is unaffected regardless of what was detected.
-            let noteLanguage = config.summarise.noteLanguage == "auto" ? dominantCode : nil
+            // The note language (Vikunja #2147, #2956): a per-recording
+            // override (`<base>.language.json`) beats `summarise.note_language`,
+            // which is "en" (default: nil, prompt untouched), "auto" (the
+            // meeting's dominant detected language) or a fixed language code.
+            // Unknown values behave like "en". See `NoteLanguage.resolve`.
+            // With no detection (WhisperX, or a spoken language fixed by the
+            // owner) "auto" falls back to that fixed spoken language.
+            let languageSidecar = LanguageOverride.load(
+                workDir: workDir, base: LanguageOverride.sourceBase(from: base))
+            // The sidecar's spoken code only counts when transcription honoured
+            // it, i.e. when the configured language is automatic
+            // (`LanguageOverride.applying`).
+            let spokenLanguage = EmbeddedModelCatalog.isAutomatic(config.transcribe.language)
+                ? (languageSidecar.flatMap { $0.code.isEmpty ? nil : $0.code } ?? config.transcribe.language)
+                : config.transcribe.language
+            let noteLanguage = NoteLanguage.resolve(
+                setting: config.summarise.noteLanguage,
+                perRecording: languageSidecar?.noteLanguage,
+                detected: dominantCode ?? spokenLanguage)
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
@@ -555,7 +569,7 @@ public enum Pipeline {
     /// The single highest-probability detected language code (e.g. "ca"),
     /// or nil when the transcribe result carries no detections (the server
     /// path, or the built-in engine outside Automatic mode). Feeds
-    /// `NoteContext.noteLanguage` when `summarise.note_language` is "auto".
+    /// `NoteContext.noteLanguage` when the note language resolves to "auto".
     static func dominantLanguageCode(from transcribeResult: [String: Any]) -> String? {
         let detections: [(code: String, probability: Double)] =
             (transcribeResult["detections"] as? [[String: Any]] ?? []).compactMap { entry in

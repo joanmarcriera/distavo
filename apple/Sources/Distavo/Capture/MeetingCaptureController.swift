@@ -359,6 +359,20 @@ final class MeetingCaptureController: ObservableObject {
         let languagePickerTarget = LanguagePickerActionTarget { userChangedLanguage = true }
         language.target = languagePickerTarget
         language.action = #selector(LanguagePickerActionTarget.picked)
+        // Per-recording note language (Vikunja #2956). Index 0 = no override (the
+        // Settings value applies); then English, the meeting's own language, and
+        // every fixed language. Only a click saves anything (same rule as above).
+        let noteChoices: [(title: String, value: String?)] =
+            [("Default (from Settings)", nil), ("English", "en"), ("Same as the meeting", "auto")]
+            + WhisperLanguageCatalog.all.filter { !$0.code.isEmpty && $0.code != "en" }
+                .map { ("Always \($0.englishName)", $0.code) }
+        let noteLanguagePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        for choice in noteChoices { noteLanguagePopup.addItem(withTitle: choice.title) }
+        noteLanguagePopup.selectItem(at: 0)
+        var userChangedNoteLanguage = false
+        let noteLanguageTarget = LanguagePickerActionTarget { userChangedNoteLanguage = true }
+        noteLanguagePopup.target = noteLanguageTarget
+        noteLanguagePopup.action = #selector(LanguagePickerActionTarget.picked)
         let languageStatus = NSTextField(labelWithString: detection == nil ? "" : "Detecting…")
         languageStatus.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         languageStatus.textColor = .secondaryLabelColor
@@ -384,11 +398,12 @@ final class MeetingCaptureController: ObservableObject {
             statusRow.orientation = .horizontal
             rows.append(statusRow)
         }
+        rows.append(row("Write notes in:", noteLanguagePopup, width: 200))
         let form = NSStackView(views: rows)
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 100 : 150)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 130 : 180)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,
@@ -420,7 +435,9 @@ final class MeetingCaptureController: ObservableObject {
         alert.addButton(withTitle: "Skip")
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = myRole
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        // NSControl.target is weak: keep both popup targets alive for the modal run.
+        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget)) { alert.runModal() }
+        guard response == .alertFirstButtonReturn else { return }
 
         let recordingsDir = folderProvider()
         let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
@@ -431,10 +448,16 @@ final class MeetingCaptureController: ObservableObject {
         // row — including one showing a "Detected: X" label — saves nothing,
         // leaving routing to the pipeline's own detection.
         let selectedCode = languageCodes[max(0, language.indexOfSelectedItem)]
-        if userChangedLanguage, !selectedCode.isEmpty {
+        let spokenCode = userChangedLanguage ? selectedCode : ""
+        let noteChoice = userChangedNoteLanguage
+            ? noteChoices[max(0, noteLanguagePopup.indexOfSelectedItem)].value : nil
+        // One sidecar carries both halves (spoken language, note language);
+        // either may be absent. Nothing clicked = no file, as before.
+        if !spokenCode.isEmpty || noteChoice != nil {
             do {
-                try LanguageOverride(code: selectedCode).save(workDir: workDir, base: base)
-                log("Meeting language confirmed for \(url.lastPathComponent): \(selectedCode)")
+                try LanguageOverride(code: spokenCode, noteLanguage: noteChoice)
+                    .save(workDir: workDir, base: base)
+                log("Language confirmed for \(url.lastPathComponent): spoken \(spokenCode.isEmpty ? "unchanged" : spokenCode), notes \(noteChoice ?? "per Settings")")
             } catch {
                 log("Could not save the language override for \(url.lastPathComponent): \(error.localizedDescription)")
             }

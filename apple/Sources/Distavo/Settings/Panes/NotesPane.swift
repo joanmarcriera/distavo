@@ -19,9 +19,19 @@ struct NotesPane: View {
             Picker("Write notes in", selection: $model.draft.summarise.noteLanguage) {
                 Text("Match the meeting language").tag("auto")
                 Text("English").tag("en")
+                // A stored value the list does not know (hand-edited config): keep it
+                // visible instead of the Picker landing on nothing. It behaves as English.
+                if !NoteLanguage.isValidChoice(model.draft.summarise.noteLanguage) {
+                    Text("\(model.draft.summarise.noteLanguage) (unrecognised — writes English)")
+                        .tag(model.draft.summarise.noteLanguage)
+                }
+                Divider()
+                ForEach(WhisperLanguageCatalog.all.filter { !$0.code.isEmpty && $0.code != "en" }) { lang in
+                    Text("Always \(lang.englishName)").tag(lang.code)
+                }
             }
-            .withHelp("‘Match the meeting language’ writes the note in Catalan or Spanish when that's the meeting's dominant detected language (section headings stay in English); any other detected language still gets English notes. ‘English’ always writes English notes, whatever was spoken. On-device (Apple Intelligence) summaries always write English.")
-            SettingCaption("The language of the finished note. The language people speak is a separate setting: Transcription › Spoken language.")
+            .withHelp("‘Match the meeting language’ writes the note in whatever language the meeting was mainly spoken in (section headings always stay in English; quoted excerpts stay as spoken). ‘English’ always writes English notes, whatever was spoken. ‘Always <language>’ writes every note in that language. You can also change it for a single recording in the “Who was in this meeting?” window after you stop recording. Ollama and the downloaded Gemma model follow this setting for any language. Apple Intelligence follows it only for languages it supports on this Mac and writes English otherwise (it does not support Catalan, for example); it never fails a note over this.")
+            SettingCaption("The language of the finished note. The language people speak is a separate setting: Transcription › Spoken language. Apple Intelligence writes English for languages it does not support.")
         }
 
         Section("People") {

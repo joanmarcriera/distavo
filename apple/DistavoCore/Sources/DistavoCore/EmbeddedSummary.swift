@@ -89,10 +89,14 @@ public struct EmbeddedSummaryBudget: Equatable {
     /// `reservedForOutput` is `finalOutputTokens(style:)` — 1800 for classic,
     /// which is what every pre-#2198 caller got.
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
-                             style: Prompt.Style = .classic, extraInstructions: String? = nil)
+                             style: Prompt.Style = .classic, extraInstructions: String? = nil,
+                             noteLanguage: String? = nil)
         -> EmbeddedSummaryBudget {
+        // nil `noteLanguage` leaves the measured prompt (so the budget) exactly
+        // as before; a language swaps in its longer rule.
         let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
-                                        userSpeaker: userSpeaker, style: style)
+                                        userSpeaker: userSpeaker, style: style,
+                                        noteLanguage: noteLanguage)
         // The end-of-user-turn block rides in the final prompt, so its tokens
         // come out of the transcript budget too.
         let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -196,11 +200,12 @@ public enum EmbeddedSummaryPlanner {
     /// Decide between one pass and map-reduce for this transcript.
     public static func plan(
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
-        style: Prompt.Style = .classic, extraInstructions: String? = nil
+        style: Prompt.Style = .classic, extraInstructions: String? = nil,
+        noteLanguage: String? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
-            extraInstructions: extraInstructions)
+            extraInstructions: extraInstructions, noteLanguage: noteLanguage)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

@@ -424,7 +424,14 @@ public enum EndOfTurnBlock {
                 + "No escribas nada después de la última sección."
             return s
         default:
-            var s = "FINAL REMINDER: use exactly the \(count) section headings listed, "
+            // Languages beyond ca/es get the English block with a leading
+            // language rule naming the language (#2956); nil/"en"/unknown keep
+            // the original text byte for byte.
+            let lead = NoteLanguage.genericName(for: noteLanguage).map {
+                "write ALL the prose of the notes in \($0.uppercased()) (not English); the section headings stay in English; "
+                + "quoted excerpts stay verbatim in the language actually spoken. "
+            } ?? ""
+            var s = "FINAL REMINDER: " + lead + "use exactly the \(count) section headings listed, "
                 + "including '## Action items' as its own heading before the action table. "
             if facts {
                 s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "

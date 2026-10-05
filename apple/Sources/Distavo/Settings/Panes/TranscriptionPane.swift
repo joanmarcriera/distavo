@@ -35,7 +35,7 @@ struct TranscriptionPane: View {
 
         Section("Spoken language and speakers") {
             languagePicker
-            SettingCaption("The language people speak in your recordings. To choose the language the notes are written in, see Notes › Write notes in.")
+            SettingCaption("The language people speak in your recordings (this is not the language of the finished note). To write notes in English, the meeting's own language, or a fixed language, see Notes › Write notes in.")
             if let detected = model.controller.lastDetectedLanguages {
                 SettingCaption("Last recording: detected \(detected).")
             }

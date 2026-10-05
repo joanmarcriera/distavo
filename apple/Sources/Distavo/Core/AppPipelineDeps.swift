@@ -113,17 +113,22 @@ extension PipelineDeps {
                     return try await GemmaPipelineRoute.summarise(
                         transcript: transcript, modelID: model, context: context)
                 }
-                // Activity-log trace for Apple's model: always the classic prompt,
-                // no note language.
+                // Note language (Vikunja #2956): Apple's model writes it only when
+                // SystemLanguageModel supports that language on this Mac; anything
+                // else (Catalan, Welsh, ...) stays English rather than risking
+                // garbled output.
+                let noteLanguage = EmbeddedSummariser.supportedNoteLanguage(context.noteLanguage)
+                // Activity-log trace for Apple's model: always the classic prompt.
                 await ModelCoordinator.shared.report(SummaryRouting.traceLine(
                     model: EmbeddedSummaryModelCatalog.model(id: model), transcript: transcript,
                     noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
-                    style: .classic, noteLanguage: nil))
+                    style: .classic, noteLanguage: noteLanguage))
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(
                     transcript: transcript, noteOwner: context.noteOwner,
-                    userSpeaker: context.userSpeaker, participants: context.participants)
+                    userSpeaker: context.userSpeaker, participants: context.participants,
+                    noteLanguage: noteLanguage)
             }
             return try await ollamaSummarise(transcript, target, options, context)
         }

@@ -161,12 +161,15 @@ public struct SummariseConfig: Codable, Equatable {
     /// installs (`recommendedForThisMac`) and offered in Settings.
     public var promptStyle: Prompt.Style
     /// "auto" (follow the meeting's dominant detected language for the note
-    /// prose — Catalan/Spanish get their own instruction, everything else is
-    /// unaffected) or "en" (always British English, today's behaviour). Same
+    /// prose; any Whisper language gets an instruction, Catalan/Spanish in
+    /// their own words), "en" (always British English, today's behaviour), or
+    /// a Whisper language code such as "fr" (always write notes in that
+    /// language — Vikunja #2956). Unknown values behave like "en". Same
     /// migration rule as `transcribe.backend`: a config file predating this
     /// key decodes to "en" so no existing user's notes change language
     /// silently; only fresh installs get "auto" via `recommendedForThisMac()`.
-    /// Ollama-only — the on-device Foundation Models path never sees it.
+    /// Honoured by Ollama and Gemma; Apple's on-device model only for
+    /// languages it reports supporting (see `NoteLanguage`).
     public var noteLanguage: String
     /// A larger/more capable Ollama model name for the "re-summarise with a
     /// bigger model" `WhenDoneAction` (Vikunja #2205). Reuses `server.url` —

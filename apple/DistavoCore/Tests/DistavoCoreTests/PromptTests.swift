@@ -94,11 +94,24 @@ final class PromptTests: XCTestCase {
                                                     style: .factsFirst, noteLanguage: "en"))
     }
 
-    /// An unrecognised code (e.g. a WhisperKit detection that isn't Catalan or
-    /// Spanish) leaves the prompt untouched too — only "ca"/"es" change it.
+    /// A code that is not in `WhisperLanguageCatalog` leaves the prompt
+    /// untouched too. (Before #2956 every non-ca/es code did, including "fr";
+    /// any real language now gets its own instruction — see `NoteLanguageTests`.)
     func testUnrecognisedCodeLeavesPromptUnchanged() {
         let baseline = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown")
-        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "fr"))
+        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "xx"))
+        XCTAssertEqual(baseline, Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "auto"))
+    }
+
+    /// Any other catalog language (#2956) replaces the English rule with a
+    /// generic instruction naming it; headings stay English.
+    func testFrenchReplacesBritishEnglishRuleAndKeepsEnglishHeadings() {
+        let out = Prompt.build(transcript: "t", noteOwner: "Marc", userSpeaker: "unknown", noteLanguage: "fr")
+        XCTAssertFalse(out.contains("Use British English."))
+        XCTAssertTrue(out.contains("Write the notes in French; keep the section headings in English."))
+        for header in ["# Meeting notes", "## Action items", "## Suggested follow-up email"] {
+            XCTAssertTrue(out.contains(header), "missing \(header)")
+        }
     }
 
     func testCatalanReplacesBritishEnglishRuleAndKeepsEnglishHeadings() {

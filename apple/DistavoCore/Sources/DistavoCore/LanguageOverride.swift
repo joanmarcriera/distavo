@@ -13,11 +13,32 @@ import Foundation
 /// `TranscribeConfig.language` and skips detection outright (the owner
 /// already told Distavo the answer); a missing or corrupt sidecar falls back
 /// to normal automatic detection exactly as if #2202 didn't exist.
+///
+/// Since Vikunja #2956 the same sidecar can also carry a per-recording NOTE
+/// language (`note_language`: "en", "auto" or a Whisper code — see
+/// `NoteLanguage`), independent of the spoken-language `code`. Either half may
+/// be absent: a sidecar written before #2956 has only `code` and decodes
+/// unchanged with `noteLanguage == nil` (no override); a note-only sidecar has
+/// no `code`.
 public struct LanguageOverride: Codable, Equatable {
-    /// A Whisper language code, e.g. "ca". Never empty/"auto".
+    /// A Whisper language code, e.g. "ca" — the SPOKEN language. Empty means
+    /// "no spoken-language override" (a note-only sidecar); never "auto" once
+    /// loaded.
     public var code: String
+    /// Per-recording note language, or nil = follow `summarise.note_language`.
+    public var noteLanguage: String?
 
-    public init(code: String) { self.code = code }
+    enum CodingKeys: String, CodingKey { case code, noteLanguage = "note_language" }
+
+    public init(code: String = "", noteLanguage: String? = nil) {
+        self.code = code; self.noteLanguage = noteLanguage
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        code = try c.decodeIfPresent(String.self, forKey: .code) ?? ""
+        noteLanguage = try c.decodeIfPresent(String.self, forKey: .noteLanguage)
+    }
 
     public static func url(workDir: URL, base: String) -> URL {
         workDir.appendingPathComponent("\(base).language.json")
@@ -28,7 +49,13 @@ public struct LanguageOverride: Codable, Equatable {
     public static func load(workDir: URL, base: String) -> LanguageOverride? {
         guard let data = try? Data(contentsOf: url(workDir: workDir, base: base)) else { return nil }
         let decoded = try? JSONDecoder().decode(LanguageOverride.self, from: data)
-        guard let decoded, !decoded.code.isEmpty, !EmbeddedModelCatalog.isAutomatic(decoded.code) else { return nil }
+        guard var decoded else { return nil }
+        if EmbeddedModelCatalog.isAutomatic(decoded.code) { decoded.code = "" }
+        // An unusable note language is dropped rather than failing the sidecar.
+        if let note = decoded.noteLanguage, !NoteLanguage.isValidChoice(note) { decoded.noteLanguage = nil }
+        // Nothing usable in the file (corrupt, "auto"/empty code, no note
+        // language) behaves exactly like a missing sidecar.
+        guard !decoded.code.isEmpty || decoded.noteLanguage != nil else { return nil }
         return decoded
     }
 
@@ -64,7 +91,8 @@ public struct LanguageOverride: Codable, Equatable {
     public static func applying(to config: TranscribeConfig, workDir: URL, wavBase: String) -> TranscribeConfig {
         var config = config
         guard EmbeddedModelCatalog.isAutomatic(config.language),
-              let override = load(workDir: workDir, base: sourceBase(from: wavBase)) else { return config }
+              let override = load(workDir: workDir, base: sourceBase(from: wavBase)),
+              !override.code.isEmpty else { return config }
         config.language = override.code
         return config
     }

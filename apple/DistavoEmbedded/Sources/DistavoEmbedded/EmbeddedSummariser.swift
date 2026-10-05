@@ -105,6 +105,20 @@ public enum EmbeddedSummariser {
 
     public static var isAvailable: Bool { unavailableReason() == nil }
 
+    /// The note language Apple's on-device model can actually write (Vikunja
+    /// #2956): `code` when `SystemLanguageModel` reports the language as
+    /// supported on this Mac, else nil — which means English notes, exactly as
+    /// before the feature. Never throws or fails a recording: an unsupported
+    /// language (Apple has no Catalan, for one) simply stays English.
+    public static func supportedNoteLanguage(_ code: String?) -> String? {
+        guard let code, !code.isEmpty else { return nil }
+        #if canImport(FoundationModels)
+        if #available(macOS 26, *),
+           SystemLanguageModel.default.supportsLocale(Locale(identifier: code)) { return code }
+        #endif
+        return nil
+    }
+
     /// Produce meeting notes from a cleaned transcript.
     ///
     /// Short transcripts go through Distavo's normal prompt in one pass. Longer
@@ -113,10 +127,14 @@ public enum EmbeddedSummariser {
     /// keeps the format `SummaryValidator` expects either way.
     /// `participants` is the owner's post-recording description of who was in
     /// the meeting (Vikunja #2182); it goes into the final prompt only — the
-    /// map step summarises chunks without it.
+    /// map step summarises chunks without it. `noteLanguage` is the resolved
+    /// note language already filtered through `supportedNoteLanguage` (the
+    /// caller does that; nil = English) — only the prompt's language rule
+    /// changes, there is no end-of-turn block on this 4096-token path.
     public static func summarise(
         transcript: String, noteOwner: String, userSpeaker: String,
         participants: String? = nil,
+        noteLanguage: String? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
 
@@ -133,7 +151,7 @@ public enum EmbeddedSummariser {
         // 4096-token window cannot afford facts-first (Vikunja #2063).
         let request = SummaryRequest(
             transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
-            participants: participants)
+            participants: participants, noteLanguage: noteLanguage)
         do {
             return try await SummaryDriver.run(
                 request, generator: FoundationModelsGenerator(), onProgress: report)

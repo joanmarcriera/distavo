@@ -173,3 +173,12 @@ unsigned or headless). Do NOT run from a build that shares your real config with
 - [ ] Hardened runtime (Direct / Setapp): same flow; the prompt must appear (the Calendars
       entitlement is in `Distavo.entitlements`). If macOS silently denies, check `codesign -d
       --entitlements - Distavo.app`.
+
+### Action items: known limits (#2941)
+
+- Reminders de-duplication is by item identity (note path + line text + ordinal), kept in
+  `reminders-exported.json` in the work folder. Editing an item's text, or renaming/moving the
+  note, after it was sent makes it a new item: sending it again creates a second reminder.
+  A corrupt ledger is moved aside as `reminders-exported.json.corrupt-<time>` (never silently reset).
+- Ticking writes one byte in place (symlinks, tags and permissions are kept). The window scans the
+  newest 500 notes only. Ticks wait up to ~3 s for a scan/regenerate to finish, else say to retry.

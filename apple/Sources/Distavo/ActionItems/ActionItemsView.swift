@@ -17,12 +17,21 @@ final class ActionItemsModel: ObservableObject {
     @Published var messageIsError = false
     @Published var accessDenied = false
     @Published var loading = false
+    /// True while a Send to Reminders is in flight (its buttons are disabled).
+    @Published var sending = false
 
     let notesDir: URL
     let workDir: URL
     private let sink: ReminderSink = EventKitReminderSink()
+    /// Writes the box through the controller (single-flight lock, search re-index).
+    private let toggler: (ActionItem, Bool) async throws -> Void?
+    /// Ticks run strictly one after another, in click order, so two quick ticks in one
+    /// note cannot lose an update and a tick followed by an untick cannot reorder.
+    private var tail: Task<Void, Never>?
 
-    init(notesDir: URL, workDir: URL) { self.notesDir = notesDir; self.workDir = workDir }
+    init(notesDir: URL, workDir: URL, toggle: @escaping (ActionItem, Bool) async throws -> Void?) {
+        self.notesDir = notesDir; self.workDir = workDir; self.toggler = toggle
+    }
 
     func refresh() {
         loading = true
@@ -38,21 +47,27 @@ final class ActionItemsModel: ObservableObject {
     /// Optimistic: flip the box in the UI first, write the file, revert and say why on failure.
     func set(_ item: ActionItem, done: Bool) {
         if done { ticked.insert(item.id) } else { ticked.remove(item.id) }
-        let wasRevertible = !done
-        Task {
+        let previous = tail
+        tail = Task {
+            await previous?.value
             do {
-                try await Task.detached { try ActionItems.toggle(item: item, to: done) }.value
+                _ = try await toggler(item, done)
                 message = nil
             } catch {
-                if done { ticked.remove(item.id) } else if wasRevertible { ticked.insert(item.id) }
+                if done { ticked.remove(item.id) } else { ticked.insert(item.id) }
                 fail(error.localizedDescription)
             }
         }
     }
 
     func sendToReminders(_ items: [ActionItem], noteTitle: String) {
+        // An item ticked in this window is done: never export it as open.
+        let items = items.filter { !isTicked($0) }
+        guard !sending, !items.isEmpty else { return }
+        sending = true
         let sink = self.sink, workDir = self.workDir
         Task {
+            defer { sending = false }
             let outcome = await RemindersExport.export(items: items, noteTitle: noteTitle, sink: sink, workDir: workDir)
             switch outcome {
             case .exported(let created, let already):
@@ -64,6 +79,7 @@ final class ActionItemsModel: ObservableObject {
                 accessDenied = true
                 fail("Distavo does not have access to Reminders.")
             case .failed(let m): fail(m)
+            case .busy: fail("A send to Reminders is already running.")
             }
         }
     }
@@ -129,6 +145,7 @@ struct ActionItemsView: View {
                 .buttonStyle(.borderless)
             Button("Send note to Reminders") { model.sendToReminders(group.items, noteTitle: group.title) }
                 .buttonStyle(.borderless)
+                .disabled(model.sending)
                 .help("Adds this note's open items to Reminders. Items already sent are skipped.")
         }
     }
@@ -151,6 +168,7 @@ struct ActionItemsView: View {
                 Image(systemName: "checklist")
             }
             .buttonStyle(.borderless)
+            .disabled(model.sending)
             .help("Send to Reminders")
         }
     }
@@ -165,9 +183,9 @@ final class ActionItemsWindowController: NSObject, NSWindowDelegate {
     static let shared = ActionItemsWindowController()
     private var window: NSWindow?
 
-    func show(notesDir: URL, workDir: URL) {
+    func show(notesDir: URL, workDir: URL, toggle: @escaping (ActionItem, Bool) async throws -> Void?) {
         if let w = window { w.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }
-        let model = ActionItemsModel(notesDir: notesDir, workDir: workDir)
+        let model = ActionItemsModel(notesDir: notesDir, workDir: workDir, toggle: toggle)
         let w = NSWindow(contentViewController: NSHostingController(rootView: ActionItemsView(model: model)))
         w.title = "Open Action Items"
         w.styleMask = [.titled, .closable, .resizable]

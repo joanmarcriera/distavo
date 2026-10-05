@@ -71,6 +71,14 @@ final class WatcherController: ObservableObject {
         log: { [weak self] message in self?.log(message) },
         suggestSilence: { [weak self] title, body in self?.notifier.notifySilence(title: title, body: body) },
         clearSilenceNotification: { [weak self] in self?.notifier.removeSilenceNotification() })
+    /// Meeting auto-detect (Vikunja #2945): off unless enabled in Settings.
+    lazy var meetingDetection = MeetingDetectionController(
+        configProvider: { [weak self] in self?.config ?? Config() },
+        isRecording: { [weak self] in self?.capture.isRecording ?? false },
+        startRecording: { [weak self] in self?.capture.toggle() },
+        notifyOffer: { [weak self] title, body in self?.notifier.notifyMeeting(title: title, body: body) },
+        clearNotification: { [weak self] in self?.notifier.removeMeetingNotification() },
+        log: { [weak self] message in self?.log(message) })
     private let needsOnboarding: Bool
     private let activityLog = ActivityLog()
 
@@ -200,6 +208,13 @@ final class WatcherController: ObservableObject {
             case .keep: self?.capture.keepRecording()
             }
         }
+        notifier.onMeetingAction = { [weak self] action in
+            switch action {
+            case .record: self?.meetingDetection.accept()
+            case .notNow: self?.meetingDetection.decline()
+            }
+        }
+        meetingDetection.configure()
         notifier.requestAuthorization()
         scanTask = Task { [weak self] in await self?.runAfterLaunch() }
     }
@@ -909,6 +924,7 @@ final class WatcherController: ObservableObject {
         config = newConfig
         watchIntervalSeconds = newConfig.watchIntervalSeconds
         allowLocalOllama = newConfig.summarise.allowLocalFallback
+        meetingDetection.configure()
         persist()
         if newConfig.summarise.allowLocalFallback && !wasAllowed { deferredBases.removeAll() }
         // New settings may fix a prior failure — clear failed markers and retry.

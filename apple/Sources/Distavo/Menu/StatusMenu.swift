@@ -9,10 +9,12 @@ import AppKit
 struct StatusMenu: View {
     @ObservedObject var controller: WatcherController
     @ObservedObject var capture: MeetingCaptureController
+    @ObservedObject var meetingDetection: MeetingDetectionController
 
     init(controller: WatcherController) {
         self.controller = controller
         self.capture = controller.capture
+        self.meetingDetection = controller.meetingDetection
     }
 
     var body: some View {
@@ -49,6 +51,13 @@ struct StatusMenu: View {
         Divider()
 
         if MeetingCaptureController.isSupported {
+            if let offer = meetingDetection.pendingOffer, !capture.isRecording {
+                // Vikunja #2945: the menu-bar answer to a detected call (also the
+                // fallback when notifications are not allowed).
+                Text("📞 \(offer)")
+                Button("● Record this call") { meetingDetection.accept() }
+                Button("Not now") { meetingDetection.decline() }
+            }
             Button(capture.isRecording
                    ? "⏹ Stop recording (\(capture.elapsedLabel)\(capture.silenceNotice.map { " · \($0)" } ?? ""))"
                    : "● Record meeting (system audio + mic)") {

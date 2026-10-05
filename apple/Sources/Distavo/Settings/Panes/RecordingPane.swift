@@ -35,6 +35,8 @@ struct RecordingPane: View {
             }
         }
 
+        if MeetingCaptureController.isSupported { MeetingDetectionSection(model: model) }
+
         Section("Recordings") {
             Stepper("Ignore recordings shorter than \(model.draft.minRecordingSeconds) s",
                     value: $model.draft.minRecordingSeconds, in: 0...120, step: 5)

@@ -201,8 +201,13 @@ public struct SummariseConfig: Codable, Equatable {
     /// Subfolder of the recordings dir (relative, "/"-separated) -> template id,
     /// longest prefix wins; overrides `template` for recordings in that folder.
     public var folderTemplates: [String: String]
+    /// Ask for a `## Tasks` checkbox section and a `## Decisions` list (Vikunja
+    /// #2941, see `ActionItemsPrompt`). **false for any config predating the key**
+    /// and never turned on by `recommendedForThisMac()`.
+    public var actionItems: Bool
 
     enum CodingKeys: String, CodingKey {
+        case actionItems = "action_items"
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
         case promptStyle = "prompt_style"
@@ -220,7 +225,9 @@ public struct SummariseConfig: Codable, Equatable {
                 noteLanguage: String = "en",
                 biggerModel: String? = nil,
                 template: String = "", customTemplate: String = "",
-                folderTemplates: [String: String] = [:]) {
+                folderTemplates: [String: String] = [:],
+                actionItems: Bool = false) {
+        self.actionItems = actionItems
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -254,6 +261,7 @@ public struct SummariseConfig: Codable, Equatable {
         customTemplate = ((try? c.decodeIfPresent(String.self, forKey: .customTemplate)) ?? nil) ?? d.customTemplate
         folderTemplates = ((try? c.decodeIfPresent([String: String].self, forKey: .folderTemplates)) ?? nil)
             ?? d.folderTemplates
+        actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
     }
 }
 

@@ -436,11 +436,13 @@ public enum Pipeline {
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 glossary: transcribeConfig.vocabulary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
-                template: SummaryTemplateCatalog.resolve(
+                // Action items (#2941) rewrite its sections when switched on.
+                template: ActionItemsPrompt.effectiveTemplate(SummaryTemplateCatalog.resolve(
                     config: config,
                     folder: SummaryTemplateCatalog.folder(of: path, in: recordingsDir),
                     sidecarID: LanguageOverride.load(
-                        workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template))
+                        workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
+                    style: config.summarise.promptStyle, enabled: config.summarise.actionItems))
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.

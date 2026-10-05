@@ -310,6 +310,9 @@ public enum TranscriptEditing {
 ///   `<base>.transcript.clean.txt`     its rendered cleaned form (what Regenerate reads)
 ///   `<base>.segments.orig.json`       pristine copies from before the FIRST edit,
 ///   `<base>.transcript.clean.orig.txt`  never overwritten afterwards
+///   `<base>.segments.orig.speakers.json` the speaker-rename mapping (#2944) in force when the
+///                                     pristine copy was taken, so a revert can restore TEXT only
+///                                     and keep the current speaker names.
 /// The originals' names do not end in `.transcript.clean.txt`, so the search
 /// reconcile (which lists the work dir by that suffix) and every other scanner
 /// ignores them.
@@ -364,11 +367,16 @@ public enum TranscriptEditStore {
         FileManager.default.fileExists(atPath: originalSegmentsURL(workDir: workDir, base: base).path)
     }
 
-    /// True when the current sidecar differs from the pristine copy.
+    public static func originalSpeakersURL(workDir: URL, base: String) -> URL {
+        workDir.appendingPathComponent("\(base).segments.orig.speakers.json")
+    }
+
+    /// True when a revert would change the current sidecar (text edits exist;
+    /// a speaker rename alone does not count, because revert keeps the names).
     public static func isModified(workDir: URL, base: String) -> Bool {
-        guard let orig = try? Data(contentsOf: originalSegmentsURL(workDir: workDir, base: base)),
+        guard let payload = try? revertPayload(workDir: workDir, base: base),
               let cur = try? Data(contentsOf: TranscriptSegments.url(workDir: workDir, base: base)) else { return false }
-        return orig != cur
+        return payload.segments != cur
     }
 
     /// Forget the pristine copies (a re-run of the recording replaces the
@@ -376,6 +384,7 @@ public enum TranscriptEditStore {
     public static func removeOriginals(workDir: URL, base: String) {
         try? FileManager.default.removeItem(at: originalSegmentsURL(workDir: workDir, base: base))
         try? FileManager.default.removeItem(at: originalCleanURL(workDir: workDir, base: base))
+        try? FileManager.default.removeItem(at: originalSpeakersURL(workDir: workDir, base: base))
     }
 
     /// Persist `edited` as the transcript for `base`, keeping the pristine
@@ -396,6 +405,9 @@ public enum TranscriptEditStore {
         let origClean = originalCleanURL(workDir: workDir, base: base)
         if !FileManager.default.fileExists(atPath: origSeg.path) {
             writes.append((origSeg, currentSegments))
+            let names = SpeakerNames.load(workDir: workDir, base: base)?.names ?? [:]
+            writes.append((originalSpeakersURL(workDir: workDir, base: base),
+                           try JSONEncoder().encode(names)))
             // The cached clean text may be absent (cleared work folder): then there is nothing to keep.
             if !FileManager.default.fileExists(atPath: origClean.path),
                let cleanData = try? Data(contentsOf: cleanURL) {
@@ -412,20 +424,47 @@ public enum TranscriptEditStore {
     public static func revert(workDir: URL, base: String, expecting: Fingerprint? = nil,
                               writer: Writer = atomicWriter) throws {
         try verify(expecting, workDir: workDir, base: base)
+        let p = try revertPayload(workDir: workDir, base: base)
+        try commit([(TranscriptSegments.url(workDir: workDir, base: base), p.segments),
+                    (Pipeline.cachedTranscriptURL(workDir: workDir, base: base), p.clean)], writer: writer)
+    }
+
+    /// What a revert writes: the pristine transcript with the CURRENT speaker
+    /// names applied (Vikunja #2944), so revert undoes text edits only. The
+    /// mapping is pristine label -> current name, built from the rename mapping
+    /// recorded when the pristine copy was taken (`orig -> label then`) and the
+    /// one in force now (`orig -> name now`), applied in one simultaneous pass
+    /// with `SpeakerRename`'s own label-position rewriting (so swaps are safe
+    /// and spoken text is never touched). With no rename, the pristine bytes
+    /// are returned untouched.
+    static func revertPayload(workDir: URL, base: String) throws -> (segments: Data, clean: Data) {
         guard let origSegments = try? Data(contentsOf: originalSegmentsURL(workDir: workDir, base: base)) else {
             throw StoreError(message: "no original transcript was kept for \(base)")
         }
-        let cleanData: Data
-        if let kept = try? Data(contentsOf: originalCleanURL(workDir: workDir, base: base)) {
-            cleanData = kept
-        } else {
-            guard let decoded = try? JSONDecoder().decode(TranscriptSegments.self, from: origSegments) else {
-                throw StoreError(message: "the saved original transcript is unreadable")
-            }
-            cleanData = Data((TranscriptEditing.renderClean(decoded.sanitised()) + "\n").utf8)
+        let then = (try? JSONDecoder().decode([String: String].self,
+                    from: Data(contentsOf: originalSpeakersURL(workDir: workDir, base: base)))) ?? [:]
+        let now = SpeakerNames.load(workDir: workDir, base: base)?.names ?? [:]
+        var mapping: [String: String] = [:]
+        for (orig, current) in now {
+            let pristineLabel = then[orig] ?? orig
+            if pristineLabel != current { mapping[pristineLabel] = current }
         }
-        try commit([(TranscriptSegments.url(workDir: workDir, base: base), origSegments),
-                    (Pipeline.cachedTranscriptURL(workDir: workDir, base: base), cleanData)], writer: writer)
+        guard let decoded = try? JSONDecoder().decode(TranscriptSegments.self, from: origSegments) else {
+            throw StoreError(message: "the saved original transcript is unreadable")
+        }
+        var cleanText: String
+        if let kept = try? Data(contentsOf: originalCleanURL(workDir: workDir, base: base)),
+           let s = String(data: kept, encoding: .utf8) {
+            cleanText = s
+        } else {
+            cleanText = TranscriptEditing.renderClean(decoded.sanitised()) + "\n"
+        }
+        if mapping.isEmpty {
+            return (origSegments, Data(cleanText.utf8))
+        }
+        cleanText = SpeakerRename.rewriteTranscript(cleanText, mapping: mapping)
+        let renamed = SpeakerRename.rewrite(decoded.sanitised(), mapping: mapping)
+        return (try renamed.encoded(), Data(cleanText.utf8))
     }
 
     /// Write `writes` in order; on any failure restore every file touched so

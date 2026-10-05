@@ -392,6 +392,8 @@ public enum Pipeline {
             }
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
+            // For "Regenerate Note…" (#2947): keep the detected language beside it.
+            TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
 
             deps.onPhase?(.summarising)
             // The note language (Vikunja #2147, #2956): a per-recording
@@ -401,18 +403,8 @@ public enum Pipeline {
             // Unknown values behave like "en". See `NoteLanguage.resolve`.
             // With no detection (WhisperX, or a spoken language fixed by the
             // owner) "auto" falls back to that fixed spoken language.
-            let languageSidecar = LanguageOverride.load(
-                workDir: workDir, base: LanguageOverride.sourceBase(from: base))
-            // The sidecar's spoken code only counts when transcription honoured
-            // it, i.e. when the configured language is automatic
-            // (`LanguageOverride.applying`).
-            let spokenLanguage = EmbeddedModelCatalog.isAutomatic(config.transcribe.language)
-                ? (languageSidecar.flatMap { $0.code.isEmpty ? nil : $0.code } ?? config.transcribe.language)
-                : config.transcribe.language
-            let noteLanguage = NoteLanguage.resolve(
-                setting: config.summarise.noteLanguage,
-                perRecording: languageSidecar?.noteLanguage,
-                detected: dominantCode ?? spokenLanguage)
+            let noteLanguage = resolveNoteLanguage(
+                config: config, workDir: workDir, base: base, dominantCode: dominantCode)
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),

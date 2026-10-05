@@ -95,7 +95,12 @@ extension Pipeline {
     /// backend / model / style choices applied. Pure, so it is unit-tested.
     static func regenerateConfig(_ config: Config, options: RegenerateOptions) -> Config {
         var cfg = config
-        if let backend = options.backend, !backend.isEmpty { cfg.summarise.backend = backend }
+        // Kill switch (CLAUDE.md): "embedded" with on-device summaries off means
+        // the Ollama server path, so a model override must land there.
+        if cfg.summarise.backend == "embedded" && !cfg.summarise.embeddedEnabled { cfg.summarise.backend = "server" }
+        if let backend = options.backend, !backend.isEmpty {
+            cfg.summarise.backend = (backend == "embedded" && !cfg.summarise.embeddedEnabled) ? "server" : backend
+        }
         if let model = options.model, !model.isEmpty {
             switch cfg.summarise.backend {
             case "embedded": cfg.summarise.embeddedModel = model
@@ -120,7 +125,9 @@ extension Pipeline {
     ///   unavailable.
     public static func regenerate(
         base: String, options: RegenerateOptions, config: Config, deps: PipelineDeps,
-        sourcePath: URL? = nil, now: Date = Date()
+        sourcePath: URL? = nil, now: Date = Date(),
+        // Test seam: lets a unit test fail the final write to prove the rollback.
+        writeNote: (String, URL) throws -> Void = { try $0.write(to: $1, atomically: true, encoding: .utf8) }
     ) async -> ProcessResult {
         let notesDir = Config.resolvePath(config.notesDir)
         let workDir = Config.resolvePath(config.workDir)
@@ -150,10 +157,6 @@ extension Pipeline {
 
         // 2. The summariser, through the normal defer/unavailable rules.
         let cfg = regenerateConfig(config, options: options)
-        if cfg.summarise.backend == "embedded" && !cfg.summarise.embeddedEnabled {
-            return ProcessResult(status: .failed, base: base,
-                                 message: "on-device summaries are switched off in Settings — the note was left as it is")
-        }
         let target: SummariseTarget
         switch await chooseSummariser(cfg, reachable: deps.ollamaReachable,
                                       embeddedReadiness: deps.embeddedReadiness) {
@@ -171,13 +174,11 @@ extension Pipeline {
         let sourceBase = LanguageOverride.sourceBase(from: base)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let languageSidecar = LanguageOverride.load(workDir: workDir, base: sourceBase)
-        let spokenLanguage = EmbeddedModelCatalog.isAutomatic(cfg.transcribe.language)
-            ? (languageSidecar.flatMap { $0.code.isEmpty ? nil : $0.code } ?? cfg.transcribe.language)
-            : cfg.transcribe.language
-        let noteLanguage = NoteLanguage.resolve(
-            setting: cfg.summarise.noteLanguage, perRecording: languageSidecar?.noteLanguage,
-            detected: spokenLanguage)
+        // Same resolution as processOne; the detected language comes from the
+        // meta sidecar (absent for notes processed before #2947).
+        let noteLanguage = resolveNoteLanguage(
+            config: cfg, workDir: workDir, base: base,
+            dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage)
         // TODO(#2940): apply template — when summary templates land, resolve
         // `options.templateID` here and fold the template's prompt into `context`.
         let context = NoteContext(
@@ -222,7 +223,7 @@ extension Pipeline {
                 backup = try NoteVersions.keepPrevious(note: notePath, now: now)
             }
             do {
-                try noteText.write(to: notePath, atomically: true, encoding: .utf8)
+                try writeNote(noteText, notePath)
             } catch {
                 if let backup { try? FileManager.default.moveItem(at: backup, to: notePath) }
                 throw error

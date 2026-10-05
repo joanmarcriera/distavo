@@ -416,11 +416,13 @@ public enum Pipeline {
             TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
+            var timedForNote: TranscriptSegments?   // tracked terms / duration (#2954)
             if var timed = TranscriptSegments(whisperXResult: result) {
                 // Same replacement map as the clean transcript, so SRT/DOCX/PDF
                 // exports spell the term like the note does (Vikunja #2939).
                 let compiled = CompiledReplacements(transcribeConfig.replacements)
                 if !compiled.isEmpty { timed = timed.applying(compiled) }
+                timedForNote = timed
                 do { try timed.save(workDir: workDir, base: base) }
                 catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }
             }
@@ -439,6 +441,8 @@ public enum Pipeline {
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
+                // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
+                customInstruction: NoteMeta.mergedInstruction(nil, notes: config.notes),
                 glossary: transcribeConfig.vocabulary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.
@@ -454,6 +458,8 @@ public enum Pipeline {
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.
+            var noteMeta: NoteMeta.Extracted?       // the model's title/tags (#2954)
+            var noteBody = "", noteFooter = ""
             func summariseAttempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(clean, target, config.summarise.options, context)
                 // A rare edge case (the ledger only existed in the discarded
@@ -463,12 +469,20 @@ public enum Pipeline {
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { message in
                     print("[Distavo] \(message)")
                 }
+                // The model's title/tags lines leave the body first (#2954).
+                if config.notes.asksModelForMetadata {
+                    noteMeta = NoteMeta.extract(from: cleaned)
+                    cleaned = noteMeta?.body ?? cleaned
+                }
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 // Key moments (#2950) are appended after the model and excluded from validation.
+                // Note order (see `NoteAssembly`): frontmatter, body with Highlights, Key moments,
+                // Tracked terms, provenance footer. `noteBody` is the body INCLUDING Key moments.
                 let footer = provenanceFooter(from: result)
-                return (RecordingBookmarks.appending(keyMoments, to: cleaned) + footer,
-                        SummaryValidator.validate(cleaned + footer))
+                let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
+                (noteBody, noteFooter) = (withMoments, footer)
+                return (withMoments + footer, SummaryValidator.validate(cleaned + footer))
             }
 
             var (noteText, failures) = try await summariseAttempt()
@@ -503,7 +517,14 @@ public enum Pipeline {
                                      transcriptPath: transcriptPath,
                                      detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
+            // Frontmatter / tracked terms (#2954); the unchanged text with default settings.
+            noteText = composeNote(
+                body: noteBody, footer: noteFooter, meta: noteMeta, config: config, context: context,
+                sourceName: path.lastPathComponent, timed: timedForNote, cleanTranscript: clean,
+                dominantCode: dominantCode,
+                existingNote: try? String(contentsOf: notePath, encoding: .utf8))
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
+            rememberTitle(noteMeta, config: config, workDir: workDir, base: base)   // #2954
             state.markDone(base)
             var message = "note written"
             if config.compactRecordingsAfterNote, variant == nil,

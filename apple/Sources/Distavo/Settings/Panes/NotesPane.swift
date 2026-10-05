@@ -37,6 +37,8 @@ struct NotesPane: View {
         TemplatesSection(model: model)
         ActionItemsSection(model: model)
 
+        ObsidianSection(model: model)
+
         Section("People") {
             TextField("Note owner", text: $model.draft.noteOwner)
             TextField("Your speaker label", text: $model.draft.userSpeaker)

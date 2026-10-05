@@ -46,7 +46,13 @@ public enum NetworkScope {
     }
 
     static func parseHost(_ urlString: String) -> ParsedHost? {
-        guard let c = URLComponents(string: urlString), c.user == nil, c.password == nil,
+        URLComponents(string: urlString).flatMap(parseHost)
+    }
+
+    /// Same, from components the caller already parsed (so the validator and the request
+    /// builder share ONE parse of the URL).
+    static func parseHost(_ c: URLComponents) -> ParsedHost? {
+        guard c.user == nil, c.password == nil,
               var raw = c.percentEncodedHost, !raw.isEmpty else { return nil }
         let bracketed = raw.hasPrefix("[") && raw.hasSuffix("]")
         if raw.hasPrefix("[") != raw.hasSuffix("]") { return nil }
@@ -79,19 +85,36 @@ public enum NetworkScope {
         var hints = addrinfo(ai_flags: AI_NUMERICHOST, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
         var result: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &result) == 0, let head = result else { return nil }
-        defer { freeaddrinfo(head) }
+        guard getaddrinfo(host, nil, &hints, &result) == 0 else { return nil }
+        defer { if let result { freeaddrinfo(result) } }
+        let out = addressStrings(result)
+        return out.isEmpty ? nil : out
+    }
+
+    /// Numeric strings for a `getaddrinfo` result chain, trusting NOTHING in it: entries with
+    /// a nil `ai_addr`, a family other than IPv4/IPv6, or an `ai_addrlen` too short for that
+    /// family are skipped (never read), conversion failures are skipped, and an empty or nil
+    /// chain yields `[]` (callers refuse an empty result). The caller owns `freeaddrinfo`.
+    static func addressStrings(_ head: UnsafeMutablePointer<addrinfo>?) -> [String] {
         var out: [String] = []
         var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        var node = Optional(head)
-        while let n = node {
-            if let addr = n.pointee.ai_addr,
-               getnameinfo(addr, n.pointee.ai_addrlen, &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
+        var node = head
+        var hops = 0
+        while let n = node, hops < 64 {   // bounded: a corrupt (cyclic) chain cannot spin forever
+            hops += 1
+            defer { node = n.pointee.ai_next }
+            guard let addr = n.pointee.ai_addr else { continue }
+            let len = Int(n.pointee.ai_addrlen)
+            switch n.pointee.ai_family {
+            case AF_INET: guard len >= MemoryLayout<sockaddr_in>.size else { continue }
+            case AF_INET6: guard len >= MemoryLayout<sockaddr_in6>.size else { continue }
+            default: continue
+            }
+            if getnameinfo(addr, socklen_t(len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 {
                 out.append(String(cString: buf))
             }
-            node = n.pointee.ai_next
         }
-        return out.isEmpty ? nil : out
+        return out
     }
 
     /// Strict dotted-quad parse (`inet_pton`): "10.evil.example" and "10.1" are nil.
@@ -151,20 +174,9 @@ public enum NetworkScope {
         var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
         var result: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &result) == 0, let head = result else { return [] }
-        defer { freeaddrinfo(head) }
-        var ips: [String] = []
-        var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        var node = Optional(head)
-        while let n = node {
-            if let addr = n.pointee.ai_addr,
-               getnameinfo(addr, n.pointee.ai_addrlen, &buf, socklen_t(buf.count),
-                           nil, 0, NI_NUMERICHOST) == 0 {
-                ips.append(String(cString: buf))
-            }
-            node = n.pointee.ai_next
-        }
-        return ips
+        guard getaddrinfo(host, nil, &hints, &result) == 0 else { return [] }
+        defer { if let result { freeaddrinfo(result) } }
+        return addressStrings(result)
     }
 
     /// True if the URL is local by name, or resolves to a private address. Short-

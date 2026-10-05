@@ -587,22 +587,25 @@ public enum Pipeline {
         return "\(formatter.string(fromByteCount: Int64(sourceSize))) → \(formatter.string(fromByteCount: Int64(compactSize)))"
     }
 
-    private static let recorderNameFormatter: DateFormatter = {
+    /// Built per call (cheap) so the zone is the one in force NOW, not whatever
+    /// `.current` was the first time any code parsed a name; the time zone is
+    /// injectable for the same reason.
+    private static func recorderNameFormatter(_ timeZone: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
+        f.timeZone = timeZone
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
         return f
-    }()
+    }
 
     /// When the recording started: the built-in recorder's file name
     /// ("Meeting 2026-09-16 16.13.08.wav", local time) is authoritative and
     /// survives copies and syncs; otherwise the file's creation date, which
     /// a phone recording or a dropped export usually keeps; nil if neither.
-    static func meetingDate(for url: URL) -> Date? {
+    static func meetingDate(for url: URL, timeZone: TimeZone = .current) -> Date? {
         let stem = url.deletingPathExtension().lastPathComponent
         if let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression),
-           let date = recorderNameFormatter.date(from: String(stem[range])) {
+           let date = recorderNameFormatter(timeZone).date(from: String(stem[range])) {
             return date
         }
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date

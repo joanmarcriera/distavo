@@ -96,7 +96,8 @@ public enum SummaryDriver {
                 contextSize: contextSize, noteOwner: request.noteOwner,
                 userSpeaker: request.userSpeaker, style: request.style,
                 extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
-                customInstruction: request.customInstruction, template: t).transcriptTokens
+                customInstruction: request.customInstruction, glossary: request.glossary,
+                template: t).transcriptTokens
         }
         let templated = budget(template)
         return templated > 0 && Double(templated) >= templateBudgetFloor * Double(budget(nil))

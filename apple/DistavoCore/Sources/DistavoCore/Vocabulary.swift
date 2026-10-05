@@ -172,6 +172,23 @@ public enum Vocabulary {
         }
     }
 
+    /// The case-insensitive, Unicode-aware whole-word matcher for `term` (a phrase
+    /// matches across any whitespace run; Han/kana/Hangul/Thai terms skip the word
+    /// boundaries). Shared by the replacement engine and tracked terms (#2954).
+    /// nil for a blank term.
+    public static func wholeWordRegex(_ term: String) -> NSRegularExpression? {
+        let from = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        if from.isEmpty { return nil }
+        // Whitespace inside a phrase matches any run of whitespace.
+        let body = from.split(whereSeparator: \.isWhitespace)
+            .map { NSRegularExpression.escapedPattern(for: String($0)) }
+            .joined(separator: "\\s+")
+        let pattern = usesUnspacedScript(from)
+            ? body
+            : "(?<![\(wordClass)])\(body)(?![\(wordClass)])"
+        return try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
+    }
+
     /// Apply `rules` in order; see `CompiledReplacements`.
     public static func applyReplacements(_ text: String, rules: [ReplacementRule]) -> String {
         CompiledReplacements(rules).apply(text)
@@ -195,15 +212,7 @@ public struct CompiledReplacements {
         for rule in rules {
             let from = rule.from.trimmingCharacters(in: .whitespacesAndNewlines)
             if from.isEmpty { continue }
-            // Whitespace inside a phrase matches any run of whitespace.
-            let body = from.split(whereSeparator: \.isWhitespace)
-                .map { NSRegularExpression.escapedPattern(for: String($0)) }
-                .joined(separator: "\\s+")
-            let pattern = Vocabulary.usesUnspacedScript(from)
-                ? body
-                : "(?<![\(Vocabulary.wordClass)])\(body)(?![\(Vocabulary.wordClass)])"
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
-            else { continue }
+            guard let regex = Vocabulary.wholeWordRegex(from) else { continue }
             out.append((regex, NSRegularExpression.escapedTemplate(for: rule.to)))
         }
         compiled = out

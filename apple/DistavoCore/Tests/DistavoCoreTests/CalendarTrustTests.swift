@@ -25,6 +25,8 @@ final class CalendarTrustTests: XCTestCase {
             (.unknown, true, true, .subscribed, false),
             (.accepted, false, true, .birthday, false),
             (.unknown, false, false, .birthday, false),
+            (.accepted, true, true, .delegate, false),    // someone else's delegate calendar
+            (.unknown, false, false, .delegate, false),
             (.accepted, true, true, .unknown, false),     // a calendar type we cannot name: not used
             (.unknown, false, false, .unknown, false),
         ]
@@ -53,7 +55,7 @@ final class CalendarTrustTests: XCTestCase {
         XCTAssertFalse(CalendarTrust.isTrusted(selfStatus: .unknown, isOrganiser: false, hasAttendees: true, calendarKind: .owned))
         XCTAssertFalse(CalendarTrust.isTrusted(selfStatus: .accepted, isOrganiser: true, hasAttendees: true, calendarKind: .unknown))
         XCTAssertEqual(CalendarSelfStatus.allCases.count, 5)
-        XCTAssertEqual(CalendarKind.allCases.count, 4)
+        XCTAssertEqual(CalendarKind.allCases.count, 5)
     }
 
     // MARK: Hostile titles

@@ -78,7 +78,12 @@ final class EventKitCalendarProvider: CalendarEventProviding, @unchecked Sendabl
             let kind: CalendarKind
             switch event.calendar?.type {
             case .local?, .calDAV?, .exchange?:
-                kind = (event.calendar?.allowsContentModifications ?? false) ? .owned : .subscribed
+                // Public API only: allowsContentModifications / isSubscribed / isImmutable and
+                // EKSource.isDelegate. There is no public "shared" flag (checked in the SDK headers).
+                let cal = event.calendar!
+                if cal.source?.isDelegate ?? true { kind = .delegate }
+                else if cal.isSubscribed || cal.isImmutable || !cal.allowsContentModifications { kind = .subscribed }
+                else { kind = .owned }
             case .subscription?: kind = .subscribed
             case .birthday?: kind = .birthday
             case nil: kind = .unknown

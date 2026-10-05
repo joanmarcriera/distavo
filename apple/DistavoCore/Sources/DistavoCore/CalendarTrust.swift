@@ -14,10 +14,17 @@ public enum CalendarSelfStatus: Equatable, Sendable, CaseIterable {
 
 /// What kind of calendar an event lives in.
 public enum CalendarKind: Equatable, Sendable, CaseIterable {
-    /// A writable calendar of the user's own account (local, iCloud/CalDAV, Exchange).
+    /// A calendar the provider could verify is the user's own: writable, not subscribed,
+    /// not immutable, and not from a delegate account. EventKit's public API has NO
+    /// "shared calendar" flag, so a calendar the user merely shares with others (an
+    /// iCloud calendar with other writers) cannot be told apart from a private one and
+    /// is classed `.owned`: that residual risk is documented, not detected.
     case owned
-    /// A subscribed or otherwise read-only calendar (other people's, holidays, sports).
+    /// A subscribed, immutable or otherwise read-only calendar (holidays, feeds).
     case subscribed
+    /// A calendar of a delegate source (`EKSource.isDelegate`, macOS 13+): someone else's
+    /// calendar the user was given access to.
+    case delegate
     /// The system birthday calendar.
     case birthday
     /// A calendar type this build does not recognise (including any future EventKit value).

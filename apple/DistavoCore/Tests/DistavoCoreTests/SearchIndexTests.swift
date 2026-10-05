@@ -304,4 +304,78 @@ final class SearchIndexTests: XCTestCase {
         XCTAssertEqual(idx.search("shared", limit: 100).count, 60)
         XCTAssertEqual(sawShared, 60)
     }
+
+    // MARK: Review fixes
+
+    func testUnlistableFolderDoesNotWipeItsRows() throws {
+        let idx = makeIndex()
+        try note("a", "keepme note")
+        try transcript("a", [("SPEAKER_00", "keepme spoken")])
+        idx.reconcile(notesDir: notes, workDir: work)
+        XCTAssertEqual(idx.documentCount(), 2)
+
+        // Notes folder vanishes (unplugged drive): its rows stay, the work dir still reconciles.
+        let moved = root.appendingPathComponent("notes-away")
+        try FileManager.default.moveItem(at: notes, to: moved)
+        try FileManager.default.removeItem(at: work.appendingPathComponent("a.transcript.clean.txt"))
+        let s = idx.reconcile(notesDir: notes, workDir: work)
+        XCTAssertEqual(s.removed, 1, "only the transcript, whose folder listed fine")
+        XCTAssertEqual(idx.search("keepme", kind: .note).count, 1)
+
+        // A genuinely empty (but listable) folder does remove its rows.
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        XCTAssertEqual(idx.reconcile(notesDir: notes, workDir: work).removed, 1)
+        XCTAssertEqual(idx.documentCount(), 0)
+    }
+
+    func testLockedDatabaseIsNotDeleted() throws {
+        try note("a", "locked content")
+        var first: SearchIndex? = makeIndex()
+        first?.reconcile(notesDir: notes, workDir: work)
+        first = nil
+
+        var holder: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(indexURL.path, &holder), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(holder, "BEGIN EXCLUSIVE", nil, nil, nil), SQLITE_OK)
+
+        let other = makeIndex()   // "another process": waits out the busy timeout, then gives up
+        XCTAssertEqual(other.documentCount(), 0, "unavailable right now")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: indexURL.path), "never deleted because it was busy")
+
+        XCTAssertEqual(sqlite3_exec(holder, "COMMIT", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(holder)
+        XCTAssertEqual(other.search("locked").count, 1, "data intact, usable again")
+    }
+
+    func testGateKeepsIndexInertUntilEnabledAndStaysDeleted() throws {
+        let suite = UserDefaults(suiteName: "search-gate-\(UUID().uuidString)")!
+        let gate = SearchGate(defaults: suite)
+        XCTAssertFalse(gate.isEnabled, "off by default")
+        let idx = SearchIndex(url: indexURL, gate: gate)
+        let n = try note("a", "gated content")
+        XCTAssertFalse(idx.index(note: n))
+        XCTAssertEqual(idx.reconcile(notesDir: notes, workDir: work), ReconcileSummary())
+        XCTAssertEqual(idx.search("gated").count, 0)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexURL.path), "nothing created before opt-in")
+
+        gate.enable()
+        XCTAssertEqual(idx.reconcile(notesDir: notes, workDir: work).added, 1)
+        XCTAssertEqual(idx.search("gated").count, 1)
+
+        gate.disable(); idx.deleteAll()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexURL.path))
+        XCTAssertFalse(idx.index(note: n))
+        _ = idx.reconcile(notesDir: notes, workDir: work); _ = idx.search("gated")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: indexURL.path), "stays deleted until enabled again")
+    }
+
+    func testSpecificHeadingBecomesTitleGenericDoesNot() throws {
+        let idx = makeIndex()
+        try note("2026-10-01 call", "# Meeting notes\n\nalpha")
+        try note("2026-10-02 call", "# Pricing review with Acme\n\nbeta")
+        idx.reconcile(notesDir: notes, workDir: work)
+        XCTAssertEqual(idx.search("alpha").first?.title, "2026-10-01 call")
+        XCTAssertEqual(idx.search("beta").first?.title, "Pricing review with Acme")
+        XCTAssertEqual(idx.search("2026-10-02").first?.base, "2026-10-02 call", "file name still searchable")
+    }
 }

@@ -83,8 +83,13 @@ public final class SearchIndex: @unchecked Sendable {
     private static let maxBodyBytes = 2_000_000
     private static let transcriptSuffix = ".transcript.clean.txt"
 
-    public init(url: URL = SearchIndex.defaultURL) {
+    /// When set, the index is inert (nothing created, read or written) until the
+    /// gate is enabled — see `SearchGate`.
+    private let gate: SearchGate?
+
+    public init(url: URL = SearchIndex.defaultURL, gate: SearchGate? = nil) {
         self.url = url
+        self.gate = gate
     }
 
     deinit { if let db { sqlite3_close(db) } }
@@ -125,10 +130,15 @@ public final class SearchIndex: @unchecked Sendable {
             var summary = ReconcileSummary()
             guard openLocked() else { return summary }
             var onDisk: [String: (SearchKind, URL, Double, Int64)] = [:]
+            // Directories that listed successfully. A folder that fails to list
+            // (unplugged drive, unresolved sandbox bookmark) is NOT empty: its
+            // rows are left alone rather than wiped.
+            var listed = Set<String>()
             for (kind, dir) in [(SearchKind.note, notesDir), (SearchKind.transcript, workDir)] {
-                let urls = (try? FileManager.default.contentsOfDirectory(
+                guard let urls = try? FileManager.default.contentsOfDirectory(
                     at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
-                    options: [.skipsHiddenFiles])) ?? []
+                    options: [.skipsHiddenFiles]) else { continue }
+                listed.insert(Self.canonical(dir.path))
                 for u in urls {
                     let name = u.lastPathComponent
                     let wanted = kind == .note ? Self.isNote(u) : name.hasSuffix(Self.transcriptSuffix)
@@ -151,9 +161,11 @@ public final class SearchIndex: @unchecked Sendable {
                 }
             }
             for path in known.keys where onDisk[path] == nil {
+                let parent = URL(fileURLWithPath: path).deletingLastPathComponent().path
+                guard listed.contains(parent) else { continue }
                 if removeLocked(path: path) { summary.removed += 1 }
             }
-            refreshNoteSpeakersLocked()
+            if summary.added + summary.updated + summary.removed > 0 { refreshNoteSpeakersLocked() }
             _ = run("COMMIT")
             finishLocked()
             return summary
@@ -311,6 +323,18 @@ public final class SearchIndex: @unchecked Sendable {
         return (start > 0 ? "… " : "") + all[start..<end].joined(separator: " ") + (end < all.count ? " …" : "")
     }
 
+    /// The note's first `# ` heading when it says something specific; generic
+    /// headings ("Meeting notes") return nil so the file name is shown instead.
+    static func heading(inNote body: String) -> String? {
+        for line in body.split(separator: "\n", maxSplits: 20, omittingEmptySubsequences: true).prefix(20) {
+            guard line.hasPrefix("# ") else { continue }
+            let title = line.dropFirst(2).trimmingCharacters(in: .whitespaces)
+            let generic: Set<String> = ["meeting notes", "meeting note", "notes", "summary", "meeting summary"]
+            return title.isEmpty || title.count > 120 || generic.contains(title.lowercased()) ? nil : title
+        }
+        return nil
+    }
+
     static func isNote(_ url: URL) -> Bool {
         url.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName(url.lastPathComponent)
     }
@@ -374,7 +398,10 @@ public final class SearchIndex: @unchecked Sendable {
         }
     }
 
+    private var lastErrorCode: Int32 = SQLITE_OK
+
     private func noteError(_ code: Int32) {
+        lastErrorCode = code
         if code == SQLITE_CORRUPT || code == SQLITE_NOTADB { needsReset = true }
     }
 
@@ -386,8 +413,18 @@ public final class SearchIndex: @unchecked Sendable {
 
     /// Open (creating or rebuilding as needed). false = index unavailable.
     private func openLocked() -> Bool {
+        if let gate, !gate.isEnabled {
+            closeLocked()
+            return false
+        }
         if db != nil { return true }
-        if openFile(), schemaIsCurrent() { return true }
+        if openFile() {
+            switch inspectSchema() {
+            case .current: return true
+            case .unavailable: closeLocked(); return false   // e.g. locked by another process: keep the file
+            case .rebuild: break
+            }
+        }
         closeLocked()
         removeFiles()
         needsReset = false   // errors from the rejected file no longer apply
@@ -405,22 +442,31 @@ public final class SearchIndex: @unchecked Sendable {
             return false
         }
         db = handle
+        sqlite3_busy_timeout(handle, 2000)   // Direct and Setapp may share this file
         return true
     }
 
-    /// true for the current schema; an empty brand-new file is initialised here.
-    private func schemaIsCurrent() -> Bool {
-        guard let version = queryInt("PRAGMA user_version") else { return false }   // not a database
-        if version == 0 {
-            guard queryInt("SELECT count(*) FROM sqlite_master") == 0 else { return false }
-            return createSchema()
+    private enum SchemaState { case current, rebuild, unavailable }
+
+    /// Only a corrupt/not-a-database file or a successfully read, different
+    /// version is rebuilt; any other failure (BUSY, IOERR, …) means "unavailable
+    /// right now" and never deletes the file.
+    private func inspectSchema() -> SchemaState {
+        func failure() -> SchemaState {
+            lastErrorCode == SQLITE_CORRUPT || lastErrorCode == SQLITE_NOTADB ? .rebuild : .unavailable
         }
-        guard version == Self.schemaVersion else { return false }
+        guard let version = queryInt("PRAGMA user_version") else { return failure() }
+        if version == 0 {
+            guard let tables = queryInt("SELECT count(*) FROM sqlite_master") else { return failure() }
+            guard tables == 0 else { return .rebuild }
+            return createSchema() ? .current : failure()
+        }
+        guard version == Self.schemaVersion else { return .rebuild }
         guard queryInt("SELECT count(*) FROM docs") != nil, queryInt("SELECT count(*) FROM fts") != nil else {
-            return false
+            return failure()
         }
         _ = run("PRAGMA synchronous = OFF")
-        return true
+        return .current
     }
 
     private func createSchema() -> Bool {
@@ -436,7 +482,11 @@ public final class SearchIndex: @unchecked Sendable {
             "CREATE VIRTUAL TABLE fts USING fts5(title, body, tokenize = 'unicode61 remove_diacritics 2')",
             "PRAGMA user_version = \(Self.schemaVersion)",
         ]
-        return statements.allSatisfy { run($0) }
+        // One transaction: a half-created schema (user_version still 0) must never be left behind.
+        guard run("BEGIN") else { return false }
+        if statements.allSatisfy({ run($0) }) { return run("COMMIT") }
+        _ = run("ROLLBACK")
+        return false
     }
 
     private func closeLocked() {
@@ -484,16 +534,17 @@ public final class SearchIndex: @unchecked Sendable {
         let speakers = kind == .transcript
             ? "|" + Self.speakerLabels(inTranscript: body).joined(separator: "|") + "|" : ""
         let (mtime, size) = Self.stat(file)
+        let title = kind == .note ? (Self.heading(inNote: body) ?? base) : base
         let path = Self.canonical(file.path)
         // `refreshSpeakers` doubles as "standalone call": reconcile already holds a transaction.
         if refreshSpeakers { _ = run("BEGIN") }
         var ok = removeLocked(path: path)
         ok = ok && run("INSERT INTO docs (path, kind, base, title, mtime, size, speakers) VALUES (?1,?2,?3,?4,?5,?6,?7)",
-                       [.text(path), .text(kind.rawValue), .text(base), .text(base), .double(mtime),
+                       [.text(path), .text(kind.rawValue), .text(base), .text(title), .double(mtime),
                         .int(size), .text(speakers == "||" ? "" : speakers)])
         if ok {
             let id = sqlite3_last_insert_rowid(db)
-            ok = run("INSERT INTO fts (rowid, title, body) VALUES (?1,?2,?3)", [.int(id), .text(base), .text(body)])
+            ok = run("INSERT INTO fts (rowid, title, body) VALUES (?1,?2,?3)", [.int(id), .text(title == base ? base : "\(title) \(base)"), .text(body)])
         }
         if refreshSpeakers {
             refreshNoteSpeakersLocked()
@@ -510,4 +561,18 @@ public final class SearchIndex: @unchecked Sendable {
             WHERE kind = 'note'
             """)
     }
+}
+
+/// Opt-in switch for the search index (Vikunja #2942): nothing is created,
+/// read or written until the user first opens "Search Notes…", which calls
+/// `enable()`. "Delete search index" calls `disable()`, so the index stays
+/// deleted until the user searches again. Stored in UserDefaults (not a Config
+/// key); default false, so existing installs see no change.
+public struct SearchGate: @unchecked Sendable {
+    public static let key = "search.indexEnabled"
+    private let defaults: UserDefaults
+    public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    public var isEnabled: Bool { defaults.bool(forKey: Self.key) }
+    public func enable() { defaults.set(true, forKey: Self.key) }
+    public func disable() { defaults.set(false, forKey: Self.key) }
 }

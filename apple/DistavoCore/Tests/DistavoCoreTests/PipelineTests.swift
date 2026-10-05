@@ -519,6 +519,19 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(stillEnglish.noteLanguage)   // default spoken language "en"
     }
 
+    /// A sidecar spoken code is ignored by transcription when the configured
+    /// language is fixed, so it must not drive the note language either.
+    func testSidecarSpokenCodeIgnoredForNoteLanguageWhenConfigLanguageIsFixed() async throws {
+        let fixed = try await summariserContext(
+            noteLanguage: "auto", sidecar: LanguageOverride(code: "ca"),
+            spokenLanguage: "fr", detections: false)
+        XCTAssertEqual(fixed.noteLanguage, "fr")
+        let automatic = try await summariserContext(
+            noteLanguage: "auto", sidecar: LanguageOverride(code: "ca"),
+            spokenLanguage: EmbeddedModelCatalog.automaticID, detections: false)
+        XCTAssertEqual(automatic.noteLanguage, "ca")
+    }
+
     /// The Gemma (MLX) and Foundation Models paths build their prompt through
     /// `SummaryDriver` from the same `NoteContext.noteLanguage`; prove both
     /// carry the French rule (Gemma also the end-of-turn block).

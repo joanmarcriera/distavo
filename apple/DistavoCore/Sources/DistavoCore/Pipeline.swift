@@ -399,8 +399,12 @@ public enum Pipeline {
             // owner) "auto" falls back to that fixed spoken language.
             let languageSidecar = LanguageOverride.load(
                 workDir: workDir, base: LanguageOverride.sourceBase(from: base))
-            let spokenLanguage = languageSidecar.flatMap { $0.code.isEmpty ? nil : $0.code }
-                ?? config.transcribe.language
+            // The sidecar's spoken code only counts when transcription honoured
+            // it, i.e. when the configured language is automatic
+            // (`LanguageOverride.applying`).
+            let spokenLanguage = EmbeddedModelCatalog.isAutomatic(config.transcribe.language)
+                ? (languageSidecar.flatMap { $0.code.isEmpty ? nil : $0.code } ?? config.transcribe.language)
+                : config.transcribe.language
             let noteLanguage = NoteLanguage.resolve(
                 setting: config.summarise.noteLanguage,
                 perRecording: languageSidecar?.noteLanguage,

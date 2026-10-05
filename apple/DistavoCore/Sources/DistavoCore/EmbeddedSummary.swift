@@ -90,14 +90,14 @@ public struct EmbeddedSummaryBudget: Equatable {
     /// which is what every pre-#2198 caller got.
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
                              style: Prompt.Style = .classic, extraInstructions: String? = nil,
-                             noteLanguage: String? = nil, customInstruction: String? = nil)
+                             noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [])
         -> EmbeddedSummaryBudget {
         // nil `noteLanguage` leaves the measured prompt (so the budget) exactly
         // as before; a language swaps in its longer rule.
         let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
                                         userSpeaker: userSpeaker, style: style,
                                         noteLanguage: noteLanguage,
-                                        customInstruction: customInstruction)
+                                        customInstruction: customInstruction, glossary: glossary)
         // The end-of-user-turn block rides in the final prompt, so its tokens
         // come out of the transcript budget too.
         let extra = extraInstructions?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -202,12 +202,12 @@ public enum EmbeddedSummaryPlanner {
     public static func plan(
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
         style: Prompt.Style = .classic, extraInstructions: String? = nil,
-        noteLanguage: String? = nil, customInstruction: String? = nil
+        noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = []
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
             extraInstructions: extraInstructions, noteLanguage: noteLanguage,
-            customInstruction: customInstruction)
+            customInstruction: customInstruction, glossary: glossary)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single
         }

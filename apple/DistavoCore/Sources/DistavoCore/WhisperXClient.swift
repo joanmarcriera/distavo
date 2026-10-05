@@ -46,6 +46,13 @@ public struct WhisperXClient {
             URLQueryItem(name: "diarize", value: config.diarize ? "true" : "false"),
             URLQueryItem(name: "num_speakers", value: String(config.numSpeakers)),
         ]
+        // Custom vocabulary (Vikunja #2939): the whisper-asr-webservice /asr
+        // contract spells the prompt `initial_prompt`. Sent only for a non-empty
+        // glossary, so the request is byte-identical otherwise.
+        let initialPrompt = Vocabulary.transcriberPrompt(config.vocabulary)
+        if !initialPrompt.isEmpty {
+            components?.queryItems?.append(URLQueryItem(name: "initial_prompt", value: initialPrompt))
+        }
         guard let endpoint = components?.url else { throw WhisperXError("invalid WhisperX URL") }
 
         let boundary = "distavo-\(UUID().uuidString)"

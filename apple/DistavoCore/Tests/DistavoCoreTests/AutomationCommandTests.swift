@@ -40,6 +40,58 @@ final class AutomationCommandTests: XCTestCase {
         for s in hostile { XCTAssertNil(AutomationCommand.parse(s), "should reject: \(s.debugDescription)") }
     }
 
+    func testExtraParserCases() {
+        XCTAssertNil(AutomationCommand.parse("distavo:record/start"))
+        XCTAssertEqual(AutomationCommand.parse("distavo://Record/Start"), .recordStart)
+        XCTAssertEqual(AutomationCommand.parse("distavo://record/start/"), .recordStart)
+        XCTAssertEqual(QueuedFile.sanitizedName(".wav"), "wav")
+        XCTAssertFalse(QueuedFile.isSupportedMedia(QueuedFile.sanitizedName(".wav")))
+    }
+
+    func testTempNameIsInvisibleToScannerAndRecorderRecovery() {
+        let dest = URL(fileURLWithPath: "/r/talk.wav")
+        let tmp = QueuedFile.tempURL(for: dest)
+        XCTAssertEqual(tmp.lastPathComponent, ".talk.wav.distavo-copy")
+        XCTAssertTrue(QueuedFile.isTempName(tmp.lastPathComponent))
+        XCTAssertFalse(QueuedFile.isSupportedMedia(tmp.lastPathComponent))
+        // MeetingRecorder.recoverOrphanedRecordings matches hasSuffix(".wav.part").
+        XCTAssertFalse(tmp.lastPathComponent.hasSuffix(".wav.part"))
+        XCTAssertFalse(QueuedFile.isTempName("talk.wav"))
+        XCTAssertFalse(QueuedFile.isTempName(".hidden.wav"))
+    }
+
+    func testRemoveStaleTemps() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        for n in [".a.wav.distavo-copy", "keep.wav", "x.wav.part"] {
+            try Data([1]).write(to: dir.appendingPathComponent(n))
+        }
+        XCTAssertEqual(QueuedFile.removeStaleTemps(in: dir), 1)
+        let left = Set(try FileManager.default.contentsOfDirectory(atPath: dir.path))
+        XCTAssertEqual(left, ["keep.wav", "x.wav.part"])
+    }
+
+    func testSourceProblemAndInsideFolder() {
+        XCTAssertNil(QueuedFile.sourceProblem(isRegularFile: true, size: 10))
+        XCTAssertEqual(QueuedFile.sourceProblem(isRegularFile: false, size: 10), .notRegularFile)
+        XCTAssertEqual(QueuedFile.sourceProblem(isRegularFile: true, size: 0), .empty)
+        XCTAssertEqual(QueuedFile.sourceProblem(isRegularFile: true, size: nil), .empty)
+        let r = URL(fileURLWithPath: "/tmp/rec")
+        XCTAssertTrue(QueuedFile.isInside(URL(fileURLWithPath: "/tmp/rec/sub/a.wav"), folder: r))
+        XCTAssertFalse(QueuedFile.isInside(URL(fileURLWithPath: "/tmp/rec"), folder: r))
+        XCTAssertFalse(QueuedFile.isInside(URL(fileURLWithPath: "/tmp/rec2/a.wav"), folder: r))
+        XCTAssertFalse(QueuedFile.isInside(URL(fileURLWithPath: "/tmp/rec/../x.wav"), folder: r))
+    }
+
+    func testThrottle() {
+        var t = CommandThrottle(interval: 5)
+        XCTAssertTrue(t.allow(.processNow, now: 100))
+        XCTAssertFalse(t.allow(.processNow, now: 102))
+        XCTAssertTrue(t.allow(.settings, now: 102))
+        XCTAssertTrue(t.allow(.processNow, now: 105.5))
+    }
+
     func testHugeStringsAreRejected() {
         XCTAssertNil(AutomationCommand.parse("distavo://process-now?" + String(repeating: "a", count: 100_000)))
         XCTAssertNil(AutomationCommand.parse("distavo://" + String(repeating: "a", count: 10_000)))

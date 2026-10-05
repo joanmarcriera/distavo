@@ -426,15 +426,24 @@ final class WatcherController: ObservableObject {
     /// failure is logged and notified but NEVER affects the recording. Variant runs
     /// (`<base>@…`) are comparison artefacts and are not exported.
     private func exportToVault(_ result: ProcessResult) {
+        guard let note = result.notePath else { return }
+        exportToVault(base: result.base, note: note)
+    }
+
+    /// Also used after a speaker rename, so the vault copy never goes stale.
+    private func exportToVault(base: String, note: URL) {
         let notes = config.notes
-        guard notes.hasVault, !result.base.contains("@"), let note = result.notePath else { return }
+        guard notes.hasVault, !base.contains("@") else { return }
         let workDir = Config.resolvePath(config.workDir)
-        let base = result.base
+        // The vault must not sit inside a folder Distavo scans itself (duplicates in search / tasks).
+        let avoiding = [config.notesDir, config.recordingsDir].map(Config.resolvePath)
         Task.detached(priority: .utility) { [weak self] in
+            let title = NoteMeta.loadTitle(workDir: workDir, base: base)
             let outcome = SandboxFolders.withVaultAccess(path: notes.vaultDir) { path -> VaultExport.Outcome in
                 var scoped = notes
                 scoped.vaultDir = path
-                return VaultExport.export(note: note, base: base, notes: scoped, workDir: workDir)
+                return VaultExport.export(note: note, base: base, notes: scoped, workDir: workDir,
+                                          title: title, avoiding: avoiding)
             }
             await MainActor.run { [weak self] in
                 self?.log("Vault copy of \(base): \(outcome.message)")
@@ -1025,6 +1034,7 @@ final class WatcherController: ObservableObject {
             if !result.changedFiles.isEmpty {
                 // Refresh the full-text index (#2942); a no-op unless search is enabled.
                 indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+                exportToVault(base: base, note: notesDir.appendingPathComponent("\(base).md"))   // #2954
             }
             log("Renamed speakers in \(base): \(mapping.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: ", "))")
             notifier.notify(title: result.changedFiles.isEmpty ? "Nothing to rename" : "✅ Speakers renamed",

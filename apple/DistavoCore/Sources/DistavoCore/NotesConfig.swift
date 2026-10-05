@@ -57,8 +57,13 @@ public struct NotesConfig: Codable, Equatable, Sendable {
     /// The tracked terms, trimmed, de-duplicated, comma-split (same rules as the vocabulary).
     public var terms: [String] { Vocabulary.normalisedTerms(trackedTerms) }
 
+    /// A title is asked for only when it will be used: in the frontmatter, or to name the vault copy.
+    public var wantsTitle: Bool { autoTitle && (frontmatter || hasVault) }
+    /// Tags only live in the frontmatter, so they are asked for only when it is on.
+    public var wantsTags: Bool { autoTags && frontmatter }
+
     /// True when the summary prompt must carry the extra title/tags request.
-    public var asksModelForMetadata: Bool { autoTitle || autoTags }
+    public var asksModelForMetadata: Bool { wantsTitle || wantsTags }
 
     /// A vault copy is wanted.
     public var hasVault: Bool { !vaultDir.trimmingCharacters(in: .whitespaces).isEmpty }

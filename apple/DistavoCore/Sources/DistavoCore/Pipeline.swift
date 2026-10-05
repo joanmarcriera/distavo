@@ -524,6 +524,7 @@ public enum Pipeline {
                 dominantCode: dominantCode,
                 existingNote: try? String(contentsOf: notePath, encoding: .utf8))
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
+            rememberTitle(noteMeta, config: config, workDir: workDir, base: base)   // #2954
             state.markDone(base)
             var message = "note written"
             if config.compactRecordingsAfterNote, variant == nil,

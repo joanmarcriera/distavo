@@ -26,10 +26,10 @@ public enum NoteMeta {
     public static func requestText(_ notes: NotesConfig) -> String {
         guard notes.asksModelForMetadata else { return "" }
         var lines: [String] = []
-        if notes.autoTitle {
+        if notes.wantsTitle {
             lines.append("\(titlePrefix) <a specific title for this meeting, at most 10 words, no quotes>")
         }
-        if notes.autoTags {
+        if notes.wantsTags {
             lines.append("\(tagsPrefix) <3 to 6 lowercase topic keywords, comma-separated, no # signs>")
         }
         return "After the notes, end your answer with exactly "
@@ -48,6 +48,31 @@ public enum NoteMeta {
         let user = String((userInstruction ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(room))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return user.isEmpty ? request : user + "\n\n" + request
+    }
+
+    // MARK: Title sidecar
+    //
+    // The model's title is kept in `<workDir>/<base>.title.txt` so the vault copy can be named
+    // by it whatever the frontmatter switch says, and a later refresh (speaker rename) still knows it.
+
+    public static func titleURL(workDir: URL, base: String) -> URL {
+        workDir.appendingPathComponent("\(base).title.txt")
+    }
+
+    public static func loadTitle(workDir: URL, base: String) -> String? {
+        (try? String(contentsOf: titleURL(workDir: workDir, base: base), encoding: .utf8))
+            .flatMap(sanitisedTitle)
+    }
+
+    /// Remember `title`; nil removes a stale one. Best effort, never throws.
+    public static func storeTitle(_ title: String?, workDir: URL, base: String) {
+        let url = titleURL(workDir: workDir, base: base)
+        if let title {
+            try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+            try? title.write(to: url, atomically: true, encoding: .utf8)
+        } else {
+            try? FileManager.default.removeItem(at: url)
+        }
     }
 
     public struct Extracted: Equatable, Sendable {

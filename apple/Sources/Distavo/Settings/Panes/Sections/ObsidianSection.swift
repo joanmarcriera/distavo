@@ -52,6 +52,13 @@ struct ObsidianSection: View {
                 .disabled(model.draft.notes.vaultDir.isEmpty)
                 HelpButton(text: "Every finished (or regenerated) note is also copied into this folder as “<date> <title>.md”, so Obsidian picks it up. It is the same text as the note, so turn on frontmatter above. Existing files are never overwritten: a regenerated note replaces its own earlier copy unless you edited that copy, in which case it is saved as a numbered file beside it. If the folder is missing (for example an unmounted drive) the copy is skipped with a notification and the note itself is unaffected. Nothing leaves your Mac.")
             }
+            if let why = VaultExport.conflict(
+                vaultDir: model.draft.notes.vaultDir, notesDir: model.draft.notesDir,
+                recordingsDir: model.draft.recordingsDir, workDir: model.draft.workDir) {
+                SettingCallout(symbol: "exclamationmark.triangle") {
+                    Text("Copies will be skipped: \(why).").font(.caption)
+                }
+            }
             if !model.draft.notes.vaultDir.isEmpty {
                 TextField("Sub-folder inside the vault (optional)", text: $model.draft.notes.vaultSubfolder)
                 SettingCaption("For example Meetings. Created if it does not exist.")

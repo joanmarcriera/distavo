@@ -281,6 +281,7 @@ extension Pipeline {
                 if let backup { try? FileManager.default.moveItem(at: backup, to: notePath) }
                 throw error
             }
+            rememberTitle(noteMeta, config: cfg, workDir: workDir, base: base)   // #2954
             state.markDone(base)
             let kept = backup.map { "; previous version kept as \($0.lastPathComponent)" } ?? ""
             return ProcessResult(status: .done, base: base, message: "note regenerated\(kept)",

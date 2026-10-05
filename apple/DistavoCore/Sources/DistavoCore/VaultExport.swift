@@ -66,9 +66,21 @@ public enum VaultExport {
         let bad = CharacterSet(charactersIn: "/\\:*?\"<>|#^[]").union(.controlCharacters)
         var out = s.unicodeScalars.map { bad.contains($0) ? "-" : String($0) }.joined()
         out = TranscriptCleaner.normaliseSpace(out)
-        out = String(out.prefix(120))
+        out = utf8Prefix(out, maxBytes: 200)
         while out.hasPrefix(".") { out.removeFirst() }
         return out.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+    }
+
+    /// The longest prefix of `s` whose UTF-8 encoding is at most `maxBytes`, never splitting a
+    /// character (a file-name component is limited to 255 BYTES, so CJK/emoji names need this).
+    static func utf8Prefix(_ s: String, maxBytes: Int) -> String {
+        var out = "", used = 0
+        for ch in s {
+            let n = String(ch).utf8.count
+            if used + n > maxBytes { break }
+            out.append(ch); used += n
+        }
+        return out
     }
 
     /// "2026-10-05 Q4 roadmap review.md": the date (when known), then the title or - without
@@ -110,12 +122,39 @@ public enum VaultExport {
         workDir.appendingPathComponent("\(base).vault.json")
     }
 
+    /// A warning when `vault` equals or lies inside any of `avoiding` (standardised, symlinks
+    /// resolved): the notes, recordings and work folders are scanned recursively (search index,
+    /// action items), so a vault there would list every note twice. nil when it is fine.
+    public static func conflict(vault: URL, avoiding: [URL]) -> String? {
+        func comps(_ u: URL) -> [String] { u.standardizedFileURL.resolvingSymlinksInPath().pathComponents }
+        let v = comps(vault)
+        for dir in avoiding {
+            let d = comps(dir)
+            if v.count >= d.count && Array(v.prefix(d.count)) == d {
+                return "the vault folder \(vault.path) is inside \(dir.path), which Distavo scans for notes; choose a folder outside your notes, recordings and work folders"
+            }
+        }
+        return nil
+    }
+
+    /// The same check from the settings strings (shared by Settings and `export`); "" vault = nil.
+    public static func conflict(vaultDir: String, notesDir: String, recordingsDir: String, workDir: String) -> String? {
+        let t = vaultDir.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return nil }
+        return conflict(vault: Config.resolvePath(t),
+                        avoiding: [notesDir, recordingsDir, workDir].map(Config.resolvePath))
+    }
+
     /// Copy the finished note at `note` into the configured vault. Never throws.
+    /// `title` (the model's, when asked for) names the file whatever the frontmatter switch
+    /// says; without it the frontmatter title, then the base name, is used. `avoiding` are
+    /// folders the vault must not be in (the work folder is always added).
     public static func export(note: URL, base: String, notes: NotesConfig, workDir: URL,
-                              now: Date = Date()) -> Outcome {
+                              title: String? = nil, avoiding: [URL] = [], now: Date = Date()) -> Outcome {
         guard notes.hasVault else { return .skipped("no vault folder configured") }
         let fm = FileManager.default
         let root = Config.resolvePath(notes.vaultDir.trimmingCharacters(in: .whitespaces))
+        if let why = conflict(vault: root, avoiding: avoiding + [workDir]) { return .skipped(why) }
         var isDir: ObjCBool = false
         guard fm.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue else {
             return .skipped("the vault folder \(root.path) was not found (is the drive mounted?)")
@@ -131,7 +170,7 @@ public enum VaultExport {
         let modified = (try? fm.attributesOfItem(atPath: note.path))?[.modificationDate] as? Date
         let date = NoteFrontmatter.value("date", in: text)
             ?? NoteFrontmatter.dateString(modified ?? now)
-        let name = fileName(date: date, title: NoteFrontmatter.value("title", in: text), base: base)
+        let name = fileName(date: date, title: title ?? NoteFrontmatter.value("title", in: text), base: base)
 
         let recordFile = recordURL(workDir: workDir, base: base)
         let record = (try? Data(contentsOf: recordFile)).flatMap { try? JSONDecoder().decode(Record.self, from: $0) }

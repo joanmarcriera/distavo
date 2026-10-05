@@ -176,10 +176,11 @@ public struct ProcessingQueue: Equatable, Sendable {
 
     /// The scan is about to process `base`. Upserts, so a file that appeared
     /// since the last sync is still tracked.
-    public mutating func begin(base: String, sourcePath: String, now: Date) {
+    /// `displayName` overrides the file name (a variant run shows "name @model-lang").
+    public mutating func begin(base: String, sourcePath: String, displayName: String? = nil, now: Date) {
         if index(base) == nil {
             items.append(QueueItem(base: base, sourcePath: sourcePath,
-                                   displayName: (sourcePath as NSString).lastPathComponent))
+                                   displayName: displayName ?? (sourcePath as NSString).lastPathComponent))
         }
         guard let i = index(base) else { return }
         items[i].state = .converting
@@ -355,20 +356,27 @@ public enum QueueScan {
     /// Process `paths` strictly one after another. `shouldContinue` is asked
     /// before EACH file (pause: the current file finishes, the next never
     /// starts); `shouldStart` skips an individual file (cancelled for this
-    /// session). Returns the number of files handed to `process`.
+    /// session). `priority` is polled before each file and, when it yields a
+    /// URL, that file runs next - this is how a retry jumps the line without a
+    /// rescan. Returns the number of files handed to `process`.
     @MainActor
     @discardableResult
     public static func run(
         paths: [URL],
         shouldContinue: () -> Bool,
         shouldStart: (URL) -> Bool = { _ in true },
+        priority: () -> URL? = { nil },
         begin: (URL) -> Void,
         process: (URL) async -> ProcessResult,
         finished: (URL, ProcessResult) -> Void
     ) async -> Int {
         var started = 0
-        for path in paths {
-            guard shouldContinue() else { break }
+        var next = 0
+        while shouldContinue() {
+            let path: URL
+            if let p = priority() { path = p }
+            else if next < paths.count { path = paths[next]; next += 1 }
+            else { break }
             guard shouldStart(path) else { continue }
             begin(path)
             started += 1

@@ -232,3 +232,18 @@ Editing
 Not covered by unit tests: all of the above window behaviour, AVPlayer seek latency, the highlight cadence,
 auto-scroll, and the App Store sandbox read of the recording. Speaker relabelling is supported by the edit
 model (`SegmentEdit.speaker`) but there is no UI for it in this version.
+## Processing Queue window (#2952)
+
+Needs a launched build (Direct and App Store); the window, drag and drop and Pause cannot run headless. Unit tests cover the reducer, ETA maths, ordering, pause-between-files, single-file retry and a 20-file sequential run (`ProcessingQueueTests`).
+
+1. Menu bar -> **Processing Queue…** opens a resizable window. With an empty folder it shows the "Drop audio or video files here" hint.
+2. **Drop 20 audio files** from Finder onto the window: the drop outline appears; rows show **Copying** one after another (never 20 copies at once; the menu bar and window stay responsive), then **Waiting**, then exactly ONE row at a time moves through Converting -> Transcribing -> Summarising -> Done, in path (alphabetical) order. No ETA/progress bar on the first file; after the first completes, waiting rows and later files show "about N min" and the toolbar shows the total.
+3. Drop a **folder**, a `.pdf` and a `.mkv`: each is rejected with an orange message under the list; nothing is copied. Drop a file already inside the recordings folder: no duplicate is made. Drop the same file twice: second copy is `name 2.m4a`.
+4. **Pause** while file N is running: file N finishes and gets its note, file N+1 never starts, the footer says it lasts until quit; "Process now" is disabled; the menu item reads "Resume watching". **Resume** continues. Quit and relaunch while paused: the app is NOT paused.
+5. **Skip** a waiting row: it shows Skipped and is not processed; Restore puts it back. Relaunch: the skipped file is processed again (it never left the folder). A running row's context menu shows Cancel greyed with the reason; there is intentionally no way to stop a file mid-process.
+6. **Retry**: make a file fail (e.g. point the summariser at a dead port with local fallback allowed, or drop a corrupt `.m4a`), then fix the cause. With two failed rows, choose Retry on ONE: only that row restarts (next after the current file) and the other stays Failed; no other pending file jumps in. "Process now" still retries all failed files.
+7. **Reprocess with another model or language…** on a Done row: the existing model/language sheet appears; the run shows as an extra row "name @model-lang" and the note lands beside the normal one. Compare… lists both.
+8. Context menu: **Reveal in Finder**, **Open note**, **Move recording to the Bin** (also clears its failed/too-short marker; the menu-bar failed list updates).
+9. **Deferred**: stop Ollama with local fallback off, drop a file: row goes to "Waiting to retry" (not Failed); start Ollama, within one scan it processes. A too-short clip shows "Too short" and is not retried by Retry.
+10. App Store build: repeat 2 with files dragged from the Desktop and from an external volume (sandbox access for the dropped URLs must last until the LAST serial copy, minutes later).
+11. Leave the window open during a long run for ~10 minutes: CPU stays low (list refreshes every 3 s from disk, progress at about 4 Hz).

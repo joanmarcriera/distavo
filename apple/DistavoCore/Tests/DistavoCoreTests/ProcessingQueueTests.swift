@@ -282,6 +282,20 @@ final class ProcessingQueueTests: XCTestCase {
         XCTAssertEqual(processed, ["a.m4a", "c.m4a"])
     }
 
+    @MainActor
+    func testPriorityRetryJumpsTheLineAndRunsOnce() async {
+        let paths = ["a", "b", "c"].map { URL(fileURLWithPath: "/rec/\($0).m4a") }
+        var retries = [URL(fileURLWithPath: "/rec/z.m4a")]
+        var processed: [String] = []
+        await QueueScan.run(
+            paths: paths, shouldContinue: { true },
+            priority: { retries.isEmpty ? nil : retries.removeFirst() },
+            begin: { _ in },
+            process: { processed.append($0.lastPathComponent); return ProcessResult(status: .done, base: "", message: "") },
+            finished: { _, _ in })
+        XCTAssertEqual(processed, ["z.m4a", "a.m4a", "b.m4a", "c.m4a"])
+    }
+
     private func tempEnv(files: [String]) throws -> (Config, DistavoState.Store, URL) {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("distavo-queue-\(UUID().uuidString)")

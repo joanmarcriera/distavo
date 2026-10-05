@@ -251,6 +251,7 @@ public enum CalendarAttendees {
     }
 
     public static let maxNameWords = 5
+    static let maxMarksPerBase = 3
     /// Punctuation a person's display name may contain besides letters, marks,
     /// digits and spaces.
     static let namePunctuation: Set<Unicode.Scalar> = [".", "'", "\u{2019}", "-", "\u{00B7}"]
@@ -284,16 +285,33 @@ public enum CalendarAttendees {
         let name = words.joined(separator: " ")
         guard !words.isEmpty, words.count <= maxNameWords, name.count <= maxNameChars else { return nil }
         var hasLetter = false
-        for u in name.unicodeScalars {
-            switch u.properties.generalCategory {
+        var marks = 0, prevPunct = false
+        for (i, u) in name.unicodeScalars.enumerated() {
+            let cat = u.properties.generalCategory
+            var isMark = false, isPunct = false
+            switch cat {
             case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter:
                 hasLetter = true
-            case .nonspacingMark, .spacingMark, .enclosingMark, .decimalNumber:
+            case .nonspacingMark, .spacingMark, .enclosingMark:
+                isMark = true
+            case .decimalNumber:
                 break
             default:
                 guard u == " " || namePunctuation.contains(u) else { return nil }
+                isPunct = u != " "
             }
+            // A name starts with a letter or digit (never punctuation or a bare mark),
+            // has no run of punctuation (`a --- b`, `...`) and no mark flood (<= 3 per base).
+            if i == 0 && (isMark || isPunct) { return nil }
+            if isPunct && prevPunct { return nil }
+            marks = isMark ? marks + 1 : 0
+            if marks > maxMarksPerBase { return nil }
+            prevPunct = isPunct
         }
+        // Every word must itself contain a letter or digit: no punctuation-only fragments.
+        for w in words where !w.unicodeScalars.contains(where: {
+            [.uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber]
+                .contains($0.properties.generalCategory) }) { return nil }
         return hasLetter ? name : nil
     }
 

@@ -39,7 +39,7 @@ struct AskView: View {
                         if model.busy {
                             HStack(spacing: 8) {
                                 ProgressView().controlSize(.small)
-                                Text("Thinking on this Mac…").foregroundStyle(.secondary)
+                                Text(model.stopping ? "Stopping…" : "Thinking on this Mac…").foregroundStyle(.secondary)
                             }
                         }
                     }
@@ -55,7 +55,7 @@ struct AskView: View {
                     .lineLimit(1...4).textFieldStyle(.roundedBorder).focused($focused)
                     .onSubmit { model.send() }
                 if model.busy {
-                    Button("Stop") { model.stop() }
+                    Button(model.stopping ? "Stopping…" : "Stop") { model.stop() }.disabled(model.stopping)
                 } else {
                     Button("Ask") { model.send() }.disabled(!model.canSend)
                 }
@@ -89,7 +89,7 @@ private struct AskBubble: View {
             }
         case .assistant:
             VStack(alignment: .leading, spacing: 6) {
-                Text(rendered(message.text)).textSelection(.enabled)
+                Text(AskPrompt.displayText(message.text)).textSelection(.enabled)
                 if message.citations.isEmpty {
                     Text("The answer cited no source. Notes the model was shown:")
                         .font(.caption).foregroundStyle(.secondary)
@@ -117,8 +117,4 @@ private struct AskBubble: View {
         }
     }
 
-    private func rendered(_ s: String) -> AttributedString {
-        (try? AttributedString(markdown: s, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
-            ?? AttributedString(s)
-    }
 }

@@ -184,13 +184,17 @@ public enum EmbeddedSummariser {
 
     /// One generic completion on Apple's model (Vikunja #2948, "Ask Your Notes"):
     /// the prompt is sent as given — no note prompt, no note post-processing.
-    /// Serialised with every other model operation (`ModelCoordinator`), and the
-    /// answer is clamped against the measured prompt size when the OS can measure.
+    /// NOT serialised through `ModelCoordinator` (Apple note summaries are not
+    /// either): the caller (Ask) refuses to start while a recording is being
+    /// processed and the UI allows one Ask at a time. Checks cancellation right
+    /// before generating. The answer is clamped against the measured prompt size
+    /// when the OS can measure it.
     public static func complete(prompt: String, maxOutputTokens: Int) async throws -> String {
         if let reason = unavailableReason() { throw reason }
         #if canImport(FoundationModels)
         guard #available(macOS 26, *) else { throw EmbeddedSummariserError.unsupportedOS }
-        return try await ModelCoordinator.shared.withExclusiveAccess {
+        do {
+            try Task.checkCancellation()
             let generator = FoundationModelsGenerator()
             var out = maxOutputTokens
             if let measured = await generator.tokenCount(prompt) {

@@ -49,7 +49,6 @@ extension WatcherController {
         // A running scan/regenerate may be using the on-device model; two concurrent
         // on-device generations are not allowed, so Ask asks the user to retry.
         // (Ollama is a separate process and is never blocked.)
-        let scanning = isScanning
         var deps = AskDeps.live(
             from: PipelineDeps.appLive(),
             retrieve: { terms, limit, words in
@@ -61,7 +60,8 @@ extension WatcherController {
         let ollamaComplete = deps.complete
         deps.complete = { prompt, target, options, maxOutputTokens in
             if case .embedded(let model) = target {
-                // Both engines serialise on ModelCoordinator (one model operation at a time).
+                // Gemma serialises on ModelCoordinator; Apple's model does not (see
+                // EmbeddedSummariser.complete) and relies on the scan refusal above.
                 if model == EmbeddedSummaryModelCatalog.appleID {
                     return try await EmbeddedSummariser.complete(prompt: prompt, maxOutputTokens: maxOutputTokens)
                 }
@@ -69,8 +69,12 @@ extension WatcherController {
             }
             return try await ollamaComplete(prompt, target, options, maxOutputTokens)
         }
-        deps.onDeviceBusy = {
-            scanning ? "Distavo is processing a recording and the on-device model is busy. Try again when it finishes." : nil
+        // Read at the point of use (AskNotes calls this right before generating).
+        deps.onDeviceBusy = { [weak self] in
+            await MainActor.run {
+                self?.isScanning == true
+                    ? "Distavo is processing a recording and the on-device model is busy. Try again when it finishes." : nil
+            }
         }
         return await AskNotes.ask(question: question, scope: scope, history: history, config: config, deps: deps)
     }

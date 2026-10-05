@@ -417,6 +417,9 @@ public enum GemmaSummariser {
         root: URL = EmbeddedModelStore.modelsDirectory
     ) async throws -> String {
         try await ModelCoordinator.shared.withExclusiveAccess {
+            // The coordinator's wait is not cancellable: a Stop pressed while queued
+            // must not still run a full generation once the lock is finally ours.
+            try Task.checkCancellation()
             let model = EmbeddedSummaryModelCatalog.model(id: modelID)
             guard model.engine == .mlx, SummaryModelStore.isVerified(model, root: root) else {
                 throw RetryableDependencyError("\(model.displayName) is not downloaded yet.")

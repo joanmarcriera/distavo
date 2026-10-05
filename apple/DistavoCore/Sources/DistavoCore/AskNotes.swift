@@ -89,7 +89,9 @@ public struct AskDeps {
     public var indexEnabled: () -> Bool
     /// Non-nil while an on-device engine must not be started because a recording is
     /// being processed (two concurrent on-device generations are not allowed).
-    public var onDeviceBusy: () -> String?
+    /// Evaluated right before the generation starts (not earlier), so a scan that began
+    /// in the meantime is noticed.
+    public var onDeviceBusy: () async -> String?
     public var resolver: NetworkScope.HostResolver
 
     public init(
@@ -98,7 +100,7 @@ public struct AskDeps {
         complete: @escaping (String, SummariseTarget, SummariseOptions, Int) async throws -> String,
         retrieve: @escaping (String, Int, Int) async -> [SearchPassage] = { _, _, _ in [] },
         indexEnabled: @escaping () -> Bool = { false },
-        onDeviceBusy: @escaping () -> String? = { nil },
+        onDeviceBusy: @escaping () async -> String? = { nil },
         resolver: @escaping NetworkScope.HostResolver = NetworkScope.systemResolver
     ) {
         self.ollamaReachable = ollamaReachable; self.embeddedReadiness = embeddedReadiness
@@ -113,13 +115,17 @@ public struct AskDeps {
         retrieve: @escaping (String, Int, Int) async -> [SearchPassage],
         indexEnabled: @escaping () -> Bool
     ) -> AskDeps {
-        let ollama = OllamaClient()
+        // Never follow a redirect: a 307 keeps the POST body, so a LAN host redirecting to a
+        // public URL would otherwise receive the question and excerpts.
+        let ollama = OllamaClient(session: AskSession.noRedirect)
         return AskDeps(
             ollamaReachable: pipeline.ollamaReachable, embeddedReadiness: pipeline.embeddedReadiness,
             complete: { prompt, target, options, _ in
                 guard case let .ollama(url, model) = target else {
                     throw OllamaError("On-device answering is not available in this build.")
                 }
+                // Re-check immediately before sending (the guard in `ask` ran earlier).
+                if let why = AskBackend.localOnlyViolation(target) { throw OllamaError(why) }
                 return try await ollama.generate(url: url, model: model, prompt: prompt, options: options)
             },
             retrieve: retrieve, indexEnabled: indexEnabled)
@@ -154,12 +160,41 @@ public enum AskBackend {
         _ target: SummariseTarget, resolver: NetworkScope.HostResolver = NetworkScope.systemResolver
     ) -> String? {
         guard case .ollama(let url, _) = target else { return nil }
-        if NetworkScope.isLoopbackHost(url) || NetworkScope.isLocalOrResolvesLocal(url, resolver: resolver) {
-            return nil
-        }
+        if isLocalEndpoint(url, resolver: resolver) { return nil }
         let host = URLComponents(string: url)?.host ?? url
         return "Ask Your Notes only works with a local model, but the configured Ollama server (\(host)) is not on this Mac or your local network. Point Settings → Summaries at a local or LAN Ollama, or pick an on-device model."
     }
+
+    /// Strict: an IP literal must be loopback or private; a hostname must be `localhost`,
+    /// a bare single-label name or `*.local`, or EVERY address it resolves to must be
+    /// loopback or private (an empty/failed resolution is not local).
+    static func isLocalEndpoint(_ url: String, resolver: NetworkScope.HostResolver) -> Bool {
+        guard let host = NetworkScope.hostOf(url), !host.isEmpty else { return false }
+        func local(_ ip: String) -> Bool { NetworkScope.isLoopbackAddress(ip) || NetworkScope.isPrivateAddress(ip) }
+        if NetworkScope.ipv4Bytes(host) != nil || NetworkScope.ipv6Bytes(host) != nil { return local(host) }
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || !host.contains(".") {
+            return true
+        }
+        let ips = resolver(host)
+        return !ips.isEmpty && ips.allSatisfy(local)
+    }
+}
+
+/// URLSession for Ask: refuses every redirect (the 3xx is returned as the response and
+/// reported as a failure), so the prompt is only ever sent to the configured endpoint.
+enum AskSession {
+    private final class NoRedirect: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            completionHandler(nil)
+        }
+    }
+    static func make(_ configuration: URLSessionConfiguration = .ephemeral) -> URLSession {
+        URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+    }
+    static let noRedirect = make()
 }
 
 public enum AskNotes {
@@ -190,7 +225,7 @@ public enum AskNotes {
         case .unavailable(let why): return .failed(why)
         }
         if let why = AskBackend.localOnlyViolation(target, resolver: deps.resolver) { return .refused(why) }
-        if case .embedded = target, let busy = deps.onDeviceBusy() { return .deferred(busy) }
+        if case .embedded = target, let busy = await deps.onDeviceBusy() { return .deferred(busy) }
 
         // 2. Budget for this backend, then the excerpts.
         let window = AskPrompt.effectiveWindow(AskBackend.contextSize(target, options: config.summarise.options))
@@ -227,7 +262,8 @@ public enum AskNotes {
             method = "the \(excerpts.count) best-matching note\(excerpts.count == 1 ? "" : "s")/transcript\(excerpts.count == 1 ? "" : "s") from the search index"
         }
 
-        // 3. Ask the model.
+        // 3. Ask the model. Re-check the on-device busy state at the point of use.
+        if case .embedded = target, let busy = await deps.onDeviceBusy() { return .deferred(busy) }
         let prompt = AskPrompt.build(question: question, excerpts: excerpts, history: turns)
         var options = config.summarise.options
         let answerTokens = AskPrompt.answerTokens(window: window)

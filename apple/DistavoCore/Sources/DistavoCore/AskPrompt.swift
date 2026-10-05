@@ -165,6 +165,20 @@ public enum AskPrompt {
         return out
     }
 
+    // MARK: Display
+
+    /// The answer as styled text with inline Markdown (emphasis, code, lists) but NO
+    /// links: a hostile transcript can make the model emit `[text](https://evil/?x=…)`,
+    /// and the only clickable things in the window must be the app's own citation
+    /// buttons. Links keep their visible text.
+    public static func displayText(_ markdown: String) -> AttributedString {
+        var text = (try? AttributedString(
+            markdown: markdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)))
+            ?? AttributedString(markdown)
+        for run in text.runs where run.link != nil { text[run.range].link = nil }
+        return text
+    }
+
     // MARK: Citations
 
     /// Excerpt numbers the answer cites, in order of first mention, restricted to

@@ -38,6 +38,10 @@ final class AskModel: ObservableObject {
     @Published var selectedBase = ""
     @Published private(set) var notes: [AskableNote] = []
     @Published private(set) var busy = false
+    /// Stop pressed; the task has not finished yet (a queued model call can only be
+    /// abandoned once it reaches the front), so `busy` stays true until it does.
+    @Published private(set) var stopping = false
+    private var cleared = false
 
     /// Answers one question (supplied by `WatcherController`, which owns the config).
     private var provider: (String, AskScope, [AskTurn]) async -> AskOutcome = { _, _, _ in .cancelled }
@@ -84,22 +88,27 @@ final class AskModel: ObservableObject {
         let provider = self.provider
         task = Task {
             let outcome = await provider(question, scope, earlier)
-            // Stop (or Clear chat) already reset the UI; a late answer is discarded.
-            guard !Task.isCancelled else { return }
-            apply(outcome)
+            let wasStopped = stopping, wasCleared = cleared
+            stopping = false; cleared = false
+            if wasCleared { busy = false; return }
+            if wasStopped || outcome == .cancelled {
+                messages.append(AskMessage(role: .notice, text: "Stopped."))
+            } else {
+                apply(outcome)
+            }
             busy = false
         }
     }
 
     func stop() {
+        guard busy, !stopping else { return }
+        stopping = true
         task?.cancel()
-        busy = false
-        messages.append(AskMessage(role: .notice, text: "Stopped."))
     }
 
     func clear() {
-        task?.cancel(); busy = false
         messages = []
+        if busy { cleared = true; task?.cancel() }
     }
 
     func enableIndex() {

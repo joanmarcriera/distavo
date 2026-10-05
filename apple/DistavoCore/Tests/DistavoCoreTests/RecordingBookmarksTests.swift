@@ -234,4 +234,45 @@ final class RecordingBookmarksTests: XCTestCase {
         try FileManager.default.removeItem(at: file)
         XCTAssertNil(ClipExporter.locateSource(base: base, source: "Team/Sync 1.m4a", recordingsDir: rec))
     }
+
+    func testNoteWithoutMarkersIsByteIdenticalToTheModelReply() async throws {
+        let env = try makeEnv()
+        let url = env.recordings.appendingPathComponent("plain.wav")
+        try Data([0, 1, 2, 3]).write(to: url)
+        let r = await Pipeline.processOne(path: url, config: env.config, deps: deps(),
+                                          stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done, r.message)
+        // The golden text: exactly the model's reply, nothing added.
+        let note = try String(contentsOf: env.notes.appendingPathComponent("plain.md"), encoding: .utf8)
+        XCTAssertEqual(note, PipelineTests.validNote)
+    }
+
+    func testRegenerateOnANoteThatAlreadyHasKeyMomentsEndsWithExactlyOne() async throws {
+        let env = try makeEnv()
+        try FileManager.default.createDirectory(at: env.notes, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: env.work, withIntermediateDirectories: true)
+        try "SPEAKER_00: hello there".write(to: Pipeline.cachedTranscriptURL(workDir: env.work, base: "demo"),
+                                            atomically: true, encoding: .utf8)
+        let footer = NoteProvenance.footer(engine: "Engine X", detections: [])
+        try ("# Meeting notes\n\nOLD\n\n## Key moments\n\n- [00:05] stale\n" + footer)
+            .write(to: env.notes.appendingPathComponent("demo.md"), atomically: true, encoding: .utf8)
+        var b = RecordingBookmarks(); b.add(offsetSeconds: 75)
+        try b.save(workDir: env.work, base: "demo")
+        // The model even echoes a section of its own: still exactly one in the result.
+        let echoing = PipelineTests.validNote + "\n## Key moments\n\n- [09:99] model made this up\n"
+        var d = deps()
+        d.summarise = { _, _, _, _ in echoing }
+        let r = await Pipeline.regenerate(base: "demo", options: .init(), config: env.config, deps: d)
+        XCTAssertEqual(r.status, .done, r.message)
+        let note = try String(contentsOf: env.notes.appendingPathComponent("demo.md"), encoding: .utf8)
+        XCTAssertEqual(note.components(separatedBy: "## Key moments").count - 1, 1, note)
+        XCTAssertFalse(note.contains("stale") || note.contains("made this up"))
+        XCTAssertTrue(note.contains("- [01:15]"))
+        XCTAssertTrue(note.hasSuffix(footer), note)
+    }
+
+    func testRemovingSectionKeepsFollowingSections() {
+        let body = "# T\n\n## A\nx\n\n## Key moments\n\n- [00:01] y\n\n## B\nz\n"
+        XCTAssertEqual(RecordingBookmarks.removingSection(from: body), "# T\n\n## A\nx\n\n## B\nz\n")
+    }
 }

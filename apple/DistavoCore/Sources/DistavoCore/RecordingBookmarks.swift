@@ -133,7 +133,8 @@ public struct RecordingBookmarks: Codable, Equatable, Sendable {
 
     /// The bases that have a usable sidecar, newest first (by file modification
     /// time) - "the most recent recording that has markers" is `.first`.
-    public static func basesWithMarkers(workDir: URL) -> [String] {
+    /// Stops decoding sidecars once `limit` usable ones are found.
+    public static func basesWithMarkers(workDir: URL, limit: Int = .max) -> [String] {
         let fm = FileManager.default
         guard let names = try? fm.contentsOfDirectory(atPath: workDir.path) else { return [] }
         let dated: [(String, Date)] = names.compactMap { name in
@@ -142,7 +143,12 @@ public struct RecordingBookmarks: Codable, Equatable, Sendable {
             let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
             return (base, date ?? .distantPast)
         }
-        return dated.sorted { $0.1 > $1.1 }.map(\.0).filter { load(workDir: workDir, base: $0) != nil }
+        var out: [String] = []
+        for (base, _) in dated.sorted(by: { $0.1 > $1.1 }) {
+            guard out.count < limit else { break }
+            if load(workDir: workDir, base: base) != nil { out.append(base) }
+        }
+        return out
     }
 
     // MARK: Note section
@@ -186,9 +192,23 @@ public struct RecordingBookmarks: Codable, Equatable, Sendable {
     /// (byte-identical) when the section is empty.
     public static func appending(_ section: String, to body: String) -> String {
         guard !section.isEmpty else { return body }
-        var trimmed = body
+        var trimmed = removingSection(from: body)
         while trimmed.hasSuffix("\n") || trimmed.hasSuffix(" ") { trimmed.removeLast() }
         return trimmed + "\n\n" + section
+    }
+
+    /// `body` without any existing `## Key moments` section (up to the next `#`
+    /// heading or the end), so a model that echoed one - or a body that already
+    /// carries ours - never ends up with two.
+    static func removingSection(from body: String) -> String {
+        var out: [Substring] = []
+        var skipping = false
+        for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.trimmingCharacters(in: .whitespaces) == heading { skipping = true; continue }
+            if skipping, line.hasPrefix("## ") || line.hasPrefix("# ") { skipping = false }
+            if !skipping { out.append(line) }
+        }
+        return out.joined(separator: "\n")
     }
 
     // MARK: Clip ranges

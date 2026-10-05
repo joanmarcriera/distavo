@@ -9,17 +9,43 @@ import DistavoCore
 /// reads the calendar through `CalendarEventProviding`.
 enum CalendarRecordingStep {
 
-    /// The event overlapping `[start, now]`, or nil when the feature is off,
-    /// access is missing (silently: this never prompts), or nothing qualifies.
-    @MainActor
-    static func lookup(start: Date, config: Config,
-                       provider: CalendarEventProviding = EventKitCalendarProvider.shared) -> CalendarMatch? {
-        guard config.calendar.enabled, provider.access == .granted else { return nil }
+    /// Whether a lookup is worth waiting for: feature on and access already granted
+    /// (this never prompts).
+    static func wantsLookup(config: Config,
+                            provider: CalendarEventProviding = EventKitCalendarProvider.shared) -> Bool {
+        config.calendar.enabled && provider.access == .granted
+    }
+
+    /// The event overlapping `[start, now]`, or nil when nothing qualifies or the
+    /// store does not answer within `timeout` seconds (a slow Exchange/CalDAV
+    /// account must never hang Stop: the recording then keeps its name). The
+    /// EventKit call runs off the main thread.
+    static func lookup(start: Date, config: Config, timeout: TimeInterval = 3,
+                       provider: CalendarEventProviding = EventKitCalendarProvider.shared) async -> CalendarMatch? {
+        guard wantsLookup(config: config, provider: provider) else { return nil }
         let end = Date()
-        return CalendarMatcher.best(
-            recordingStart: start, recordingEnd: end,
-            candidates: provider.candidates(from: start, to: end),
-            calendarIDs: config.calendar.calendars, ownerName: config.noteOwner)
+        let calendars = config.calendar.calendars, owner = config.noteOwner
+        return await withCheckedContinuation { (cont: CheckedContinuation<CalendarMatch?, Never>) in
+            let once = Once(cont)
+            DispatchQueue.global(qos: .userInitiated).async {
+                once.resume(CalendarMatcher.best(
+                    recordingStart: start, recordingEnd: end,
+                    candidates: provider.candidates(from: start, to: end),
+                    calendarIDs: calendars, ownerName: owner))
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { once.resume(nil) }
+        }
+    }
+
+    /// Resumes a continuation exactly once, whichever of lookup / timeout comes first.
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var cont: CheckedContinuation<CalendarMatch?, Never>?
+        init(_ cont: CheckedContinuation<CalendarMatch?, Never>) { self.cont = cont }
+        func resume(_ value: CalendarMatch?) {
+            lock.lock(); let c = cont; cont = nil; lock.unlock()
+            c?.resume(returning: value)
+        }
     }
 
     /// Persist the match, optionally rename the recording and move its sidecars,

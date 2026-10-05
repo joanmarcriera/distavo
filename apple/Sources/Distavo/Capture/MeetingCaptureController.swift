@@ -264,23 +264,43 @@ final class MeetingCaptureController: ObservableObject {
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
         let recStart = recorder.startedAt ?? startedAt ?? Date()
-        // Calendar event overlapping the recording (#2946); nil when off / no access / no match.
-        let calendarMatch = CalendarRecordingStep.lookup(start: recStart, config: config)
-        let outcome = recorder.stop(deferFinalize: ask || calendarMatch != nil)
+        // Calendar lookup (#2946) happens AFTER the recorder has stopped, off the main
+        // thread with a timeout, so a slow calendar store can never delay Stop; the take
+        // stays a `.part` until it is done.
+        let wantsCalendar = CalendarRecordingStep.wantsLookup(config: config)
+        let outcome = recorder.stop(deferFinalize: ask || wantsCalendar)
         self.recorder = nil
         isRecording = false
         quickNotes.end()   // keeps the sidecar, closes the panel
         keyMoments.end()   // keeps the sidecar, releases the hotkey
 
         guard let outcome else { return }
+        guard wantsCalendar else {
+            finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
+                       ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let match = await CalendarRecordingStep.lookup(start: recStart, config: config)
+            self?.finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
+                             ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
+        }
+    }
+
+    /// Everything after the recorder stopped: the calendar step, the notifications and the
+    /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup.
+    @available(macOS 14.4, *)
+    private func finishStop(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, config: Config,
+                            silenceMinutes: Int?, ask: Bool, recStart: Date,
+                            calendarMatch: CalendarMatch?, heldForCalendar: Bool) {
         // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
         var savedURL = outcome.url
         if let calendarMatch {
             savedURL = CalendarRecordingStep.apply(
                 calendarMatch, recording: outcome.url, start: recStart, config: config,
                 recordingsDir: folderProvider(), askingSpeakers: ask, log: log)
-            if !ask { recorder.finalizeDeferred(as: savedURL) }
         }
+        if heldForCalendar && !ask { recorder.finalizeDeferred(as: savedURL) }
         log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")
         if !outcome.systemAudioHeard {
             notify("Recording saved — but no system audio was captured",
@@ -314,7 +334,7 @@ final class MeetingCaptureController: ObservableObject {
             // holds `finalizeDeferred()` back until detection has finished
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
-            let detection = startLanguageDetection(partURL: outcome.url.appendingPathExtension("part"))
+            let detection = startLanguageDetection(partURL: savedURL.appendingPathExtension("part"))
             askSpeakers(for: savedURL, config: config, detection: detection,
                         prefillOthers: config.calendar.attendeesAsParticipants
                             ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "")

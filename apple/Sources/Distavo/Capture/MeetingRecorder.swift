@@ -208,12 +208,15 @@ final class MeetingRecorder {
     private var deferred: (part: URL, url: URL)?
 
     /// Balance and publish a take held back by `stop(deferFinalize: true)`,
-    /// under `url` when given (a calendar-event name, Vikunja #2946) - the
-    /// caller has already moved the take's sidecars to that name's base.
+    /// under `url` when given (a calendar-event name, Vikunja #2946). In that
+    /// case `CalendarRename` has already renamed the `.part` to `<url>.part`
+    /// together with the sidecars, so the part is found under the new name.
     func finalizeDeferred(as url: URL? = nil) {
         guard let pending = deferred else { return }
         deferred = nil
-        queue.async { Self.finalize(part: pending.part, to: url ?? pending.url) }
+        let target = url ?? pending.url
+        let part = target == pending.url ? pending.part : target.appendingPathExtension("part")
+        queue.async { Self.finalize(part: part, to: target) }
 
     }
 

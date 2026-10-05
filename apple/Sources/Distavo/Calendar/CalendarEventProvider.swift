@@ -36,7 +36,7 @@ protocol CalendarEventProviding {
     func candidates(from start: Date, to end: Date) -> [CalendarCandidate]
 }
 
-final class EventKitCalendarProvider: CalendarEventProviding {
+final class EventKitCalendarProvider: CalendarEventProviding, @unchecked Sendable {
     static let shared = EventKitCalendarProvider()
     private let store = EKEventStore()
 
@@ -66,17 +66,42 @@ final class EventKitCalendarProvider: CalendarEventProviding {
     func candidates(from start: Date, to end: Date) -> [CalendarCandidate] {
         guard access == .granted, end > start else { return [] }
         let predicate = store.predicateForEvents(withStart: start, end: end, calendars: nil)
-        return store.events(matching: predicate).map { event in
+        return store.events(matching: predicate).compactMap { event in
+            // Calendar events are UNTRUSTED (anyone can invite the user): keep only
+            // what the user owns or agreed to. What EventKit exposes and we use:
+            //  - calendar.type: .local/.calDAV/.exchange are the user's accounts;
+            //    .subscription (holidays, other people's feeds) and .birthday are not.
+            //  - calendar.allowsContentModifications: false = read-only calendar, not used.
+            //  - event.organizer?.isCurrentUser and the current user's own
+            //    EKParticipant.participantStatus (accepted/tentative/pending/declined).
             let me = event.attendees?.first(where: { $0.isCurrentUser })
+            let kind: CalendarKind
+            switch event.calendar?.type {
+            case .birthday?: kind = .birthday
+            case .subscription?, nil: kind = .subscribed
+            default: kind = (event.calendar?.allowsContentModifications ?? false) ? .owned : .subscribed
+            }
+            let selfStatus: CalendarSelfStatus
+            switch me?.participantStatus {
+            case .accepted?: selfStatus = .accepted
+            case .tentative?: selfStatus = .tentative
+            case .pending?: selfStatus = .pending
+            case .declined?: selfStatus = .declined
+            default: selfStatus = .unknown
+            }
+            guard event.status != .canceled,
+                  CalendarTrust.isTrusted(selfStatus: selfStatus, isOrganiser: event.organizer?.isCurrentUser ?? false,
+                                          hasAttendees: !(event.attendees ?? []).isEmpty, calendarKind: kind)
+            else { return nil }
             var names = (event.attendees ?? []).filter { !$0.isCurrentUser }.compactMap(\.name)
             // The organizer is often not listed among the attendees.
             if let organizer = event.organizer, !organizer.isCurrentUser, let n = organizer.name { names.append(n) }
-            let status: CalendarEventStatus =
-                event.status == .canceled ? .cancelled : (me?.participantStatus == .declined ? .declined : .normal)
+            // Only title, times, attendee DISPLAY NAMES and the calendar id are read:
+            // never notes, location, URL or e-mail addresses.
             return CalendarCandidate(
                 title: event.title ?? "", start: event.startDate, end: event.endDate,
                 isAllDay: event.isAllDay, attendees: names,
-                calendarID: event.calendar?.calendarIdentifier ?? "", status: status)
+                calendarID: event.calendar?.calendarIdentifier ?? "", status: .normal)
         }
     }
 }

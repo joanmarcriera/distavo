@@ -16,12 +16,12 @@ struct CalendarSection: View {
     var body: some View {
         Section("Calendar") {
             Toggle("Name notes after the calendar event", isOn: cal.enabled)
-                .withHelp("When a recording overlaps an event in your calendar (at least 5 minutes, and at least half of the shorter of the two), that event's title becomes the note's title and its attendees are used as the meeting's participants. All-day, declined and cancelled events are ignored; with no match nothing changes. Distavo only reads your calendar: it never changes it, and nothing leaves your Mac. macOS asks for permission the first time you press ‘Allow calendar access…’.")
+                .withHelp("When a recording closely matches an event in your calendar (overlapping at least 5 minutes, and the event not much longer or shorter than the recording), that event's title becomes the note's title and its attendees are used as the meeting's participants. Only events you organise or have accepted are used (never unanswered invitations); all-day, declined and cancelled events and subscribed calendars are ignored; with no match nothing changes. Distavo only reads your calendar: it never changes it, and nothing leaves your Mac. macOS asks for permission the first time you press ‘Allow calendar access…’.")
             if model.draft.calendar.enabled {
                 accessRow
                 Toggle("Rename recordings made with Distavo", isOn: cal.renameRecordings)
                     .withHelp("After a recording made with Distavo's own recorder stops, its file is renamed to ‘yyyy-MM-dd Event Title’ so the note carries the same name. Files you drop into the folder yourself are never renamed.")
-                SettingCaption("Renames the recording file itself (not just the note) when an event matches.")
+                SettingCaption("Renames the recording file itself (not just the note) when an event matches. Only events you organise or have accepted (and your own entries) are used, never unanswered invitations, declined events or subscribed calendars; the name is plain ASCII, so titles without Latin letters keep the timestamped name.")
                 Toggle("Use the attendees as participants", isOn: cal.attendeesAsParticipants)
                     .withHelp("Adds the event's attendee names (never e-mail addresses, and not you) to the participants the summary is told about, and pre-fills them in the “Who was in this meeting?” window. Anything you type there wins.")
                 if access == .granted { calendarPicker }

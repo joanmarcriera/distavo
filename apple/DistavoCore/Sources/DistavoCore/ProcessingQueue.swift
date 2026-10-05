@@ -78,6 +78,8 @@ public struct ProcessingQueue: Equatable, Sendable {
     /// Seconds of work per second of audio, last `rateWindow` samples per stage.
     public private(set) var stageRates: [QueueItemState: [Double]] = [:]
     public static let rateWindow = 5
+    /// Most done/skipped rows kept in the list.
+    public static let maxFinished = 200
     public static let stages: [QueueItemState] = [.converting, .transcribing, .summarising]
     /// Prefix of the pseudo-base given to a file that is still being copied.
     public static let copyPrefix = "copy:"
@@ -229,6 +231,16 @@ public struct ProcessingQueue: Equatable, Sendable {
         items[i].finishedAt = now
         items[i].stageStartedAt = nil
         if result.status != .done { items[i].progress = nil }
+        trimFinished()
+    }
+
+    /// Keep a long session bounded: only the newest `maxFinished` done/skipped
+    /// rows stay (disk-backed failed/too-short/deferred rows are never trimmed).
+    private mutating func trimFinished() {
+        let finished = items.indices.filter { items[$0].state == .done || items[$0].state == .skipped }
+        guard finished.count > Self.maxFinished else { return }
+        let drop = Set(finished.prefix(finished.count - Self.maxFinished))
+        items = items.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
     }
 
     /// Feed the rolling rate for the stage `item` was in, when it ran to completion.

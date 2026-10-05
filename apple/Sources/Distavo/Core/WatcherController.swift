@@ -145,6 +145,11 @@ final class WatcherController: ObservableObject {
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
         refreshKeyMomentExport()   // #2950: initial state from disk
         wireEmbeddedProgress()
+        #if EDITION_DIRECT
+        // Read-only loopback MCP server (#2955): off unless the user enabled it.
+        MCPServerController.shared.log = { [weak self] in self?.log($0) }
+        MCPServerController.shared.apply(config: cfg)
+        #endif
         start()
     }
 
@@ -1125,6 +1130,9 @@ final class WatcherController: ObservableObject {
         // New settings may fix a prior failure — clear failed markers and retry.
         lastError = nil
         seedLastNoteFromDisk()   // the notes folder may have just been re-pointed
+        #if EDITION_DIRECT
+        MCPServerController.shared.apply(config: newConfig)   // #2955: start/stop/re-point
+        #endif
         maybeWarnLocalNetwork()
         processNow()
     }

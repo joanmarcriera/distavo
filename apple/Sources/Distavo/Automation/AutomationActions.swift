@@ -200,6 +200,13 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { TranscriptWindowController.shared.confirmTerminate() ? .terminateNow : .terminateCancel }
     }
 
+    #if EDITION_DIRECT
+    /// Close the loopback MCP listener on quit (#2955).
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { MCPServerController.shared.stop() }
+    }
+    #endif
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let command = AutomationCommand.parse(url) else {

@@ -31,6 +31,9 @@ struct ConnectionsPane: View {
                 lanPermissionWarning
             }
         }
+        #if EDITION_DIRECT
+        MCPServerSection(model: model)   // #2955
+        #endif
     }
 
     /// Shown after a failed Test Connections when the unreachable server is on the

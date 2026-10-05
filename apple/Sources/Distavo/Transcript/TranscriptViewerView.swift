@@ -151,8 +151,17 @@ final class TranscriptWindowController: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil)
     }
 
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
+    func windowShouldClose(_ sender: NSWindow) -> Bool { confirmUnsavedEdits() }
+
+    /// Quit (also Sparkle's relaunch-to-update): `windowShouldClose` does not run
+    /// on terminate, so ask here. Synchronous modal on the main thread, so there
+    /// is no pending-terminate state to deadlock an update; Cancel aborts the quit.
+    func confirmTerminate() -> Bool { confirmUnsavedEdits() }
+
+    /// true = safe to go on (nothing unsaved, saved, or discarded); false = stay.
+    private func confirmUnsavedEdits() -> Bool {
         guard let model, model.dirty else { return true }
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = "Save your changes to this transcript?"
         alert.informativeText = "The edits are lost if you do not save them. Saving does not change the note; use Re-summarise for that."

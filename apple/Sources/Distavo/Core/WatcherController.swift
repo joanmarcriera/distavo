@@ -820,7 +820,8 @@ final class WatcherController: ObservableObject {
     /// lock as the scanner (so it never overlaps a scan or another variant run).
     /// Not routed through `handle`: a regenerate that cannot run must not look
     /// like a failed recording (no marker, no "failed" menu entry).
-    func regenerateNote(base: String, options: RegenerateOptions) async {
+    @discardableResult
+    func regenerateNote(base: String, options: RegenerateOptions) async -> ProcessResult {
         while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
         isScanning = true
         defer { isScanning = false }
@@ -851,6 +852,7 @@ final class WatcherController: ObservableObject {
             notifier.notify(title: "Note not regenerated", body: "\(base): \(result.message)")
         }
         refreshActivity()
+        return result
     }
 
     /// "Rename Speakers…" (Vikunja #2944): pick a note, name its speakers.

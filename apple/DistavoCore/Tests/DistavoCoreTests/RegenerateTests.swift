@@ -166,14 +166,132 @@ final class RegenerateTests: XCTestCase {
         XCTAssertEqual(calls.targets.first, .ollama(url: cfg.summarise.server.url, model: "big-model:1b"))
     }
 
-    func testOnDeviceBackendOffIsRefusedNotSilentlySwitched() async throws {
-        let (cfg, notes, _) = try makeEnv()
+    /// Kill switch: "embedded" with on-device summaries off means Ollama, and a
+    /// typed model name lands on the Ollama server target (never `embeddedModel`).
+    func testOnDeviceBackendOffFallsBackToOllama() async throws {
+        var (cfg, notes, _) = try makeEnv()
+        cfg.summarise.backend = "embedded"
+        cfg.summarise.embeddedEnabled = false
         let calls = Calls()
-        let result = await Pipeline.regenerate(base: "demo", options: .init(backend: "embedded"),
+        let result = await Pipeline.regenerate(base: "demo", options: .init(model: "big:1b"),
                                                config: cfg, deps: deps(calls))
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertEqual(calls.targets.first, .ollama(url: cfg.summarise.server.url, model: "big:1b"))
+        // An explicit "embedded" choice with the switch off resolves to the same path.
+        XCTAssertEqual(Pipeline.regenerateConfig(Config(), options: .init(backend: "embedded")).summarise.backend, "server")
+        XCTAssertEqual(read(notes.appendingPathComponent("demo.md")), Self.newNote)
+    }
+
+    func testWriteFailureRestoresPreviousNote() async throws {
+        let (cfg, notes, _) = try makeEnv()
+        struct Boom: Error {}
+        let result = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg,
+                                               deps: deps(Calls()), writeNote: { _, _ in throw Boom() })
         XCTAssertEqual(result.status, .failed)
-        XCTAssertEqual(calls.summarises, 0)
         XCTAssertEqual(read(notes.appendingPathComponent("demo.md")), oldNote)
+        XCTAssertTrue(backups(notes).isEmpty, "the backup must be moved back, not left behind")
+    }
+
+    func testVariantBaseRegenerates() async throws {
+        let (cfg, notes, work) = try makeEnv()
+        try "SPEAKER_00: variant words".write(
+            to: Pipeline.cachedTranscriptURL(workDir: work, base: "demo@m-auto"), atomically: true, encoding: .utf8)
+        try "# Meeting notes\n\nVARIANT OLD".write(
+            to: notes.appendingPathComponent("demo@m-auto.md"), atomically: true, encoding: .utf8)
+        let result = await Pipeline.regenerate(base: "demo@m-auto", options: .init(), config: cfg, deps: deps(Calls()))
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertEqual(read(notes.appendingPathComponent("demo@m-auto.md")), Self.newNote)
+        XCTAssertEqual(read(notes.appendingPathComponent("demo.md")), oldNote, "the plain note is untouched")
+        XCTAssertEqual(backups(notes).count, 1)
+        XCTAssertTrue(backups(notes)[0].lastPathComponent.hasPrefix("demo@m-auto.prev-"))
+    }
+
+    // MARK: Note language parity with processOne (detected language sidecar)
+
+    private func detectingTranscribe(_ code: String?) -> (URL, TranscribeConfig) async throws -> [String: Any] {
+        { _, _ in
+            var r: [String: Any] = ["segments": [["speaker": "SPEAKER_00", "text": "hola"]]]
+            if let code { r["detections"] = [["code": code, "probability": 0.9]] }
+            return r
+        }
+    }
+
+    private func processOneEnv(language: String = "auto") throws -> (Config, URL, URL) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-meta-\(UUID().uuidString)")
+        let rec = root.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
+        let input = rec.appendingPathComponent("demo.opus")
+        try Data([0, 1, 2, 3]).write(to: input)
+        var cfg = Config()
+        cfg.recordingsDir = rec.path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        cfg.summarise.noteLanguage = language
+        return (cfg, input, URL(fileURLWithPath: cfg.workDir))
+    }
+
+    private func processDeps(_ calls: Calls, code: String?) -> PipelineDeps {
+        PipelineDeps(
+            convertToWav: { _, dest in
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data([0]).write(to: dest)
+            },
+            transcribe: detectingTranscribe(code), ollamaReachable: { _ in true },
+            summarise: { _, target, _, context in calls.summarise(context, target); return PipelineTests.validNote },
+            audioDurationSeconds: { _ in nil })
+    }
+
+    func testProcessOneWritesOverwritesAndRemovesTranscriptMeta() async throws {
+        let (cfg, input, work) = try processOneEnv()
+        let calls = Calls()
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: processDeps(calls, code: "ca"),
+                                      stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(TranscriptMeta.load(workDir: work, base: "demo")?.dominantLanguage, "ca")
+        TranscriptMeta.store(dominant: "es", workDir: work, base: "demo")   // simulate a stale value
+        // Reprocess (clear the done markers) with a detection of English: overwritten.
+        try FileManager.default.removeItem(at: work.appendingPathComponent(".state"))
+        try FileManager.default.removeItem(at: URL(fileURLWithPath: cfg.notesDir).appendingPathComponent("demo.md"))
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: processDeps(calls, code: "en"),
+                                      stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(TranscriptMeta.load(workDir: work, base: "demo")?.dominantLanguage, "en")
+        // And with no detection the stale file is removed.
+        try FileManager.default.removeItem(at: work.appendingPathComponent(".state"))
+        try FileManager.default.removeItem(at: URL(fileURLWithPath: cfg.notesDir).appendingPathComponent("demo.md"))
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: processDeps(calls, code: nil),
+                                      stableChecks: 1, stableDelay: 0)
+        XCTAssertNil(TranscriptMeta.load(workDir: work, base: "demo"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: TranscriptMeta.url(workDir: work, base: "demo").path))
+    }
+
+    func testRegenerateResolvesAutoNoteLanguageLikeProcessOne() async throws {
+        let (cfg, input, work) = try processOneEnv()
+        let calls = Calls()
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: processDeps(calls, code: "ca"),
+                                      stableChecks: 1, stableDelay: 0)
+        let first = try XCTUnwrap(calls.contexts.first)
+        XCTAssertEqual(first.noteLanguage, "ca")
+        let regen = Calls()
+        let result = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg, deps: deps(regen))
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertEqual(regen.contexts.first?.noteLanguage, "ca", "Catalan note must stay Catalan")
+        // No meta (a note processed before this change): the old fallback.
+        try FileManager.default.removeItem(at: TranscriptMeta.url(workDir: work, base: "demo"))
+        let legacy = Calls()
+        _ = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg, deps: deps(legacy))
+        XCTAssertNil(legacy.contexts.first?.noteLanguage)
+    }
+
+    func testProcessOnePromptUnchangedByRegenerateFields() async throws {
+        let (cfg, input, _) = try processOneEnv(language: "en")
+        let calls = Calls()
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: processDeps(calls, code: "ca"),
+                                      stableChecks: 1, stableDelay: 0)
+        let c = try XCTUnwrap(calls.contexts.first)
+        XCTAssertNil(c.noteLanguage)
+        XCTAssertNil(c.customInstruction)
+        XCTAssertEqual(c.prompt(transcript: "T"),
+                       Prompt.build(transcript: "T", noteOwner: c.noteOwner, userSpeaker: c.userSpeaker,
+                                    participants: c.participants, style: c.promptStyle, meetingDate: c.meetingDate))
     }
 
     func testProvenanceFooterIsCarriedOver() async throws {

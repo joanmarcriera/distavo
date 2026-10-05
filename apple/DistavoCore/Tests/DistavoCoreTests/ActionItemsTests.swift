@@ -48,6 +48,16 @@ final class ActionItemsTests: XCTestCase {
         XCTAssertEqual(items[0].sourceLink.path, "/n/a.md")
     }
 
+    /// Seen with gemma4 in the 1.17 live check: the model annotates the date.
+    func testDueWithTrailingAnnotationKeepsTheDate() {
+        let a = ActionItems.splitMetadata("Send the report — owner: Priya; due: 2026-10-10 (interpreted from 'this week')")
+        XCTAssertEqual(a.due, "2026-10-10")
+        XCTAssertEqual(a.owner, "Priya")
+        XCTAssertEqual(ActionItems.splitMetadata("x — due: 2026-10-10.").due, "2026-10-10")
+        XCTAssertNil(ActionItems.splitMetadata("x — due: 2026-10-101").due)   // not a date followed by a digit
+        XCTAssertNil(ActionItems.splitMetadata("x — due: next week (2026-10-10)").due)
+    }
+
     func testMalformedDueIsIgnoredAndTitleKept() {
         let i = ActionItems.parse("- [ ] Call Bob due: next week", notePath: "x")[0]
         XCTAssertNil(i.due)

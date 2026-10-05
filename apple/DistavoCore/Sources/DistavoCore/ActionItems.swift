@@ -141,7 +141,11 @@ public enum ActionItems {
                     if !v.isEmpty, !["unassigned", "none", "unclear", "none stated"].contains(v.lowercased()) { owner = v }
                 } else if lower.hasPrefix("due:") {
                     let v = String(p.dropFirst(4)).trimmingCharacters(in: .whitespaces)
-                    if isISODate(v) { due = v }
+                    // Models often annotate the date ("2026-10-10 (interpreted from
+                    // 'this week')"): accept a leading ISO date followed by a non-digit.
+                    let head = String(v.prefix(10))
+                    let rest = v.dropFirst(10)
+                    if isISODate(head), rest.first.map({ !$0.isNumber }) ?? true { due = head }
                 }
             }
         }

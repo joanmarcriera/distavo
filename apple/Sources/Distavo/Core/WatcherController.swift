@@ -788,6 +788,12 @@ final class WatcherController: ObservableObject {
         Task { [weak self] in await self?.runVariant(variant, on: sourcePath) }
     }
 
+    /// "Open Action Items…" (Vikunja #2941): open checkboxes across the notes folder.
+    func showActionItems() {
+        ActionItemsWindowController.shared.show(
+            notesDir: Config.resolvePath(config.notesDir), workDir: Config.resolvePath(config.workDir))
+    }
+
     /// "Regenerate Note…" (Vikunja #2947): open the picker over the newest notes.
     func showRegenerateNote() {
         let notesDir = Config.resolvePath(config.notesDir)

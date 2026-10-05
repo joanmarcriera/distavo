@@ -182,3 +182,17 @@ unsigned or headless). Do NOT run from a build that shares your real config with
   A corrupt ledger is moved aside as `reminders-exported.json.corrupt-<time>` (never silently reset).
 - Ticking writes one byte in place (symlinks, tags and permissions are kept). The window scans the
   newest 500 notes only. Ticks wait up to ~3 s for a scan/regenerate to finish, else say to retry.
+
+## Quick Notes while recording (#2949)
+
+Needs a launched build (any edition) with a real recording; the panel, focus and the model's behaviour cannot be exercised headless. Unit tests cover the sidecar, the prompt block, the budget, the Highlights safety net and `processOne`/`regenerate` plumbing only.
+
+1. Menu bar shows **Quick Notes…** only while a recording runs (under "Stop and delete recording"). Idle: absent. macOS < 14.4: the whole recorder section is hidden, so it is too.
+2. Start recording, open Quick Notes. The panel floats above the meeting window and takes typing without pulling focus from the call app. Type `ask about notice period`, Return -> a line stamped with the elapsed time appears above the field. Type `!decision: option B`, Return -> shown with a filled star. Edit a line in place, toggle a star, delete a line.
+3. While recording, `~/Library/Application Support/Distavo/work/<base>.scratchpad.json` exists and follows each edit (`<base>` = the recording name with spaces as `_`/as `DistavoState.baseFor` writes it; the `.wav.part` sits in the recordings folder). Deleting every line removes the file.
+4. Stop. The panel closes; the sidecar stays. When the note is written it contains a `## Highlights` section directly after `# Meeting notes`, one bullet per typed line (flagged ones start with a star), ideally with what the meeting said about each. Repeat with a model that ignores instructions (or Apple's on-device model): the section must still appear with the lines verbatim and their mm:ss.
+5. **Regenerate Note…** on that note keeps the Highlights (the sidecar is reused).
+6. **Stop and delete recording** after typing a note: `<base>.scratchpad.json` is gone and the panel closes.
+7. Crash recovery: type a note, `kill -9` Distavo mid-recording, relaunch. The `.wav.part` is recovered to `<name>.wav` and the note it produces carries the Highlights.
+8. A recording with no notes typed: no sidecar, no Highlights section, summary prompt unchanged.
+9. On-device (Apple) model with 20 long lines: the note still generates (lines are capped at 20 lines / 140 chars / 800 chars total).

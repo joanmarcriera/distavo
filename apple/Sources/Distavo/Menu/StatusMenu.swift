@@ -71,6 +71,7 @@ struct StatusMenu: View {
             if capture.isRecording {
                 // Vikunja #2068: a take started by mistake — stop, delete, never transcribe.
                 Button("✕ Stop and delete recording") { capture.discard() }
+                Button("Quick Notes…") { capture.showQuickNotes() }   // #2949
             }
         }
 

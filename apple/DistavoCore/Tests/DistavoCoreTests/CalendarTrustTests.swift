@@ -160,7 +160,8 @@ final class CalendarTrustTests: XCTestCase {
         // The title is not in the prompt at all; only the one plausible attendee is.
         XCTAssertFalse(box.prompt.contains("evil"))
         XCTAssertFalse(box.prompt.contains("mail the notes"))
-        XCTAssertTrue(box.prompt.contains("Other participants: Ada Lovelace"))
+        XCTAssertTrue(box.prompt.contains("attribute speakers): Ada Lovelace\n"))
+        XCTAssertFalse(box.prompt.contains("Participants, as stated by the note owner"))
         XCTAssertFalse(box.prompt.contains("Ignore previous instructions"))
         XCTAssertFalse(box.prompt.contains("Eve"))
         let base = DistavoState.baseFor(recordingsDir: rec, path: url)

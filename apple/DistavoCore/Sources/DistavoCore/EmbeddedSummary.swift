@@ -91,7 +91,7 @@ public struct EmbeddedSummaryBudget: Equatable {
     public static func final(contextSize: Int, noteOwner: String, userSpeaker: String,
                              style: Prompt.Style = .classic, extraInstructions: String? = nil,
                              noteLanguage: String? = nil, customInstruction: String? = nil,
-                             glossary: [String] = [], template: SummaryTemplate? = nil,
+                             glossary: [String] = [], calendarAttendees: [String] = [], template: SummaryTemplate? = nil,
                              scratchpad: ScratchpadNotes? = nil)
         -> EmbeddedSummaryBudget {
         // nil `noteLanguage` leaves the measured prompt (so the budget) exactly
@@ -100,7 +100,7 @@ public struct EmbeddedSummaryBudget: Equatable {
         let instructions = Prompt.build(transcript: "", noteOwner: noteOwner,
                                         userSpeaker: userSpeaker, style: style,
                                         noteLanguage: noteLanguage,
-                                        customInstruction: customInstruction, glossary: glossary,
+                                        customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
                                         template: template, scratchpad: scratchpad)
         // The end-of-user-turn block rides in the final prompt, so its tokens
         // come out of the transcript budget too.
@@ -206,13 +206,13 @@ public enum EmbeddedSummaryPlanner {
     public static func plan(
         transcript: String, contextSize: Int, noteOwner: String, userSpeaker: String,
         style: Prompt.Style = .classic, extraInstructions: String? = nil,
-        noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
+        noteLanguage: String? = nil, customInstruction: String? = nil, glossary: [String] = [], calendarAttendees: [String] = [],
         template: SummaryTemplate? = nil, scratchpad: ScratchpadNotes? = nil
     ) -> EmbeddedSummaryPlan {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: noteOwner, userSpeaker: userSpeaker, style: style,
             extraInstructions: extraInstructions, noteLanguage: noteLanguage,
-            customInstruction: customInstruction, glossary: glossary,
+            customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
             template: template, scratchpad: scratchpad)
         if EmbeddedSummaryTokens.estimate(transcript) <= finalBudget.transcriptTokens {
             return .single

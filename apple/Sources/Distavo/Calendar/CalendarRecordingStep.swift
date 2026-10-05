@@ -48,13 +48,12 @@ enum CalendarRecordingStep {
         }
     }
 
-    /// Persist the match, optionally rename the recording and move its sidecars,
-    /// and (window disabled) write the attendees as speaker hints. Returns the
+    /// Persist the match and optionally rename the recording and move its sidecars. Returns the
     /// URL the finished recording will have (the original when not renamed or
     /// when anything failed, in which case everything stays under the old name).
     @MainActor
     static func apply(_ match: CalendarMatch, recording: URL, start: Date, config: Config,
-                      recordingsDir: URL, askingSpeakers: Bool, log: (String) -> Void) -> URL {
+                      recordingsDir: URL, log: (String) -> Void) -> URL {
         let workDir = Config.resolvePath(config.workDir)
         let notesDir = Config.resolvePath(config.notesDir)
         var final = recording
@@ -74,20 +73,17 @@ enum CalendarRecordingStep {
             }
         }
 
-        // No "Who was in this meeting?" window: the attendees are the hints,
-        // unless the owner already gave some.
-        if !askingSpeakers, config.calendar.attendeesAsParticipants, !match.attendees.isEmpty,
-           SpeakerHints.load(workDir: workDir, base: base) == nil {
-            do { try SpeakerHints(participants: CalendarAttendees.hintsText(match.attendees)).save(workDir: workDir, base: base) }
-            catch { log("Could not save the attendees as speaker hints: \(error.localizedDescription)") }
-        }
+        // The attendees are never written to the speaker hints here: that field is the
+        // owner's own statement. Unconfirmed names reach the prompt in their own
+        // untrusted-data block; names the owner sees and keeps in the window below
+        // become speaker hints through the window itself.
         log("Calendar event matched: \"\(match.title)\" (\(match.attendees.count) attendees)")
         return final
     }
 
     /// After the speakers window: keep only the attendees the owner left in the
     /// participants (Skip or blank = none), so processing does not re-add names
-    /// the owner removed. The match keeps its title either way.
+    /// the owner removed, and mark the list owner-confirmed. The match keeps its title.
     @MainActor
     static func pruneAttendees(recording: URL, recordingsDir: URL, config: Config) {
         let workDir = Config.resolvePath(config.workDir)
@@ -95,8 +91,8 @@ enum CalendarRecordingStep {
         guard var match = CalendarMatchStore.load(workDir: workDir, base: base), !match.attendees.isEmpty else { return }
         let kept = CalendarAttendees.mentioned(
             in: SpeakerHints.load(workDir: workDir, base: base)?.participants, attendees: match.attendees)
-        guard kept != match.attendees else { return }
         match.attendees = kept
+        match.attendeesConfirmed = true
         try? CalendarMatchStore.save(match, workDir: workDir, base: base)
     }
 }

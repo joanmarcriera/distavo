@@ -194,8 +194,8 @@ extension Pipeline {
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         // Calendar match saved at processing time (#2946); regenerate never looks the calendar up.
         let calendarMatch = config.calendar.enabled ? CalendarMatchStore.load(workDir: workDir, base: sourceBase) : nil
-        let participants = CalendarLookup.participants(
-            hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines), match: calendarMatch, config: cfg)
+        let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calendarAttendees = CalendarLookup.promptAttendees(participants: participants, match: calendarMatch, config: cfg)
         // Same resolution as processOne; the detected language comes from the
         // meta sidecar (absent for notes processed before #2947).
         let noteLanguage = resolveNoteLanguage(
@@ -218,7 +218,8 @@ extension Pipeline {
                 regenerateTemplate(options: options, config: cfg, workDir: workDir,
                                    sourceBase: sourceBase, sourcePath: sourcePath),
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
-            scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949: keeps the highlights
+            scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
+            calendarAttendees: calendarAttendees)   // #2946
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

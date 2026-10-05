@@ -46,13 +46,19 @@ public struct CalendarMatch: Codable, Equatable, Sendable {
     /// the meeting date for the prompt, so a calendar-renamed file whose title looks
     /// like a time never has its date guessed from the file name.
     public var recordingStart: Date?
+    /// True once the owner has seen the attendee list in "Who was in this meeting?" and
+    /// kept or edited it: `attendees` are then the owner's own statement. nil/false =
+    /// taken from the calendar unseen, so the prompt frames them as untrusted data.
+    public var attendeesConfirmed: Bool?
 
     public static let currentVersion = 1
 
-    public init(title: String, start: Date, end: Date, attendees: [String] = [], recordingStart: Date? = nil) {
+    public init(title: String, start: Date, end: Date, attendees: [String] = [], recordingStart: Date? = nil,
+                attendeesConfirmed: Bool? = nil) {
         self.version = Self.currentVersion
         self.title = title; self.start = start; self.end = end; self.attendees = attendees
         self.recordingStart = recordingStart
+        self.attendeesConfirmed = attendeesConfirmed
     }
 }
 
@@ -336,19 +342,6 @@ public enum CalendarAttendees {
         return false
     }
 
-    /// `existing` participants text plus any calendar attendee not already
-    /// mentioned in it. Returns `existing` untouched when there is nothing to
-    /// add, so a recording without attendees keeps a byte-identical prompt.
-    public static func mergedParticipants(existing: String?, attendees: [String]) -> String? {
-        let base = existing?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let haystack = fold(base ?? "")
-        let missing = attendees.filter { !haystack.contains(fold($0)) }
-        guard !missing.isEmpty else { return existing }
-        let line = hintsText(missing)
-        guard let base, !base.isEmpty else { return line }
-        return base + ". " + line
-    }
-
     /// The attendees whose names still appear in `participants` (all-case/accent
     /// insensitive); none when the text is nil or blank.
     public static func mentioned(in participants: String?, attendees: [String]) -> [String] {
@@ -356,10 +349,6 @@ public enum CalendarAttendees {
         return attendees.filter { haystack.contains(fold($0)) }
     }
 
-    /// The participants text the "Who was in this meeting?" window writes.
-    public static func hintsText(_ attendees: [String]) -> String {
-        "Other participants: " + attendees.joined(separator: ", ")
-    }
 }
 
 // MARK: - Sidecar
@@ -411,23 +400,21 @@ public enum CalendarLookup {
         guard let match = CalendarMatcher.best(
             recordingStart: start, recordingEnd: end, candidates: candidates,
             calendarIDs: config.calendar.calendars, ownerName: config.noteOwner) else { return nil }
+        // Attendees are NOT written to `<base>.speakers.json`: that field is the owner's
+        // statement and is framed as authoritative in the prompt.
         try? CalendarMatchStore.save(match, workDir: workDir, base: sourceBase)
-        // Same as the recorder's direct path: attendees become speaker hints
-        // unless the owner already gave some.
-        if config.calendar.attendeesAsParticipants, !match.attendees.isEmpty,
-           SpeakerHints.load(workDir: workDir, base: sourceBase) == nil {
-            try? SpeakerHints(participants: CalendarAttendees.hintsText(match.attendees))
-                .save(workDir: workDir, base: sourceBase)
-        }
         return match
     }
 
-    /// The participants text for the prompt, calendar attendees merged in.
-    static func participants(_ existing: String?, match: CalendarMatch?, config: Config) -> String? {
-        guard let match, config.calendar.attendeesAsParticipants else { return existing }
-        // Re-sanitised: the sidecar is data on disk, never trusted to be clean.
-        return CalendarAttendees.mergedParticipants(
-            existing: existing, attendees: CalendarAttendees.clean(match.attendees, owner: ""))
+    /// The calendar attendees for the prompt's own untrusted-data block: none when the
+    /// feature/attendees option is off, when the owner confirmed the list in the
+    /// speakers window, or for names the owner's participants text already mentions.
+    /// Sanitised again here: the sidecar is data on disk, never trusted to be clean.
+    static func promptAttendees(participants: String?, match: CalendarMatch?, config: Config) -> [String] {
+        guard let match, config.calendar.attendeesAsParticipants, match.attendeesConfirmed != true else { return [] }
+        let clean = CalendarAttendees.clean(match.attendees, owner: config.noteOwner)
+        let mentioned = Set(CalendarAttendees.mentioned(in: participants, attendees: clean))
+        return clean.filter { !mentioned.contains($0) }
     }
 }
 

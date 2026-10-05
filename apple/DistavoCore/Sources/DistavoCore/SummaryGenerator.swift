@@ -60,6 +60,9 @@ public struct SummaryRequest: Sendable {
     public var customInstruction: String?
     /// Custom vocabulary (Vikunja #2939); counted in the budget. Default empty.
     public var glossary: [String]
+    /// Calendar attendee names NOT confirmed by the owner (#2946): third-party data,
+    /// framed as such by `Prompt.build`; counted in the budget. Default empty.
+    public var calendarAttendees: [String]
     /// Summary template (#2940) replacing the stock section list; nil = stock.
     public var template: SummaryTemplate?
     /// Typed scratchpad notes (#2949); part of the final prompt and its budget.
@@ -68,7 +71,7 @@ public struct SummaryRequest: Sendable {
     public init(transcript: String, noteOwner: String, userSpeaker: String,
                 participants: String? = nil, style: Prompt.Style = .classic,
                 meetingDate: Date? = nil, noteLanguage: String? = nil,
-                endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
+                endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = [], calendarAttendees: [String] = [],
                 template: SummaryTemplate? = nil, scratchpad: ScratchpadNotes? = nil) {
         self.scratchpad = scratchpad
         self.customInstruction = customInstruction
@@ -77,6 +80,7 @@ public struct SummaryRequest: Sendable {
         self.style = style; self.meetingDate = meetingDate
         self.noteLanguage = noteLanguage; self.endOfTurnBlock = endOfTurnBlock
         self.glossary = glossary
+        self.calendarAttendees = calendarAttendees
         self.template = template
     }
 }
@@ -99,7 +103,7 @@ public enum SummaryDriver {
                 contextSize: contextSize, noteOwner: request.noteOwner,
                 userSpeaker: request.userSpeaker, style: request.style,
                 extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
-                customInstruction: request.customInstruction, glossary: request.glossary,
+                customInstruction: request.customInstruction, glossary: request.glossary, calendarAttendees: request.calendarAttendees,
                 template: t, scratchpad: request.scratchpad).transcriptTokens
         }
         let templated = budget(template)
@@ -141,7 +145,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
+            glossary: request.glossary, calendarAttendees: request.calendarAttendees, template: request.template, scratchpad: request.scratchpad)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
@@ -149,7 +153,7 @@ public enum SummaryDriver {
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
             style: request.style, extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
+            glossary: request.glossary, calendarAttendees: request.calendarAttendees, template: request.template, scratchpad: request.scratchpad)
 
         switch plan {
         case .single:
@@ -191,7 +195,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, participants: request.participants,
             style: request.style, meetingDate: request.meetingDate,
             noteLanguage: request.noteLanguage, customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
+            glossary: request.glossary, calendarAttendees: request.calendarAttendees, template: request.template, scratchpad: request.scratchpad)
         guard let block = request.endOfTurnBlock?.trimmingCharacters(in: .whitespacesAndNewlines),
               !block.isEmpty else { return prompt }
         return prompt + "\n" + block + "\n"
@@ -215,7 +219,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
+            glossary: request.glossary, calendarAttendees: request.calendarAttendees, template: request.template, scratchpad: request.scratchpad)
         // No room for the notes at all: stop rather than prompt with an empty transcript.
         guard budget.transcriptTokens >= minimumReduceTokens else { throw SummaryDriverError.contextTooSmall }
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)

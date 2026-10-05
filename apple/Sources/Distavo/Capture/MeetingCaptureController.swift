@@ -298,7 +298,7 @@ final class MeetingCaptureController: ObservableObject {
         if let calendarMatch {
             savedURL = CalendarRecordingStep.apply(
                 calendarMatch, recording: outcome.url, start: recStart, config: config,
-                recordingsDir: folderProvider(), askingSpeakers: ask, log: log)
+                recordingsDir: folderProvider(), log: log)
         }
         if heldForCalendar && !ask { recorder.finalizeDeferred(as: savedURL) }
         log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")

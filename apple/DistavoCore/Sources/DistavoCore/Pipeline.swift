@@ -133,12 +133,15 @@ public struct NoteContext: Equatable, Sendable {
     public var template: SummaryTemplate?
     /// Notes typed during the recording (Vikunja #2949); nil = prompt byte-identical.
     public var scratchpad: ScratchpadNotes?
+    /// Calendar attendees the owner has not confirmed (#2946); empty = prompt byte-identical.
+    public var calendarAttendees: [String]
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
                 noteLanguage: String? = nil, customInstruction: String? = nil,
                 glossary: [String] = [], template: SummaryTemplate? = nil,
-                scratchpad: ScratchpadNotes? = nil) {
+                scratchpad: ScratchpadNotes? = nil, calendarAttendees: [String] = []) {
+        self.calendarAttendees = calendarAttendees
         self.scratchpad = scratchpad
         self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
@@ -152,7 +155,7 @@ public struct NoteContext: Equatable, Sendable {
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
-                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary,
+                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
                      template: template, scratchpad: scratchpad)
     }
 }
@@ -386,8 +389,9 @@ public enum Pipeline {
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
-        let participants = CalendarLookup.participants(
-            hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines), match: calendarMatch, config: config)
+        // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
+        let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calendarAttendees = CalendarLookup.promptAttendees(participants: participants, match: calendarMatch, config: config)
 
         do {
             // A re-run must never leave the previous run's timed transcript
@@ -465,7 +469,8 @@ public enum Pipeline {
                     sidecarID: LanguageOverride.load(
                         workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
                     style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
-                scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949
+                scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
+                calendarAttendees: calendarAttendees)   // #2946
             let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
                 segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked

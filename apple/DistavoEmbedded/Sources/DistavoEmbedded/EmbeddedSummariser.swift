@@ -136,7 +136,7 @@ public enum EmbeddedSummariser {
         participants: String? = nil,
         noteLanguage: String? = nil,
         customInstruction: String? = nil,
-        glossary: [String] = [],
+        glossary: [String] = [], calendarAttendees: [String] = [],
         template: SummaryTemplate? = nil,
         scratchpad: ScratchpadNotes? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil
@@ -156,7 +156,7 @@ public enum EmbeddedSummariser {
         let request = SummaryRequest(
             transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
             participants: participants, noteLanguage: noteLanguage,
-            customInstruction: customInstruction, glossary: glossary, template: template,
+            customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees, template: template,
             scratchpad: scratchpad)
         do {
             return try await SummaryDriver.run(

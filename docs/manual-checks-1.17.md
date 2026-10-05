@@ -95,3 +95,14 @@ signed, running build.
       "none stated" guard.
 - [ ] Apple Intelligence (macOS 26+): same with a template on a long recording (map-reduce); the
       final note has the template headings. Not run by the author.
+## Search Notes (Vikunja #2942)
+
+1. Menu bar -> **Search Notes…** opens a resizable window with the field focused; type a distinctive phrase from an older note: results appear within a fraction of a second as you type, the match is bold/tinted in the excerpt.
+2. Type an accented word without the accent (e.g. `reunio` for `reunió`): it still matches. Type `"`, `*`, `NEAR(` or `a -b`: no error, no crash.
+3. Up/Down arrows move the selection while the field has focus; **Return** and **double-click** open the note in the default app. For a Transcripts hit, the note with the same name opens (the transcript file if the note was deleted).
+4. Kind control (Notes & transcripts / Notes / Transcripts) and the Speaker popup (labels such as SPEAKER_00 from your transcripts) narrow the results.
+5. Process a new recording, then search for a phrase from it: the new note is found without reopening the window. Edit a note by hand in an editor, reopen the window, search for the new text. Delete a note in Finder, reopen: it is gone from results (a stale hit shows "That file no longer exists").
+6. Ellipsis menu -> **Delete search index**: `~/Library/Application Support/Distavo/search-index.sqlite` disappears; reopen the window and it is recreated. **Rebuild search index** repopulates it.
+7. Quit Distavo, overwrite the index file with garbage, relaunch: Distavo works normally and search is rebuilt.
+
+Not exercised by unit tests: the SwiftUI window, focus, key handling, opening in the default app, the App Store container path.

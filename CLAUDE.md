@@ -143,6 +143,7 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
 - Work/cache + `.state` markers (+ `<base>.speakers.json` sidecars): `~/Library/Application Support/Distavo/work`
 - Default recordings/notes: `~/Documents/Distavo/recordings` and `.../notes`
 - Logs: `~/Library/Logs/Distavo/distavo.log`
+- Search index (a rebuildable FTS5 cache of note + transcript text, #2942, `docs/search.md`): `~/Library/Application Support/Distavo/search-index.sqlite`
 - WhisperKit models: `~/Library/Application Support/Distavo/models`
 
 Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never commit user data.

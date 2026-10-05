@@ -88,7 +88,15 @@ public enum SummaryPostProcess {
     /// (18 for facts-first, 16 for classic). Derived from the template text so
     /// there is one source of truth; the "## Step n" working headings of
     /// facts-first are not sections of the note.
-    public static func requiredHeadings(for style: Prompt.Style) -> [String] {
+    public static func requiredHeadings(for style: Prompt.Style, template summaryTemplate: SummaryTemplate? = nil) -> [String] {
+        // A summary template (#2940) replaces the stock sections; facts-first still
+        // opens with its two working sections.
+        if let summaryTemplate {
+            let headings = (style == .factsFirst ? ["## Speakers", "## Facts ledger"] : [])
+                + summaryTemplate.effectiveSections(for: style).map(\.heading)
+            var seen = Set<String>()
+            return headings.filter { seen.insert($0.lowercased()).inserted }   // first occurrence wins
+        }
         let template = style == .factsFirst ? Prompt.factsFirstTemplate : Prompt.template
         let lines = template.components(separatedBy: "\n")
         guard let start = lines.firstIndex(of: "# Meeting notes") else { return [] }
@@ -117,11 +125,12 @@ public enum SummaryPostProcess {
 
     /// Required headings that `text` does not contain. Case-insensitive and
     /// tolerant of a trailing colon, bold-only and colon-only heading lines.
-    public static func missingHeadings(in text: String, style: Prompt.Style) -> [String] {
+    public static func missingHeadings(in text: String, style: Prompt.Style,
+                                       template: SummaryTemplate? = nil) -> [String] {
         let present = Set(text.components(separatedBy: "\n")
             .filter(looksLikeHeading)
             .map(normalisedHeading))
-        return requiredHeadings(for: style).filter { !present.contains(normalisedHeading($0)) }
+        return requiredHeadings(for: style, template: template).filter { !present.contains(normalisedHeading($0)) }
     }
 
     /// Insert any missing required heading with a "none stated" body, at its
@@ -129,10 +138,11 @@ public enum SummaryPostProcess {
     /// that forgot `## Action items` still yields a note with the full
     /// structure. A caller that prefers to retry can look at `missingHeadings`
     /// first. Text with all headings is returned unchanged.
-    public static func ensureHeadings(_ text: String, style: Prompt.Style) -> String {
-        let missing = Set(missingHeadings(in: text, style: style))
+    public static func ensureHeadings(_ text: String, style: Prompt.Style,
+                                      template: SummaryTemplate? = nil) -> String {
+        let missing = Set(missingHeadings(in: text, style: style, template: template))
         guard !missing.isEmpty else { return text }
-        let order = requiredHeadings(for: style)
+        let order = requiredHeadings(for: style, template: template)
         var lines = text.components(separatedBy: "\n")
 
         for heading in order where missing.contains(heading) {
@@ -354,12 +364,13 @@ public enum SummaryPostProcess {
     /// (only when `transcript` is given), repair headings.
     public static func clean(_ text: String, style: Prompt.Style,
                              transcript: String? = nil, alwaysKeep: [String] = [],
-                             extraHaystack: [String] = []) -> String {
+                             extraHaystack: [String] = [],
+                             template: SummaryTemplate? = nil) -> String {
         var out = stripTrailingMeta(text)
         if style == .factsFirst { out = dedupeLedgerRows(out) }
         if let transcript { out = dropUnsupportedKeyPeople(out, transcript: transcript, alwaysKeep: alwaysKeep,
                                                            extraHaystack: extraHaystack) }
-        return ensureHeadings(out, style: style)
+        return ensureHeadings(out, style: style, template: template)
     }
 }
 
@@ -376,8 +387,13 @@ public enum EndOfTurnBlock {
     /// `ownerSpeaker` is the known speaker label of the note owner (the app's
     /// `userSpeaker`, e.g. "SPEAKER_00").
     public static func build(
-        noteLanguage: String?, style: Prompt.Style, noteOwner: String, ownerSpeaker: String
+        noteLanguage: String?, style: Prompt.Style, noteOwner: String, ownerSpeaker: String,
+        template: SummaryTemplate? = nil
     ) -> String {
+        if let template {
+            return templated(noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
+                             ownerSpeaker: ownerSpeaker, template: template)
+        }
         let count = SummaryPostProcess.requiredHeadings(for: style).count
         let facts = style == .factsFirst
         switch noteLanguage {
@@ -445,5 +461,35 @@ public enum EndOfTurnBlock {
                 + "transcription error, put it under '## Possible transcription corrections'."
             return s
         }
+    }
+
+    /// The block for a note built from a summary template (#2940). English-worded
+    /// for every language (the stock ca/es blocks name the stock sections, which a
+    /// template does not have); the language rule leads it. Mentions only the
+    /// sections the template really contains.
+    static func templated(noteLanguage: String?, style: Prompt.Style, noteOwner: String,
+                          ownerSpeaker: String, template: SummaryTemplate) -> String {
+        let headings = SummaryPostProcess.requiredHeadings(for: style, template: template)
+        let have = Set(headings.map { $0.dropFirst(3).lowercased() })
+        var lead = ""
+        if let code = noteLanguage, code != "en", code != "auto",
+           let name = WhisperLanguageCatalog.language(forCode: code)?.englishName {
+            lead = "write ALL the prose of the notes in \(name.uppercased()) (not English); the section headings stay "
+                + "in English; quoted excerpts stay verbatim in the language actually spoken. "
+        }
+        var s = "FINAL REMINDER: " + lead + "use exactly the \(headings.count) section headings listed, "
+            + "spelled as given, in that order. "
+        if style == .factsFirst {
+            s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "
+        }
+        s += "Output nothing after the last section: no notes, self-corrections or commentary. "
+            + "SPEAKER ROLES (authoritative): \(ownerSpeaker) IS \(noteOwner), the note owner. "
+            + "Any other speaker is NOT \(noteOwner), even if the word '\(noteOwner)' appears in their turn "
+            + "(it is a greeting addressed to \(noteOwner)). "
+        if have.contains("key people and organisations") {
+            s += "In '## Key people and organisations' list ONLY names that appear literally in the transcript "
+                + "(do not infer: 'ChatGPT' does not imply 'OpenAI'); each entry once. "
+        }
+        return s.trimmingCharacters(in: .whitespaces)
     }
 }

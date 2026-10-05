@@ -122,14 +122,14 @@ extension PipelineDeps {
                 await ModelCoordinator.shared.report(SummaryRouting.traceLine(
                     model: EmbeddedSummaryModelCatalog.model(id: model), transcript: transcript,
                     noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
-                    style: .classic, noteLanguage: noteLanguage))
+                    style: .classic, noteLanguage: noteLanguage, template: context.template))
                 // Always the classic prompt on-device: the 4096-token window
                 // cannot afford the facts-first template (Vikunja #2063).
                 return try await EmbeddedSummariser.summarise(
                     transcript: transcript, noteOwner: context.noteOwner,
                     userSpeaker: context.userSpeaker, participants: context.participants,
                     noteLanguage: noteLanguage, customInstruction: context.customInstruction,
-                    glossary: context.glossary)
+                    glossary: context.glossary, template: context.template)
             }
             return try await ollamaSummarise(transcript, target, options, context)
         }

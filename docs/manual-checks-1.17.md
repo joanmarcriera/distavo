@@ -71,3 +71,27 @@ Settings > Transcription > Vocabulary.
    note is still produced (glossary is capped and counted in the 4096-token budget).
 7. Upgrade path: launch with an old `watcher-config.json` (no `vocabulary` or
    `replacements`): Settings shows both empty and nothing else changes.
+## Summary templates (#2940)
+
+Unit tests cover the prompt, resolution order, guards and the pipeline with fakes; these need a
+signed, running build.
+
+- [ ] Settings > Notes > Templates: pick "Stand-up", Save, process a short recording. The note has
+      the stand-up headings (Updates by person, Plans for today, Blockers, Action items, Open
+      questions) and no "Technical scope". Set the picker back to "None": the next note is the
+      standard 16-section note again.
+- [ ] Custom: open "Custom template", press "Start from…" > "1:1", edit a heading, choose Custom,
+      process a recording: the note uses the edited headings. Clear the text: "Empty - Custom
+      behaves as None." shows and notes are standard.
+- [ ] Folders: in the recordings folder make `Sales/` and `Standups/`; add rules Sales -> Sales call,
+      Standups -> Stand-up; drop a recording in each. The two notes have different headings; a
+      recording in the recordings root uses the "Note template" picker.
+- [ ] Recorder: stop a recording; the "Who was in this meeting?" window has a "Note template" popup.
+      Choose "Interview", Save: that note uses the interview headings even if a folder rule or
+      the global setting says otherwise. Leave it on "Default (from Settings)": no
+      `<base>.language.json` is written for that recording (check the work folder).
+- [ ] Gemma (Direct only): process with a template; the Activity log routing line shows
+      `template=<id>`, and the note has the template's headings with none repaired in by the
+      "none stated" guard.
+- [ ] Apple Intelligence (macOS 26+): same with a template on a long recording (map-reduce); the
+      final note has the template headings. Not run by the author.

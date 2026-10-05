@@ -414,7 +414,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String? = nil,
-        glossary: [String] = [],
+        glossary: [String] = [], template: SummaryTemplate? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil,
         root: URL = EmbeddedModelStore.modelsDirectory,
         manager: SummaryModelManager = .shared
@@ -426,7 +426,8 @@ public enum GemmaSummariser {
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
                 meetingDate: meetingDate, noteLanguage: noteLanguage,
-                customInstruction: customInstruction, glossary: glossary, onProgress: onProgress,
+                customInstruction: customInstruction, glossary: glossary, template: template,
+                onProgress: onProgress,
                 root: root, manager: manager)
         }
     }
@@ -436,7 +437,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String?,
-        glossary: [String],
+        glossary: [String], template: SummaryTemplate?,
         onProgress: (@Sendable (String) -> Void)?,
         root: URL, manager: SummaryModelManager
     ) async throws -> String {
@@ -460,8 +461,8 @@ public enum GemmaSummariser {
             noteLanguage: noteLanguage,
             endOfTurnBlock: EndOfTurnBlock.build(
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
-                ownerSpeaker: userSpeaker),
-            customInstruction: customInstruction, glossary: glossary)
+                ownerSpeaker: userSpeaker, template: template),
+            customInstruction: customInstruction, glossary: glossary, template: template)
         do {
             let raw = try await SummaryDriver.run(request, generator: generator, onProgress: report)
             LocalSummaryFailureTracker.shared.noteSuccess(model: model.id)
@@ -469,7 +470,7 @@ public enum GemmaSummariser {
             // said their name aloud.
             return SummaryPostProcess.clean(
                 raw, style: style, transcript: transcript, alwaysKeep: [noteOwner],
-                extraHaystack: [participants, noteOwner].compactMap { $0 })
+                extraHaystack: [participants, noteOwner].compactMap { $0 }, template: template)
         } catch let error as SummaryDriverError {
             switch error {
             case .contextTooSmall:
@@ -519,7 +520,7 @@ public enum GemmaPipelineRoute {
         await ModelCoordinator.shared.report(SummaryRouting.traceLine(
             model: EmbeddedSummaryModelCatalog.model(id: modelID), transcript: transcript,
             noteOwner: context.noteOwner, userSpeaker: context.userSpeaker,
-            style: context.promptStyle, noteLanguage: context.noteLanguage))
+            style: context.promptStyle, noteLanguage: context.noteLanguage, template: context.template))
         // Unlike Apple's model, Gemma follows the configured prompt style and
         // note language: its window is big enough for facts-first and Catalan/
         // Spanish notes.
@@ -529,6 +530,6 @@ public enum GemmaPipelineRoute {
             participants: context.participants, style: context.promptStyle,
             meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
             customInstruction: context.customInstruction,
-            glossary: context.glossary, root: root, manager: manager)
+            glossary: context.glossary, template: context.template, root: root, manager: manager)
     }
 }

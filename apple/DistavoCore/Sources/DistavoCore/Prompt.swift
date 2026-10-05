@@ -276,13 +276,17 @@ public enum Prompt {
     public static func build(transcript: String, noteOwner: String, userSpeaker: String,
                              participants: String? = nil, style: Style = .classic,
                              meetingDate: Date? = nil, noteLanguage: String? = nil,
-                             customInstruction: String? = nil, glossary: [String] = []) -> String {
+                             customInstruction: String? = nil, glossary: [String] = [],
+                             template: SummaryTemplate? = nil) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let block = (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
             + glossaryText(glossary)
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
-            : template
+            : Self.template
+        // A summary template (#2940) swaps the section list; nil leaves the
+        // text, and so the whole prompt, byte-identical to before.
+        if let template { base = template.apply(to: base, style: style) }
         // nil, "en" and unrecognised codes leave the prompt byte-identical to
         // before this feature; any other catalog language replaces the
         // "Use British English." rule.

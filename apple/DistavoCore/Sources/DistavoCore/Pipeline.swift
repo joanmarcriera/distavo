@@ -126,23 +126,29 @@ public struct NoteContext: Equatable, Sendable {
     /// The user's custom vocabulary (`transcribe.vocabulary`, Vikunja #2939).
     /// Empty (the default) leaves every prompt byte-identical.
     public var glossary: [String]
+    /// The summary template resolved for this recording (Vikunja #2940), or nil
+    /// for the stock section list - the prompt is then byte-identical to before.
+    /// Honoured by Ollama, Gemma and Apple's on-device model.
+    public var template: SummaryTemplate?
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
                 noteLanguage: String? = nil, customInstruction: String? = nil,
-                glossary: [String] = []) {
+                glossary: [String] = [], template: SummaryTemplate? = nil) {
         self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
         self.participants = participants; self.meetingDate = meetingDate
         self.promptStyle = promptStyle; self.noteLanguage = noteLanguage
         self.glossary = glossary
+        self.template = template
     }
 
     /// The full prompt for the Ollama path.
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
-                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary)
+                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary,
+                     template: template)
     }
 }
 
@@ -428,7 +434,13 @@ public enum Pipeline {
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
-                glossary: transcribeConfig.vocabulary)
+                glossary: transcribeConfig.vocabulary,
+                // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
+                template: SummaryTemplateCatalog.resolve(
+                    config: config,
+                    folder: SummaryTemplateCatalog.folder(of: path, in: recordingsDir),
+                    sidecarID: LanguageOverride.load(
+                        workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template))
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.

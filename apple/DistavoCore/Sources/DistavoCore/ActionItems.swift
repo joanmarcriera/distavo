@@ -55,10 +55,13 @@ public struct NoteActionItems: Equatable, Sendable, Identifiable {
 public enum ActionItemsError: Error, Equatable, LocalizedError {
     case noteChanged
     case unreadable(String)
+    /// A scan, regenerate or other rewrite holds the single-flight lock.
+    case busy
     public var errorDescription: String? {
         switch self {
         case .noteChanged: return "The note changed - refresh and try again."
         case .unreadable(let m): return m
+        case .busy: return "Distavo is rewriting notes right now - try again in a moment."
         }
     }
 }
@@ -68,6 +71,9 @@ public enum ActionItems {
     /// Largest note examined (bytes); bigger files are skipped by `scan`.
     public static let maxNoteBytes = 2_000_000
     /// Most notes / items `scan` returns by default.
+    /// `scan` examines at most this many notes (the newest by modification date), however
+    /// few of them have open items, so a huge notes folder cannot make the window slow.
+    public static let maxNotesExamined = 500
     public static let defaultMaxNotes = 100
     public static let defaultMaxItems = 500
 
@@ -82,8 +88,15 @@ public enum ActionItems {
         let b = Array(line.utf8)
         var i = 0
         while i < b.count, b[i] == 0x20 || b[i] == 0x09 { i += 1 }
-        guard i < b.count, b[i] == 0x2D || b[i] == 0x2A || b[i] == 0x2B else { return nil }   // - * +
-        i += 1
+        if i < b.count, b[i] >= 0x30, b[i] <= 0x39 {                                         // "1." / "1)"
+            var d = i
+            while d < b.count, b[d] >= 0x30, b[d] <= 0x39, d - i < 9 { d += 1 }
+            guard d < b.count, b[d] == 0x2E || b[d] == 0x29 else { return nil }
+            i = d + 1
+        } else {
+            guard i < b.count, b[i] == 0x2D || b[i] == 0x2A || b[i] == 0x2B else { return nil }   // - * +
+            i += 1
+        }
         let gap = i
         while i < b.count, b[i] == 0x20 || b[i] == 0x09 { i += 1 }
         guard i > gap, i + 2 < b.count, b[i] == 0x5B, b[i + 2] == 0x5D else { return nil }  // [?]
@@ -95,6 +108,14 @@ public enum ActionItems {
         while j < b.count, b[j] == 0x20 || b[j] == 0x09 { j += 1 }
         let text = String(decoding: b[j...], as: UTF8.self).trimmingCharacters(in: .whitespaces)
         return Line(boxByteOffset: i + 1, done: box != 0x20, text: text)
+    }
+
+    /// Any list item (bullet or ordered), checkbox or not.
+    static func isListLine(_ trimmed: String) -> Bool {
+        guard let f = trimmed.first else { return false }
+        if "-*+".contains(f) { return trimmed.dropFirst().first == " " }
+        let digits = trimmed.prefix(while: \.isNumber)
+        return !digits.isEmpty && digits.count < 10 && [".", ")"].contains(trimmed.dropFirst(digits.count).first)
     }
 
     /// Splits "Buy milk — owner: Ana; due: 2026-10-12" into title / owner / due.
@@ -155,17 +176,35 @@ public enum ActionItems {
         var out: [(item: ActionItem, boxOffset: Int)] = []
         var seen: [String: Int] = [:]
         var offset = 0
-        var inFence = false
+        var fence: (char: Character, length: Int)?     // the open fence, if any
+        var lastTopLevelWasList = false                // for 4+-space indented code vs nested list items
         for (n, slice) in bytes.split(separator: 0x0A, omittingEmptySubsequences: false).enumerated() {
-            let lineStart = offset
+            var lineStart = offset
             offset += slice.count + 1
             var lineBytes = Array(slice)
             if lineBytes.last == 0x0D { lineBytes.removeLast() }
+            // A UTF-8 byte-order mark on line 1 is not part of the line.
+            if n == 0, lineBytes.starts(with: [0xEF, 0xBB, 0xBF]) { lineBytes.removeFirst(3); lineStart += 3 }
             let line = String(decoding: lineBytes, as: UTF8.self)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") { inFence.toggle(); continue }
-            if inFence { continue }
-            guard let p = parseLine(line) else { continue }
+            // Fenced code: ``` or ~~~ (3+); only the same character, at least as long, closes it,
+            // so a ~~~ line inside a ``` fence is just code.
+            if let f = fence {
+                if let c = trimmed.first, c == f.char,
+                   trimmed.prefix(while: { $0 == c }).count >= f.length,
+                   trimmed.drop(while: { $0 == c }).isEmpty { fence = nil }
+                continue
+            }
+            if let c = trimmed.first, c == "`" || c == "~", trimmed.prefix(while: { $0 == c }).count >= 3 {
+                fence = (c, trimmed.prefix(while: { $0 == c }).count); continue
+            }
+            let indent = line.prefix(while: { $0 == " " || $0 == "\t" })
+                .reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+            let parsed = parseLine(line)
+            // Indented code block (4+ columns): not a task unless it nests under a list.
+            if indent >= 4, !lastTopLevelWasList { continue }
+            if indent < 4, !trimmed.isEmpty { lastTopLevelWasList = parsed != nil || isListLine(trimmed) }
+            guard let p = parsed else { continue }
             // Identity ignores the box state, so ticking does not change it.
             var normalised = lineBytes
             normalised[p.boxByteOffset] = 0x20
@@ -186,20 +225,32 @@ public enum ActionItems {
 
     /// Sets `item`'s box to `done` in the file's CURRENT content. Throws
     /// `.noteChanged` (and writes nothing) when no line with that content and
-    /// ordinal exists any more. A no-op (no write) when already in that state.
+    /// ordinal exists any more, and refuses a file that is not valid UTF-8. A no-op
+    /// (no write) when already in that state.
+    ///
+    /// The change is one byte of the same size, written IN PLACE through the
+    /// resolved path, so a symlinked note stays a symlink and the inode, permissions
+    /// and extended attributes (Finder tags) are untouched.
+    /// Callers must serialise toggles on the same note (`WatcherController`).
     public static func toggle(item: ActionItem, to done: Bool) throws {
-        let url = URL(fileURLWithPath: item.notePath)
+        let url = URL(fileURLWithPath: item.notePath).resolvingSymlinksInPath()
         let data: Data
         do { data = try Data(contentsOf: url) } catch {
             throw ActionItemsError.unreadable("Could not read the note: \(error.localizedDescription)")
         }
-        var bytes = [UInt8](data)
-        guard let hit = parse(bytes: bytes, notePath: item.notePath)
+        guard String(data: data, encoding: .utf8) != nil else {
+            throw ActionItemsError.unreadable("The note is not UTF-8 text, so Distavo will not edit it.")
+        }
+        guard let hit = parse(bytes: [UInt8](data), notePath: item.notePath)
             .first(where: { $0.item.contentKey == item.contentKey && $0.item.ordinal == item.ordinal })
         else { throw ActionItemsError.noteChanged }
         if hit.item.isDone == done { return }
-        bytes[hit.boxOffset] = done ? 0x78 : 0x20
-        do { try Data(bytes).write(to: url, options: .atomic) } catch {
+        do {
+            let h = try FileHandle(forUpdating: url)
+            defer { try? h.close() }
+            try h.seek(toOffset: UInt64(hit.boxOffset))
+            try h.write(contentsOf: Data([done ? 0x78 : 0x20]))
+        } catch {
             throw ActionItemsError.unreadable("Could not write the note: \(error.localizedDescription)")
         }
     }
@@ -223,6 +274,7 @@ public enum ActionItems {
             candidates.append((url, v.contentModificationDate ?? .distantPast))
         }
         candidates.sort { $0.date > $1.date }
+        candidates = Array(candidates.prefix(maxNotesExamined))
         var groups: [NoteActionItems] = []
         var total = 0
         for c in candidates {

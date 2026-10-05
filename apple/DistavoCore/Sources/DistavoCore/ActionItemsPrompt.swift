@@ -33,6 +33,29 @@ public enum ActionItemsPrompt {
             "One bullet per decision that was explicitly made. Write \"none stated\" if there were none.")
     }
 
+    /// The two classic-style rules that contradict the strict Tasks format ("distinguish
+    /// 1/2/3" and "deadline ... write none stated / Post-engagement") are replaced so
+    /// the instructions agree: distinctions live in the task text, due has one convention.
+    static func reconcileRules(_ text: String) -> String {
+        var out: [String] = []
+        var skipNumbered = false
+        for line in text.components(separatedBy: "\n") {
+            if line.hasPrefix("- For action items, distinguish:") {
+                out.append("- For tasks, say in the task text whether each is explicit, an implied next step or a possible future responsibility (prefix \"(implied)\" or \"(possible)\"; explicit ones need no prefix).")
+                skipNumbered = true
+                continue
+            }
+            if skipNumbered, line.hasPrefix("  1. ") || line.hasPrefix("  2. ") || line.hasPrefix("  3. ") { continue }
+            skipNumbered = false
+            if line.hasPrefix("- Give each action's own deadline") {
+                out.append("- Give each task a due date only when the transcript states or clearly implies one, otherwise \"due: none\". Never write \"Post-engagement / not yet active\" as a due date; if a task cannot start until a hire, contract or onboarding is complete, say so in the task text.")
+                continue
+            }
+            out.append(line)
+        }
+        return out.joined(separator: "\n")
+    }
+
     private static let taskTitles: Set<String> = ["tasks", "action items", "action item"]
     private static let decisionTitles: Set<String> = ["decisions", "decisions made"]
 
@@ -41,16 +64,19 @@ public enum ActionItemsPrompt {
     }
 
     /// The stock section list of `style`, read from the real prompt text.
-    static func stockTemplate(for style: Prompt.Style) -> SummaryTemplate {
+    /// nil if the prompt layout no longer has the markers this parses (never a crash:
+    /// `effectiveTemplate` then leaves the prompt as it is; `ActionItemsTests` fails loudly in CI).
+    static func stockTemplate(for style: Prompt.Style) -> SummaryTemplate? {
         let text = style == .factsFirst ? Prompt.factsFirstTemplate : Prompt.template
         let marker = style == .factsFirst
             ? "Return Markdown using exactly these sections:"
             : "Return the output in Markdown using exactly these sections:"
         guard let s = text.range(of: marker),
               let e = text.range(of: "Transcript:\n\n{transcript_text}", range: s.upperBound..<text.endIndex),
-              let t = SummaryTemplate.parse(id: "standard", name: "Standard",
+              var t = SummaryTemplate.parse(id: "standard", name: "Standard",
                                             outline: String(text[s.upperBound..<e.lowerBound]))
-        else { preconditionFailure("stock prompt layout changed: ActionItemsPrompt cannot parse it") }
+        else { return nil }
+        t.keepsStockRules = true
         return t
     }
 
@@ -60,7 +86,13 @@ public enum ActionItemsPrompt {
     public static func effectiveTemplate(_ base: SummaryTemplate?, style: Prompt.Style,
                                          enabled: Bool) -> SummaryTemplate? {
         guard enabled else { return base }
-        var t = base ?? stockTemplate(for: style)
+        let stock = base == nil ? stockTemplate(for: style) : nil
+        if base == nil && stock == nil {
+            print("[Distavo] action items: the stock prompt layout was not recognised; using the stock sections")
+            return nil
+        }
+        guard var t = base ?? stock else { return base }
+        t.strictTasks = true
         var sections: [SummaryTemplate.Section] = []
         var haveTasks = false, haveDecisions = false
         for s in t.sections {

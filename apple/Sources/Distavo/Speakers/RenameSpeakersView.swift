@@ -18,6 +18,8 @@ struct RenameSpeakersView: View {
     let notes: [RenamableNote]
     /// Speakers of a note (reads the files; nil/empty = none found).
     let detect: (String) -> [DetectedSpeaker]
+    /// current name -> original label for speakers renamed earlier (empty = nothing to reset).
+    let resetMapping: (String) -> [String: String]
     /// Called with the note and current-label -> new-name; the window closes right after.
     let onApply: (String, [String: String]) -> Void
     let onCancel: () -> Void
@@ -27,8 +29,10 @@ struct RenameSpeakersView: View {
     @State private var names: [String: String] = [:]
 
     init(notes: [RenamableNote], detect: @escaping (String) -> [DetectedSpeaker],
+         resetMapping: @escaping (String) -> [String: String],
          onApply: @escaping (String, [String: String]) -> Void, onCancel: @escaping () -> Void) {
-        self.notes = notes; self.detect = detect; self.onApply = onApply; self.onCancel = onCancel
+        self.notes = notes; self.detect = detect; self.resetMapping = resetMapping
+        self.onApply = onApply; self.onCancel = onCancel
         _selectedBase = State(initialValue: notes.first?.base ?? "")
     }
 
@@ -51,7 +55,7 @@ struct RenameSpeakersView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Rename speakers").font(.headline)
-            Text("Type a name for each speaker. Every mention is replaced in the note, the saved transcript and the timestamps file, so exports and “Regenerate Note…” use the new names. The previous note is kept as “….prev-<date>.md”. Give two speakers the same name to merge them.")
+            Text("Type a name for each speaker. Every mention is replaced in the note, the saved transcript and the timestamps file, so exports and “Regenerate Note…” use the new names. The previous note is kept as “….prev-<date>.md”. Mentions inside sentences are not changed. Giving two speakers the same name merges them, which cannot be undone from the app.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
             if notes.isEmpty {
@@ -99,7 +103,10 @@ struct RenameSpeakersView: View {
             HStack {
                 Spacer()
                 Button("Cancel", action: onCancel).keyboardShortcut(.cancelAction)
-                Button("Apply") { onApply(selectedBase, changes) }
+                if !resetMapping(selectedBase).isEmpty {
+                    Button("Reset to original labels") { onApply(selectedBase, resetMapping(selectedBase)) }
+                }
+                Button("Apply") { confirmAndApply() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(changes.isEmpty || hasEmptyName || invalidName != nil)
             }
@@ -107,6 +114,22 @@ struct RenameSpeakersView: View {
         .padding(16)
         .frame(width: 520)
         .onAppear { reload() }
+    }
+
+    /// A merge loses information, so it is confirmed first.
+    private func confirmAndApply() {
+        let merges = SpeakerRename.merges((try? SpeakerRename.normalised(changes)) ?? changes,
+                                          present: speakers.map(\.label))
+        if !merges.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = merges.map { "Merge \($0.from.joined(separator: ", ")) into \($0.into)?" }
+                .joined(separator: "\n")
+            alert.informativeText = "This cannot be undone from the app. A copy of the transcript and timestamps is kept in the work folder (“….pre-merge-…”)."
+            alert.addButton(withTitle: "Merge")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        onApply(selectedBase, changes)
     }
 
     private func reload() {
@@ -123,10 +146,11 @@ final class RenameSpeakersWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
 
     func show(notes: [RenamableNote], detect: @escaping (String) -> [DetectedSpeaker],
+              resetMapping: @escaping (String) -> [String: String],
               onApply: @escaping (String, [String: String]) -> Void) {
         window?.close()
         let view = RenameSpeakersView(
-            notes: notes, detect: detect,
+            notes: notes, detect: detect, resetMapping: resetMapping,
             onApply: { [weak self] base, mapping in
                 self?.window?.close()
                 onApply(base, mapping)

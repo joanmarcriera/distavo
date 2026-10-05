@@ -125,7 +125,7 @@ your daily Distavo (shared config and data folder). Prerequisite: a note made on
 `<base>.segments.json` and `<base>.transcript.clean.txt` in `~/Library/Application Support/Distavo/work`)
 with at least two speakers.
 
-1. Menu bar -> **Rename Speakers…** opens a window with the 15 newest notes; each detected speaker shows
+1. Menu bar -> **Rename Speakers…** opens a window listing your notes (newest first); each detected speaker shows
    its label, turn count, a sample line and a name field.
 2. Rename `SPEAKER_00` to a name and press **Apply**. A notification says speakers were renamed. The note
    now has the name wherever the label was; `<base>.prev-<date>.md` holds the old note; the work folder has
@@ -134,7 +134,8 @@ with at least two speakers.
    produces a note using the new names.
 4. Open the window again and rename the same speaker a second time: it composes (the sidecar still maps the
    original `SPEAKER_00` to the latest name). Give two speakers the same name: they merge.
-5. Clearing a name field disables Apply; names with `[` or `]` are refused.
+5. Clearing a name field disables Apply; names with `[` or `]` are refused. Only label positions change (speaker headers, a `## Speakers` list, `**Name:**`, `(Name)`, Owner column / `owner: Name`) plus `SPEAKER_nn` anywhere outside code and links; a sentence that merely mentions the name is left alone, the title and footer too.
+5b. Give two speakers the same name: a confirmation "Merge X into Y? This cannot be undone from the app" appears, and `….pre-merge-…` copies of the transcript and timestamps appear in the work folder. After a plain rename the window offers **Reset to original labels**. With full-text search enabled, searching the new name finds the note.
 6. Open an older note without a segments file or cached transcript: speakers found in the note text are
    still renamable; the missing files are skipped silently.
 7. Hand-edit the note first, then rename: your edits survive, only the speaker tokens change.

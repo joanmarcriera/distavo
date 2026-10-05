@@ -867,7 +867,6 @@ final class WatcherController: ObservableObject {
                 return (url, date)
             }
             .sorted { $0.1 > $1.1 }
-            .prefix(15)
             .map { RenamableNote(base: $0.0.deletingPathExtension().lastPathComponent) }
         let detect: (String) -> [DetectedSpeaker] = { base in
             SpeakerRename.detectSpeakers(
@@ -875,7 +874,8 @@ final class WatcherController: ObservableObject {
                 transcript: try? String(contentsOf: Pipeline.cachedTranscriptURL(workDir: workDir, base: base), encoding: .utf8),
                 segments: TranscriptSegments.load(workDir: workDir, base: base))
         }
-        RenameSpeakersWindowController.shared.show(notes: Array(notes), detect: detect) { [weak self] base, mapping in
+        RenameSpeakersWindowController.shared.show(notes: Array(notes), detect: detect,
+                                                   resetMapping: { SpeakerRename.resetMapping(workDir: workDir, base: $0) }) { [weak self] base, mapping in
             Task { [weak self] in await self?.renameSpeakers(base: base, mapping: mapping) }
         }
     }
@@ -890,6 +890,10 @@ final class WatcherController: ObservableObject {
         let workDir = Config.resolvePath(config.workDir)
         do {
             let result = try SpeakerRename.apply(mapping: mapping, base: base, notesDir: notesDir, workDir: workDir)
+            if !result.changedFiles.isEmpty {
+                // Refresh the full-text index (#2942); a no-op unless search is enabled.
+                indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+            }
             log("Renamed speakers in \(base): \(mapping.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: ", "))")
             notifier.notify(title: result.changedFiles.isEmpty ? "Nothing to rename" : "✅ Speakers renamed",
                             body: result.changedFiles.isEmpty ? "\(base) has no mention of those speakers."

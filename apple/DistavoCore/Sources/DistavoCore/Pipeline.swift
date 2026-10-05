@@ -394,6 +394,12 @@ public enum Pipeline {
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.
             TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
+            // Timed twin of the clean transcript for exports/viewer (#2943).
+            // Best-effort: a failure to write it must never fail the recording.
+            if let timed = TranscriptSegments(whisperXResult: result) {
+                do { try timed.save(workDir: workDir, base: base) }
+                catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }
+            }
 
             deps.onPhase?(.summarising)
             // The note language (Vikunja #2147, #2956): a per-recording

@@ -114,6 +114,29 @@ final class TranscriptRobustnessTests: XCTestCase {
         try TranscriptSegments(segments: [S(start: 0, end: 1, text: "OLD MEETING")]).save(workDir: work, base: "demo")
     }
 
+    /// Regenerate (#2947) does not re-transcribe, so the timed transcript must survive it.
+    func testRegenerateKeepsTheSidecar() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-regsc-\(UUID().uuidString)")
+        var cfg = Config()
+        cfg.recordingsDir = root.appendingPathComponent("recordings").path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        let notes = URL(fileURLWithPath: cfg.notesDir), work = URL(fileURLWithPath: cfg.workDir)
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        try "SPEAKER_00: hello there".write(to: Pipeline.cachedTranscriptURL(workDir: work, base: "demo"),
+                                           atomically: true, encoding: .utf8)
+        try "# Meeting notes\n\nOLD".write(to: notes.appendingPathComponent("demo.md"), atomically: true, encoding: .utf8)
+        try seedStale(work)
+        let before = try Data(contentsOf: TranscriptSegments.url(workDir: work, base: "demo"))
+
+        let result = await Pipeline.regenerate(
+            base: "demo", options: .init(), config: cfg,
+            deps: deps { _, _ in XCTFail("regenerate must not transcribe"); return [:] })
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertEqual(try Data(contentsOf: TranscriptSegments.url(workDir: work, base: "demo")), before)
+    }
+
     func testTextOnlyReprocessLeavesNoStaleSidecar() async throws {
         let (cfg, input, work) = try env()
         try seedStale(work)

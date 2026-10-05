@@ -421,6 +421,39 @@ final class WatcherController: ObservableObject {
         if changed { persist() }
     }
 
+    /// Second copy of a finished note in the configured vault folder (Vikunja #2954). Runs off
+    /// the main actor (the vault may be a slow or network folder); a missing vault or any
+    /// failure is logged and notified but NEVER affects the recording. Variant runs
+    /// (`<base>@…`) are comparison artefacts and are not exported.
+    private func exportToVault(_ result: ProcessResult) {
+        guard let note = result.notePath else { return }
+        exportToVault(base: result.base, note: note)
+    }
+
+    /// Also used after a speaker rename, so the vault copy never goes stale.
+    private func exportToVault(base: String, note: URL) {
+        let notes = config.notes
+        guard notes.hasVault, !base.contains("@") else { return }
+        let workDir = Config.resolvePath(config.workDir)
+        // The vault must not sit inside a folder Distavo scans itself (duplicates in search / tasks).
+        let avoiding = [config.notesDir, config.recordingsDir].map(Config.resolvePath)
+        Task.detached(priority: .utility) { [weak self] in
+            let title = NoteMeta.loadTitle(workDir: workDir, base: base)
+            let outcome = SandboxFolders.withVaultAccess(path: notes.vaultDir) { path -> VaultExport.Outcome in
+                var scoped = notes
+                scoped.vaultDir = path
+                return VaultExport.export(note: note, base: base, notes: scoped, workDir: workDir,
+                                          title: title, avoiding: avoiding)
+            }
+            await MainActor.run { [weak self] in
+                self?.log("Vault copy of \(base): \(outcome.message)")
+                if case .skipped(let why) = outcome {
+                    self?.notifier.notify(title: "Note not copied to your vault", body: "\(base): \(why)")
+                }
+            }
+        }
+    }
+
     /// Process all pending recordings (self-serializing so overlapping timer
     /// ticks and "Process now" can't double-process).
     /// `trigger`: only the timer is `.automatic`; every user-initiated entry point
@@ -502,6 +535,7 @@ final class WatcherController: ObservableObject {
             }
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
+            exportToVault(result)
             if let sourcePath { runWhenDoneActions(result, sourcePath: sourcePath) }
         case .tooShort:
             status = "Too short: \(result.base)"
@@ -925,6 +959,7 @@ final class WatcherController: ObservableObject {
             indexForSearch(base: base, note: result.notePath)   // #2942
             logTasksReport(result.notePath)                     // #2941
             notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
+            exportToVault(result)
         default:
             status = "Idle"
             log("Regenerate not done: \(base) — \(result.message)")
@@ -999,6 +1034,7 @@ final class WatcherController: ObservableObject {
             if !result.changedFiles.isEmpty {
                 // Refresh the full-text index (#2942); a no-op unless search is enabled.
                 indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
+                exportToVault(base: base, note: notesDir.appendingPathComponent("\(base).md"))   // #2954
             }
             log("Renamed speakers in \(base): \(mapping.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: ", "))")
             notifier.notify(title: result.changedFiles.isEmpty ? "Nothing to rename" : "✅ Speakers renamed",

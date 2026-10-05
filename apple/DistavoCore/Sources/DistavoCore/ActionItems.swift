@@ -291,7 +291,10 @@ public enum ActionItems {
     }
 
     static func noteTitle(data: Data, url: URL) -> String {
-        let text = String(decoding: data.prefix(4096), as: UTF8.self)
+        let raw = String(decoding: data.prefix(4096), as: UTF8.self)
+        // YAML frontmatter (#2954): its `title` wins, and its keys are never headings.
+        if let t = NoteFrontmatter.value("title", in: raw), !t.isEmpty { return t }
+        let text = NoteFrontmatter.strip(raw)
         for line in text.components(separatedBy: .newlines) where line.hasPrefix("# ") {
             let t = line.dropFirst(2).trimmingCharacters(in: .whitespaces)
             if !t.isEmpty && t.lowercased() != "meeting notes" { return t }

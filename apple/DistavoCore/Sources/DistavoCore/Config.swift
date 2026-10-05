@@ -343,6 +343,9 @@ public struct Config: Codable, Equatable {
     /// Calendar-aware titling and attendees (Vikunja #2946). OFF for any config
     /// predating it and for fresh installs; see `CalendarConfig`.
     public var calendar: CalendarConfig
+    /// Obsidian-friendly output (Vikunja #2954): frontmatter, auto title/tags,
+    /// tracked terms, vault copy. Absent in older configs -> everything off.
+    public var notes: NotesConfig
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -361,6 +364,7 @@ public struct Config: Codable, Equatable {
         case meetingDetection = "meeting_detection"
         case recording
         case calendar
+        case notes
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -382,7 +386,8 @@ public struct Config: Codable, Equatable {
                 whenDone: [WhenDoneAction] = [],
                 meetingDetection: MeetingDetectionConfig = .init(),
                 recording: RecordingOptions = .init(),
-                calendar: CalendarConfig = .init()) {
+                calendar: CalendarConfig = .init(),
+                notes: NotesConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -399,6 +404,7 @@ public struct Config: Codable, Equatable {
         self.meetingDetection = meetingDetection
         self.recording = recording
         self.calendar = calendar
+        self.notes = notes
     }
 
     public init(from decoder: Decoder) throws {
@@ -422,6 +428,7 @@ public struct Config: Codable, Equatable {
         autoStopOnSilence = (try? c.decodeIfPresent(Bool.self, forKey: .autoStopOnSilence)).flatMap { $0 } ?? d.autoStopOnSilence
         autoStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .autoStopSilenceMinutes)).flatMap { $0 } ?? d.autoStopSilenceMinutes)
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
+        notes = (try? c.decodeIfPresent(NotesConfig.self, forKey: .notes)) ?? d.notes
         // `when_done` (an array); unknown entries are dropped rather than
         // failing the whole config. A config predating it falls back to the
         // legacy `open_when_done` scalar, migrated 1:1; either absent leaves `[]`.

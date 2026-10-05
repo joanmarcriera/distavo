@@ -38,6 +38,8 @@ struct NotesPane: View {
         ActionItemsSection(model: model)
         CalendarSection(model: model)   // #2946
 
+        ObsidianSection(model: model)
+
         Section("People") {
             TextField("Note owner", text: $model.draft.noteOwner)
             TextField("Your speaker label", text: $model.draft.userSpeaker)

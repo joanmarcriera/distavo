@@ -209,7 +209,8 @@ extension Pipeline {
             noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
-            customInstruction: options.customInstruction,
+            // The user's instruction, plus the title/tags request when #2954 asks for it.
+            customInstruction: NoteMeta.mergedInstruction(options.customInstruction, notes: cfg.notes),
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
@@ -234,13 +235,20 @@ extension Pipeline {
         // 4. Summarise (one retry on a truncated answer, like `processOne`) and validate.
         deps.onPhase?(.summarising)
         do {
+            var noteMeta: NoteMeta.Extracted?   // the model's title/tags (#2954)
+            var noteBody = ""
             func attempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                if cfg.notes.asksModelForMetadata {
+                    noteMeta = NoteMeta.extract(from: cleaned)
+                    cleaned = noteMeta?.body ?? cleaned
+                }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 // Key moments (#2950): re-appended after the model, outside validation.
-                return (RecordingBookmarks.appending(keyMoments, to: cleaned) + footer,
-                        SummaryValidator.validate(cleaned + footer))
+                let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
+                noteBody = withMoments   // body INCLUDING Key moments; see `NoteAssembly` for the order
+                return (withMoments + footer, SummaryValidator.validate(cleaned + footer))
             }
             var (noteText, failures) = try await attempt()
             if isRetryableTruncation(failures) { (noteText, failures) = try await attempt() }
@@ -256,7 +264,15 @@ extension Pipeline {
                     transcriptPath: transcriptPath)
             }
 
-            if let calendarMatch { noteText = CalendarTitle.retitle(note: noteText, title: calendarMatch.title) }   // #2946
+            // Frontmatter / tracked terms (#2954); unchanged text with default settings.
+            // Unmanaged keys the user added to the old note's frontmatter are carried over.
+            noteText = composeNote(
+                body: noteBody, footer: footer, meta: noteMeta, config: cfg, context: context,
+                sourceName: sourcePath?.lastPathComponent,
+                timed: TranscriptSegments.load(workDir: workDir, base: base), cleanTranscript: transcript,
+                dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage,
+                existingNote: previousText, calendar: calendarMatch)
+
             // 5. Keep the old version, then write the new one.
             try FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
             var backup: URL?
@@ -269,6 +285,7 @@ extension Pipeline {
                 if let backup { try? FileManager.default.moveItem(at: backup, to: notePath) }
                 throw error
             }
+            rememberTitle(noteMeta, config: cfg, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             let kept = backup.map { "; previous version kept as \($0.lastPathComponent)" } ?? ""
             return ProcessResult(status: .done, base: base, message: "note regenerated\(kept)",

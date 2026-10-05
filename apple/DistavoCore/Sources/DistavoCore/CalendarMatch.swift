@@ -226,7 +226,6 @@ public enum CalendarTitle {
 
     /// Replace the note's first `# ` heading with the event title. A note
     /// without a level-1 heading is returned unchanged.
-    // TODO(#2954): prefer calendar title for frontmatter title (use CalendarMatchStore.load(workDir:base:)?.title)
     public static func retitle(note: String, title: String) -> String {
         guard let heading = displayTitle(title) else { return note }
         var lines = note.components(separatedBy: "\n")

@@ -52,7 +52,9 @@ struct CompareView: View {
     private func pane(index: Binding<Int>) -> some View {
         let variant = variants[index.wrappedValue]
         let path = showTranscript ? variant.transcriptPath : variant.notePath
+        // A note may open with a YAML frontmatter block (#2954): show only the body.
         let text = path.flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .map { showTranscript ? $0 : NoteFrontmatter.strip($0) }
 
         VStack(spacing: 0) {
             HStack {

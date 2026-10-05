@@ -57,7 +57,8 @@ public enum RecordingVariants {
         let prefix = "\(base)@"
         let names = (try? fileManager.contentsOfDirectory(atPath: notesDir.path)) ?? []
         let suffixes = names.compactMap { name -> String? in
-            guard name.hasSuffix(".md"), name.hasPrefix(prefix) else { return nil }
+            guard name.hasSuffix(".md"), name.hasPrefix(prefix),
+                  !NoteVersions.isBackupName(name) else { return nil }
             let suffix = String(name.dropLast(3).dropFirst(prefix.count))   // strip ".md" then "<base>@"
             return suffix.isEmpty ? nil : suffix
         }.sorted()

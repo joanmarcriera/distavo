@@ -135,6 +135,7 @@ public enum EmbeddedSummariser {
         transcript: String, noteOwner: String, userSpeaker: String,
         participants: String? = nil,
         noteLanguage: String? = nil,
+        customInstruction: String? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
 
@@ -151,7 +152,8 @@ public enum EmbeddedSummariser {
         // 4096-token window cannot afford facts-first (Vikunja #2063).
         let request = SummaryRequest(
             transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
-            participants: participants, noteLanguage: noteLanguage)
+            participants: participants, noteLanguage: noteLanguage,
+            customInstruction: customInstruction)
         do {
             return try await SummaryDriver.run(
                 request, generator: FoundationModelsGenerator(), onProgress: report)

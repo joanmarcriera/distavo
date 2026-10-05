@@ -751,6 +751,70 @@ final class WatcherController: ObservableObject {
         Task { [weak self] in await self?.runVariant(variant, on: sourcePath) }
     }
 
+    /// "Regenerate Note…" (Vikunja #2947): open the picker over the newest notes.
+    func showRegenerateNote() {
+        let notesDir = Config.resolvePath(config.notesDir)
+        let workDir = Config.resolvePath(config.workDir)
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: notesDir, includingPropertiesForKeys: keys)) ?? []
+        let notes = urls
+            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
+            .compactMap { url -> (URL, Date)? in
+                guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
+                      let date = v.contentModificationDate else { return nil }
+                return (url, date)
+            }
+            .sorted { $0.1 > $1.1 }
+            .prefix(15)
+            .map { url, _ -> RegenerableNote in
+                let base = url.deletingPathExtension().lastPathComponent
+                return RegenerableNote(
+                    base: base, title: base,
+                    hasTranscript: FileManager.default.fileExists(
+                        atPath: Pipeline.cachedTranscriptURL(workDir: workDir, base: base).path))
+            }
+        RegenerateWindowController.shared.show(notes: Array(notes), config: config) { [weak self] base, options in
+            Task { [weak self] in await self?.regenerateNote(base: base, options: options) }
+        }
+    }
+
+    /// Re-summarise `base` from its saved transcript under the same single-flight
+    /// lock as the scanner (so it never overlaps a scan or another variant run).
+    /// Not routed through `handle`: a regenerate that cannot run must not look
+    /// like a failed recording (no marker, no "failed" menu entry).
+    func regenerateNote(base: String, options: RegenerateOptions) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        let cfg = config
+        processingActive = true
+        processingPhase = .transcribing
+        status = "Regenerating \(base)…"
+        log("Regenerating note for \(base) (transcript reused)")
+        refreshActivity()
+        let source = Self.recordingURL(
+            forBase: LanguageOverride.sourceBase(from: base), in: Config.resolvePath(cfg.recordingsDir))
+        let result = await Pipeline.regenerate(
+            base: base, options: options, config: cfg, deps: deps, sourcePath: source)
+        processingActive = false
+        switch result.status {
+        case .done:
+            status = "Last note: \(base)"
+            lastDone = (base, result.notePath, result.transcriptPath)
+            hasLastNote = result.notePath != nil
+            hasLastTranscript = result.transcriptPath != nil
+            unseenDone = true
+            log("Regenerated note: \(base) — \(result.message)")
+            notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
+        default:
+            status = "Idle"
+            log("Regenerate not done: \(base) — \(result.message)")
+            notifier.notify(title: "Note not regenerated", body: "\(base): \(result.message)")
+        }
+        refreshActivity()
+    }
+
     func openLastNote() {
         guard let note = lastDone?.note, FileManager.default.fileExists(atPath: note.path) else {
             notifier.notify(title: "No note yet", body: "Process a recording first.")

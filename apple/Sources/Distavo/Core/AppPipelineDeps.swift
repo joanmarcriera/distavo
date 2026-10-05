@@ -128,7 +128,7 @@ extension PipelineDeps {
                 return try await EmbeddedSummariser.summarise(
                     transcript: transcript, noteOwner: context.noteOwner,
                     userSpeaker: context.userSpeaker, participants: context.participants,
-                    noteLanguage: noteLanguage)
+                    noteLanguage: noteLanguage, customInstruction: context.customInstruction)
             }
             return try await ollamaSummarise(transcript, target, options, context)
         }

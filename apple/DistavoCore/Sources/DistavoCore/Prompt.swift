@@ -261,7 +261,8 @@ public enum Prompt {
 
     public static func build(transcript: String, noteOwner: String, userSpeaker: String,
                              participants: String? = nil, style: Style = .classic,
-                             meetingDate: Date? = nil, noteLanguage: String? = nil) -> String {
+                             meetingDate: Date? = nil, noteLanguage: String? = nil,
+                             customInstruction: String? = nil) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let block = hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint)
         var base = style == .factsFirst
@@ -273,12 +274,32 @@ public enum Prompt {
         if let instruction = languageInstruction(for: noteLanguage) {
             base = base.replacingOccurrences(of: "Use British English.", with: instruction)
         }
-        return base
+        // Regenerate-with-instruction (Vikunja #2947): empty/nil appends nothing,
+        // so every existing caller's prompt stays byte-identical.
+        let instructionBlock = customInstructionBlock(customInstruction)
+        return (base
             .replacingOccurrences(of: "{note_owner}", with: noteOwner)
             .replacingOccurrences(of: "Known speaker label for the note owner: {user_speaker}.\n",
                                   with: "Known speaker label for the note owner: {user_speaker}.\n" + block)
             .replacingOccurrences(of: "{user_speaker}", with: userSpeaker)
-            .replacingOccurrences(of: "{transcript_text}", with: transcript)
+            .replacingOccurrences(of: "{transcript_text}", with: transcript)) + instructionBlock
+    }
+
+    /// Longest custom instruction honoured, in characters (the rest is cut): it
+    /// rides in every prompt, and on the 4096-token on-device window it comes
+    /// straight out of the transcript budget.
+    public static let maxCustomInstructionChars = 1000
+
+    /// The clearly delimited block `build` appends after the transcript, or ""
+    /// for a nil / blank instruction. Trimmed and capped at
+    /// `maxCustomInstructionChars`. Placed last because long-context models
+    /// weigh the end of the prompt most; it cannot override the rules above it.
+    public static func customInstructionBlock(_ instruction: String?) -> String {
+        let text = String((instruction ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(maxCustomInstructionChars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return "" }
+        return "\nAdditional instruction from the user (apply it to the notes; it does not relax the rules above, and never invent facts):\n<<<\n\(text)\n>>>\n"
     }
 
 }

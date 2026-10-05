@@ -343,6 +343,9 @@ public struct Config: Codable, Equatable {
     /// Obsidian-friendly output (Vikunja #2954): frontmatter, auto title/tags,
     /// tracked terms, vault copy. Absent in older configs -> everything off.
     public var notes: NotesConfig
+    /// Read-only loopback MCP server (Vikunja #2955, Direct edition only). Off by default,
+    /// for old configs and for fresh installs. See `MCPConfig`.
+    public var mcp: MCPConfig
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -361,6 +364,7 @@ public struct Config: Codable, Equatable {
         case meetingDetection = "meeting_detection"
         case recording
         case notes
+        case mcp
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -382,7 +386,8 @@ public struct Config: Codable, Equatable {
                 whenDone: [WhenDoneAction] = [],
                 meetingDetection: MeetingDetectionConfig = .init(),
                 recording: RecordingOptions = .init(),
-                notes: NotesConfig = .init()) {
+                notes: NotesConfig = .init(),
+                mcp: MCPConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -399,6 +404,7 @@ public struct Config: Codable, Equatable {
         self.meetingDetection = meetingDetection
         self.recording = recording
         self.notes = notes
+        self.mcp = mcp
     }
 
     public init(from decoder: Decoder) throws {
@@ -423,6 +429,7 @@ public struct Config: Codable, Equatable {
         autoStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .autoStopSilenceMinutes)).flatMap { $0 } ?? d.autoStopSilenceMinutes)
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
         notes = (try? c.decodeIfPresent(NotesConfig.self, forKey: .notes)) ?? d.notes
+        mcp = (try? c.decodeIfPresent(MCPConfig.self, forKey: .mcp)).flatMap { $0 } ?? d.mcp
         // `when_done` (an array); unknown entries are dropped rather than
         // failing the whole config. A config predating it falls back to the
         // legacy `open_when_done` scalar, migrated 1:1; either absent leaves `[]`.

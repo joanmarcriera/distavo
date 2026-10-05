@@ -85,13 +85,12 @@ public struct MiniHTTPParser {
         if let failure { return .failed(failure) }
         if finished { return fail(400, "request already complete") }
         // Refuse to buffer beyond what any valid request could need.
-        let ceiling = head == nil
-            ? limits.maxHeaderBytes + 4
-            : headerEnd + (head?.contentLength ?? 0)
-        if buffer.count + data.count > ceiling + (head == nil ? 0 : 0) {
-            // Before the head is known we may legitimately hold up to header-limit bytes plus
-            // some body bytes in the same read, so only enforce the hard ceiling afterwards.
-            if head != nil { return fail(400, "unexpected data after the request body") }
+        if let head {
+            if buffer.count + data.count > headerEnd + head.contentLength {
+                return fail(400, "unexpected data after the request body")
+            }
+        } else if buffer.count + data.count > limits.maxHeaderBytes + 4 + limits.maxBodyBytes {
+            return fail(413, "request too large")
         }
         buffer.append(contentsOf: data)
 

@@ -26,6 +26,17 @@ public enum RemindersExportOutcome: Equatable, Sendable {
     case exported(created: Int, alreadySent: Int)
     case accessDenied
     case failed(String)
+    /// Another export into the same ledger is still running; nothing was done.
+    case busy
+}
+
+/// One export at a time per ledger: a second concurrent run would read the same
+/// ledger, create the same reminders again and then overwrite the first one's save.
+actor RemindersExportGate {
+    static let shared = RemindersExportGate()
+    private var running: Set<String> = []
+    func enter(_ key: String) -> Bool { running.insert(key).inserted }
+    func leave(_ key: String) { running.remove(key) }
 }
 
 /// Item ids already sent, kept in a small JSON sidecar in the work dir.
@@ -33,10 +44,15 @@ public struct RemindersLedger: Codable, Equatable, Sendable {
     public var sent: Set<String> = []
     public static let fileName = "reminders-exported.json"
 
+    /// A missing ledger is empty. A ledger that exists but cannot be decoded is moved aside
+    /// (`reminders-exported.json.corrupt-<time>`) rather than silently reset, then treated as empty.
     public static func load(workDir: URL) -> RemindersLedger {
-        guard let d = try? Data(contentsOf: workDir.appendingPathComponent(fileName)),
-              let l = try? JSONDecoder().decode(RemindersLedger.self, from: d) else { return RemindersLedger() }
-        return l
+        let url = workDir.appendingPathComponent(fileName)
+        guard let d = try? Data(contentsOf: url) else { return RemindersLedger() }
+        if let l = try? JSONDecoder().decode(RemindersLedger.self, from: d) { return l }
+        let aside = workDir.appendingPathComponent("\(fileName).corrupt-\(Int(Date().timeIntervalSince1970))")
+        try? FileManager.default.moveItem(at: url, to: aside)
+        return RemindersLedger()
     }
 
     public func save(workDir: URL) throws {
@@ -65,6 +81,15 @@ public enum RemindersExport {
     /// successfully created item is recorded in the ledger saved to `workDir`.
     public static func export(items: [ActionItem], noteTitle: String, sink: ReminderSink,
                               workDir: URL) async -> RemindersExportOutcome {
+        let key = workDir.standardizedFileURL.path
+        guard await RemindersExportGate.shared.enter(key) else { return .busy }
+        let outcome = await run(items: items, noteTitle: noteTitle, sink: sink, workDir: workDir)
+        await RemindersExportGate.shared.leave(key)
+        return outcome
+    }
+
+    private static func run(items: [ActionItem], noteTitle: String, sink: ReminderSink,
+                            workDir: URL) async -> RemindersExportOutcome {
         var ledger = RemindersLedger.load(workDir: workDir)
         let open = items.filter { !$0.isDone }
         let fresh = open.filter { !ledger.sent.contains($0.id) }

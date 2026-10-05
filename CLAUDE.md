@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-**Distavo** (v1.15.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
+**Distavo** (v1.17.0) is a **native Swift/SwiftUI macOS menu-bar app** that watches a folder for audio/video
 recordings and turns each new one into a structured Markdown meeting note. The pipeline is:
 **AVFoundation** (local WAV convert) → transcribe (**built-in WhisperKit (including two Barcelona Supercomputing
 Center Catalan/Spanish models) or NVIDIA Parakeet for the "Fast" engine, auto-routed by detected language, or the
@@ -72,6 +72,30 @@ of the original Python module (noted in its header).
 - **`EmbeddedSupport.swift`** — dependency-free pieces: `EmbeddedModelCatalog`, `HardwareProbe`,
   `Config.recommendedForThisMac()`.
 
+1.17 feature groups (each file's header comment is the spec; all pure and unit-tested, the app target only renders them):
+- **Settings panes** — `SettingsPanes.swift`: which panes exist per edition, sidebar search, remembered selection.
+- **Note language** — `NoteLanguage.swift` (`summarise.note_language`: `en` | `auto` | a Whisper code; unknown = `en`).
+- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript.
+- **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; `ActionItemsPrompt.swift`
+  expresses `summarise.action_items` as a template; `ActionItems.swift` lists/ticks `- [ ]` across notes;
+  `RemindersExport.swift` decides what to send (EventKit sink lives in the app target).
+- **Regenerate** — `Regenerate.swift` (`Pipeline.regenerate`, `NoteVersions`): re-runs only the summarise step on the cached clean transcript.
+- **Timed transcript** — `TranscriptSegments.swift` (`.segments.json`, spec `docs/transcript-sidecar.md`), `TranscriptExport.swift`
+  (SRT/VTT/JSON/HTML/DOCX) + `StoredZipWriter.swift` + `TranscriptPDF.swift` (CoreText), `TranscriptTimeline.swift`
+  (viewer layout and `TranscriptEditing`; originals kept as `.orig`), `TranscriptMeta.swift`.
+- **Speaker rename** — `SpeakerRename.swift`: renames/merges across note, clean transcript and segments.
+- **Search and Ask** — `SearchIndex.swift` (system SQLite FTS5 cache, `docs/search.md`); `AskNotes.swift` / `AskPrompt.swift`
+  (retrieval, token budget, citations) / `AskEndpoint.swift` (local-only endpoint guard, `docs/ask-local-only.md`).
+- **Automation** — `AutomationCommand.swift` (`distavo://` allow-list, Finder Service, App Intents; `docs/automation.md`), `AutomationCopySafety.swift`.
+- **Meeting detection** — `MeetingDetector.swift`: offers to record when a listed call app captures the mic (fake-clock policy, like `SilenceMonitor`).
+- **Scratchpad, key moments** — `Scratchpad.swift` (typed Quick Notes -> `Prompt.build(scratchpad:)`), `RecordingBookmarks.swift`
+  (markers -> deterministic `## Key moments`), `ClipExporter.swift` (AVFoundation m4a clips).
+- **Queue** — `ProcessingQueue.swift` (view over durable markers, ETAs, `QueueScan`, `QueueRetry`), `QueueCoordinator.swift` (`PausePolicy`, retries).
+- **Notes output** — `NotesConfig.swift` (`notes` config section), `NoteFrontmatter.swift`, `NoteMeta.swift` (LLM title/tags),
+  `TrackedTerms.swift` (`## Tracked terms`), `VaultExport.swift` (second copy in e.g. an Obsidian vault), `NoteAssembly.swift`.
+- **Calendar** — `CalendarMatch.swift` (match, safe titles, attendee cleaning, `moveSidecars`), `CalendarTrust.swift`, `CalendarConfig.swift`;
+  EventKit is read-only and opt-in (permission requested from Settings).
+
 The **`DistavoEmbedded`** package (`apple/DistavoEmbedded/`) holds the built-in engines (transcriber + summariser):
 - `EmbeddedTranscriber` (WhisperKit + SpeakerKit from `argmax-oss-swift`; per-call lifetime)
 - `EmbeddedSummariser` (Apple Foundation Models, macOS 26+, behind `#if canImport(FoundationModels)` + `@available`)
@@ -83,8 +107,17 @@ App target (`apple/Sources/Distavo/`):
 - **`Menu/StatusMenu.swift`** + **`Core/WatcherController.swift`** — `MenuBarExtra` menu (one Button per item)
   wired to the GUI-agnostic controller (timers, locks, status, deferred-set tracking, marker cleanup).
   Timer scans on configured interval; scan is single-flight (non-blocking lock prevents double-process).
+  Since 1.17 `WatcherController` is split into `WatcherController+{Ask,KeyMoments,Queue,Search,Transcript}.swift`
+  extensions (put new controller behaviour in a `+Feature` file, not the main one); the scan loop runs through
+  `QueueCoordinator` (`+Queue`), and `isScanning` is the single-flight lock (`runExclusivePass`, and the note-rewriting features, wait on it).
 - **`Settings/`** — native Settings window (no localhost web server). Backend selection via radio buttons
-  (Ollama vs. embedded for both transcribe and summarise, if available on this Mac).
+  (Ollama vs. embedded for both transcribe and summarise, if available on this Mac). Since 1.17 the window is a
+  sidebar of panes: `Settings/Panes/<Name>Pane.swift` (`PaneSupport.swift` shared) with `Panes/Sections/<Name>Section.swift`
+  for feature blocks — **one file per pane/section**; a new pane also needs a case in `SettingsPanes.swift` and in `SettingsView.detail`.
+- **Feature folders (1.17)** — `Regenerate/`, `Search/`, `Ask/`, `Transcript/` (audio-synced viewer/editor), `Speakers/`
+  (rename), `ActionItems/` (+ `EventKitReminderSink`), `Queue/`, `Automation/` (URL scheme, Finder Service, App Intents),
+  `Calendar/` (`CalendarEventProvider` = EventKit), plus `Compare/`. New in `Capture/`: `MeetingDetectionController`,
+  `QuickNotes`, `KeyMoments` (optional global hotkey).
 - **`Core/`** — `Links` (outbound URLs including "Send Feedback…" in Direct edition), `LoginItem`,
   `Notifier`, `SandboxFolders` (App Store bookmarks), `AppPipelineDeps` (routes pipeline transcribe/summarise).
 - **`Capture/`** — built-in meeting recorder (macOS 14.4+): global Core Audio process tap (excluding Distavo)
@@ -99,6 +132,23 @@ Direct only** — the App Store forbids third-party updaters and Setapp ships it
 in each xcconfig selects behavior: `EDITION_DIRECT` (+ `DONATE_ENABLED`), `EDITION_SETAPP`, `EDITION_APPSTORE`.
 Keep edition-specific UI gated — the **App Store** build must contain **no Sparkle**, **no Lemon Squeezy donate link**
 (Direct-only), **no sandbox-prohibited automation** (the "Run in Terminal" helper is `#if !EDITION_APPSTORE`).
+
+## Per-recording sidecars (work dir)
+
+All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (possibly synced) recordings folder stays untouched:
+- `.transcript.clean.txt` — cleaned transcript; `Pipeline.processOne` (rewritten by transcript editor / speaker rename). Regenerate and Ask read it.
+- `.transcript.meta.json` — detected language for `note_language=auto`; `Pipeline` (`TranscriptMeta`), removed on reprocess when none.
+- `.segments.json` — timed transcript; `Pipeline`. `.segments.orig.json`, `.transcript.clean.orig.txt`, `.segments.orig.speakers.json` — pristine copies made before the first transcript-editor save.
+- `.speakers.json` — participants/speaker count from the recorder question (`SpeakerHints`).
+- `.language.json` — `LanguageOverride`: spoken language `code`, plus `note_language` and `summary_template` for that recording; written by the recorder's confirm controls.
+- `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
+- `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
+- `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
+- `reminders-exported.json` — ledger of reminders already sent (one per work dir, not per base; `RemindersLedger`).
+- In the **notes** folder: `<note>.prev-<yyyyMMdd-HHmmss>.md` backups (`NoteVersions`, from Regenerate and speaker rename); every scan/listing skips them via `NoteVersions.isBackupName`.
+- Search index (not per base): `search-index.sqlite`, created only after the first Search Notes… open (`search.indexEnabled`).
+
+**Anything that renames a base must move all of them.** `CalendarMatch.moveSidecars` does so by prefix (`<oldBase>.*`, enumerated, copy-then-commit-then-delete) — never add a fixed list.
 
 ## Key behaviors to preserve
 
@@ -136,6 +186,29 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
 - **Backend migration rule:** a config file predating `transcribe.backend` decodes to `"server"` (never
   silently switch existing WhisperX users to embedded); only fresh installs get `"embedded"` via `Config.recommendedForThisMac()`.
 - **Concurrency:** scan is self-serializing so overlapping timer ticks and "Process now" can't double-process.
+- **1.17 options are inert until switched on.** Every new key (`notes.*`, `calendar.*`, vocabulary, templates, `note_language`,
+  action items, meeting detection, key-moment hotkey…) decodes to off/empty for a config predating it, and
+  `recommendedForThisMac()` leaves them off too unless a comment says otherwise. With them unset `Prompt.build` and the note
+  are byte-identical to before (pinned by `PromptTests`/`SummaryTemplateTests`); don't add a prompt line that changes the unset digest.
+- **Note section order is fixed** (`NoteAssembly`): frontmatter → model body (incl. Highlights) → `## Key moments` → `## Tracked terms` → provenance footer.
+  Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
+- **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions
+  (Process now, Retry, URL/Shortcuts, Finder Service) run; a pause switched on mid-pass still stops the next file.
+- **Ask is local-only by construction.** `AskEndpointGuard.resolve` parses once, resolves once, requires EVERY address to be
+  loopback/RFC1918/link-local/ULA, then pins the validated IP (Host header = original); no redirects, no system proxy, no cookies;
+  anything unverifiable fails closed. `NetworkScope` now parses hosts strictly (numeric forms via `getaddrinfo`, zone ids, userinfo
+  rejected); its classification-only callers use the lenient `hostOf`. https-to-hostname can't be pinned (residual risk in `docs/ask-local-only.md`).
+- **Calendar content is untrusted** (`CalendarTrust.isTrusted`: only events the user owns/accepted). Names pass the
+  `plausibleName` allow-list and reach the model only in the separate untrusted attendees block, never as authoritative
+  participants; the event title is used for the file/note title (sanitised), never put in the prompt. Read-only: nothing writes to a calendar.
+- **Features that rewrite the user's note are careful:** speaker rename and regenerate keep a `.prev-` backup and write atomically;
+  an action-item tick changes exactly one byte, re-locating the line by content (`.noteChanged` if edited); all run under the scan lock.
+- **Automation can't touch files:** `distavo://` commands carry no path and never read/move/delete or change settings; start-recording
+  by link always asks (Cancel default). Unknown URLs are ignored and logged.
+- **Opt-in by use:** the search index (`search.indexEnabled`, UserDefaults, not Config) and EventKit/Reminders permissions are requested
+  only when the user first uses the feature; nothing is indexed or prompted before that.
+- **Tests must not mutate process-global time zone** (`setenv("TZ")`/`NSTimeZone` resets): a cached static `DateFormatter` froze the zone
+  and made results depend on test order. Build formatters per call with an injectable `TimeZone`.
 
 ## Runtime data locations (not in the repo)
 
@@ -144,6 +217,8 @@ Keep edition-specific UI gated — the **App Store** build must contain **no Spa
 - Default recordings/notes: `~/Documents/Distavo/recordings` and `.../notes`
 - Logs: `~/Library/Logs/Distavo/distavo.log`
 - Search index (a rebuildable FTS5 cache of note + transcript text, #2942, `docs/search.md`): `~/Library/Application Support/Distavo/search-index.sqlite`
+- UserDefaults (no Keychain items exist): `search.indexEnabled`, `settings.selectedPane`, the key-moment hotkey error, `summaryModelDownloadOptIn.*`, onboarding/preflight/local-network flags, last detected language, App Store folder bookmarks (`SandboxFolders`). Config-file keys are for behaviour; window state stays here.
+- Docs: `docs/automation.md`, `search.md`, `ask-local-only.md`, `transcript-sidecar.md` (sidecar format), `settings-redesign-checklist.md`, `voice-profiles-feasibility.md`, `manual-checks-1.17.md` (what headless tests can't prove: TCC, EventKit, hotkey, detection)
 - WhisperKit models: `~/Library/Application Support/Distavo/models`
 
 Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never commit user data.
@@ -154,6 +229,9 @@ Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never comm
 fakes through the pipeline's `PipelineDeps` seam and use a WhisperX fixture / `MockURLProtocol` for
 the HTTP clients. `LiveE2ETests` is skipped unless `DISTAVO_LIVE=1` (see `apple/README.md`). CI also
 regenerates the Xcode project and builds the Direct edition unsigned to catch app-target breakage.
+The suite is ~1100 tests (one file per feature in `Tests/DistavoCoreTests`); anything needing audio, a model, a server or a TCC
+permission is gated behind an env var (`DISTAVO_LIVE`, `DISTAVO_EMBEDDED_LIVE`, `DISTAVO_DETECTOR_LIVE`, `DISTAVO_SUMMARY_LIVE`, …) and skips by default,
+with the manual remainder listed in `docs/manual-checks-1.17.md`.
 
 ## Skills
 

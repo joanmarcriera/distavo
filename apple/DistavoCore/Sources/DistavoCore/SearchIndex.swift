@@ -220,9 +220,11 @@ public final class SearchIndex: @unchecked Sendable {
 
     /// Passages of a few hundred words around the matches of the best-ranked
     /// documents — the retrieval step for "ask across notes" (#2948).
+    /// `matchAny` ORs the terms (a document needs only one) instead of requiring all of
+    /// them: natural-language questions rarely have every word in one place.
     public func passages(matching query: String, limit: Int = 8, kind: SearchKind? = nil,
-                         words: Int = 300) -> [SearchPassage] {
-        guard let match = Self.matchQuery(query) else { return [] }
+                         words: Int = 300, matchAny: Bool = false) -> [SearchPassage] {
+        guard let match = Self.matchQuery(query, any: matchAny) else { return [] }
         let terms = Self.tokens(query).map(Self.fold)
         return queue.sync {
             guard openLocked() else { return [] }
@@ -280,9 +282,11 @@ public final class SearchIndex: @unchecked Sendable {
 
     /// `"a" "b"*` — every term quoted (so `AND`/`NEAR`/`OR` are plain words),
     /// the last one a prefix. nil when there is nothing to search for.
-    static func matchQuery(_ raw: String) -> String? {
+    static func matchQuery(_ raw: String, any: Bool = false) -> String? {
         let terms = tokens(raw)
         guard !terms.isEmpty else { return nil }
+        // OR mode (retrieval for "ask", #2948): quoted terms, longer ones as prefixes.
+        if any { return terms.map { "\"\($0)\"" + ($0.count >= 4 ? "*" : "") }.joined(separator: " OR ") }
         return terms.enumerated().map { i, t in
             "\"\(t)\"" + (i == terms.count - 1 ? "*" : "")
         }.joined(separator: " ")

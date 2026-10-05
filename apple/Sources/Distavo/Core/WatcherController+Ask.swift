@@ -58,7 +58,7 @@ extension WatcherController {
             },
             indexEnabled: { Self.searchGate.isEnabled })
         let ollamaComplete = deps.complete
-        deps.complete = { prompt, target, options, maxOutputTokens in
+        deps.complete = { prompt, target, options, maxOutputTokens, endpoint in
             if case .embedded(let model) = target {
                 // Gemma serialises on ModelCoordinator; Apple's model does not (see
                 // EmbeddedSummariser.complete) and relies on the scan refusal above.
@@ -67,7 +67,7 @@ extension WatcherController {
                 }
                 return try await GemmaSummariser.complete(prompt: prompt, modelID: model, maxOutputTokens: maxOutputTokens)
             }
-            return try await ollamaComplete(prompt, target, options, maxOutputTokens)
+            return try await ollamaComplete(prompt, target, options, maxOutputTokens, endpoint)
         }
         // Read at the point of use (AskNotes calls this right before generating).
         deps.onDeviceBusy = { [weak self] in

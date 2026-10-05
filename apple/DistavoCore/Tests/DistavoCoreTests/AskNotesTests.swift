@@ -44,7 +44,7 @@ final class AskNotesTests: XCTestCase {
                       resolver: @escaping NetworkScope.HostResolver = { _ in [] }) -> AskDeps {
         AskDeps(
             ollamaReachable: { _ in true }, embeddedReadiness: { _ in readiness },
-            complete: { prompt, target, _, _ in
+            complete: { prompt, target, _, _, _ in
                 spy.complete(prompt, target)
                 if let throwing { throw throwing }
                 return reply
@@ -301,7 +301,7 @@ final class AskNotesTests: XCTestCase {
 
     func testOllamaOfflineDefersAndRetryableFromEngineDefers() async {
         var cfg = config(backend: "server"); cfg.allowLocalFallbackForTest()
-        let offline = AskDeps(ollamaReachable: { _ in false }, complete: { _, _, _, _ in "x" })
+        let offline = AskDeps(ollamaReachable: { _ in false }, complete: { _, _, _, _, _ in "x" })
         let o = await AskNotes.ask(question: "q", scope: .note(base: "x"), config: cfg, deps: offline)
         guard case .deferred = o else { return XCTFail("\(o)") }
 
@@ -402,7 +402,7 @@ final class AskNotesTests: XCTestCase {
         final class Box: @unchecked Sendable { var opts: SummariseOptions? }
         let box = Box()
         let d = AskDeps(ollamaReachable: { _ in true },
-                        complete: { _, _, o, _ in box.opts = o; return "x [1]" },
+                        complete: { _, _, o, _, _ in box.opts = o; return "x [1]" },
                         retrieve: { _, _, _ in [self.passage("a", "budget")] }, indexEnabled: { true })
         let cfg = config()
         _ = await AskNotes.ask(question: "budget", scope: .allNotes, config: cfg, deps: d)

@@ -77,12 +77,14 @@ public enum AskOutcome: Equatable, Sendable {
 
 /// Injectable effects (cf. `PipelineDeps`). The defaults are inert; use `live`.
 public struct AskDeps {
-    public var ollamaReachable: (String) async -> Bool
+    /// Reachability ping against the SAME pinned endpoint the answer will use.
+    public var ollamaReachable: (AskEndpoint) async -> Bool
     public var embeddedReadiness: (String) async -> EmbeddedReadiness
     /// One generic text completion on `target` — NOT a note summary: the prompt is
     /// sent as given and the reply returned as is (no note validators or repair).
-    public var complete: (_ prompt: String, _ target: SummariseTarget,
-                          _ options: SummariseOptions, _ maxOutputTokens: Int) async throws -> String
+    /// `endpoint` is the verified, pinned endpoint for an Ollama target (nil for on-device).
+    public var complete: (_ prompt: String, _ target: SummariseTarget, _ options: SummariseOptions,
+                          _ maxOutputTokens: Int, _ endpoint: AskEndpoint?) async throws -> String
     /// Best passages for space-separated search terms (OR-ed): `(terms, limit, words)`.
     public var retrieve: (_ terms: String, _ limit: Int, _ words: Int) async -> [SearchPassage]
     /// Whether the search index exists (opt-in gate).
@@ -95,9 +97,9 @@ public struct AskDeps {
     public var resolver: NetworkScope.HostResolver
 
     public init(
-        ollamaReachable: @escaping (String) async -> Bool,
+        ollamaReachable: @escaping (AskEndpoint) async -> Bool,
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
-        complete: @escaping (String, SummariseTarget, SummariseOptions, Int) async throws -> String,
+        complete: @escaping (String, SummariseTarget, SummariseOptions, Int, AskEndpoint?) async throws -> String,
         retrieve: @escaping (String, Int, Int) async -> [SearchPassage] = { _, _, _ in [] },
         indexEnabled: @escaping () -> Bool = { false },
         onDeviceBusy: @escaping () async -> String? = { nil },
@@ -121,18 +123,18 @@ public struct AskDeps {
         // public URL would otherwise receive the question and excerpts.
         let ollama = OllamaClient(session: session ?? AskSession.noRedirect)
         return AskDeps(
-            ollamaReachable: pipeline.ollamaReachable, embeddedReadiness: pipeline.embeddedReadiness,
-            complete: { prompt, target, options, _ in
-                guard case let .ollama(url, model) = target else {
+            // Every Ask network call (this ping and the completion) uses the Ask session
+            // (no proxy, no redirects) against the pinned endpoint value, nothing else.
+            ollamaReachable: { endpoint in
+                await ollama.reachable(endpoint.requestURL, headers: endpoint.hostHeader.map { ["Host": $0] } ?? [:])
+            },
+            embeddedReadiness: pipeline.embeddedReadiness,
+            complete: { prompt, target, options, _, endpoint in
+                guard case let .ollama(_, model) = target else {
                     throw OllamaError("On-device answering is not available in this build.")
                 }
-                // Resolve ONCE, validate every address, and connect to that validated address
-                // (no second resolution that DNS rebinding could answer differently).
-                let endpoint: AskEndpoint
-                switch AskEndpointGuard.resolve(url, resolver: resolver) {
-                case .success(let e): endpoint = e
-                case .failure(let f): throw OllamaError(f.message)
-                }
+                // Fail closed: only a verified endpoint (resolved once, every address local) is used.
+                guard let endpoint else { throw OllamaError("No verified local endpoint for the Ollama server.") }
                 return try await ollama.generate(
                     url: endpoint.requestURL, model: model, prompt: prompt, options: options,
                     headers: endpoint.hostHeader.map { ["Host": $0] } ?? [:])
@@ -225,15 +227,17 @@ public enum AskNotes {
         guard !question.isEmpty else { return .failed("Type a question first.") }
         if scope == .allNotes, !deps.indexEnabled() { return .needsIndex }
 
-        // 1. Backend: the same choice as a note summary, local-only.
+        // 1. Backend: the same choice as a note summary, but the local-only check (resolve ONCE,
+        //    validate every address) runs BEFORE any network call, and the pinned endpoint is
+        //    what every later call uses (reachability ping and completion alike).
         let target: SummariseTarget
-        switch await Pipeline.chooseSummariser(config, reachable: deps.ollamaReachable,
-                                               embeddedReadiness: deps.embeddedReadiness) {
-        case .use(let t): target = t
-        case .deferred(let why): return .deferred("\(why). Try again later.")
-        case .unavailable(let why): return .failed(why)
+        let endpoint: AskEndpoint?
+        switch await chooseTarget(config, deps) {
+        case .use(let t, let e): target = t; endpoint = e
+        case .deferred(let why): return .deferred(why)
+        case .refused(let why): return .refused(why)
+        case .failed(let why): return .failed(why)
         }
-        if let why = AskBackend.localOnlyViolation(target, resolver: deps.resolver) { return .refused(why) }
         if case .embedded = target, let busy = await deps.onDeviceBusy() { return .deferred(busy) }
 
         // 2. Budget for this backend, then the excerpts.
@@ -279,7 +283,7 @@ public enum AskNotes {
         options.numPredict = answerTokens   // a short chat answer; leaves num_ctx alone (no model reload)
         let raw: String
         do {
-            raw = try await deps.complete(prompt, target, options, answerTokens)
+            raw = try await deps.complete(prompt, target, options, answerTokens, endpoint)
         } catch is CancellationError {
             return .cancelled
         } catch let retry as RetryableDependencyError {
@@ -304,6 +308,42 @@ public enum AskNotes {
         return .answered(AskAnswer(
             text: parsed.cleaned, citations: parsed.keys.compactMap { byKey[$0] }.map(citation),
             consulted: excerpts.map(citation), backend: AskBackend.label(target), method: method))
+    }
+
+    // MARK: Backend choice (local-only first)
+
+    enum Chosen { case use(SummariseTarget, AskEndpoint?), deferred(String), refused(String), failed(String) }
+
+    /// Mirrors `Pipeline.chooseSummariser` (server -> reachable? -> optional local fallback;
+    /// local; on-device) but never touches the network before the endpoint is verified local.
+    static func chooseTarget(_ config: Config, _ deps: AskDeps) async -> Chosen {
+        let s = config.summarise
+        if s.backend == "embedded" && s.embeddedEnabled {
+            // This branch of chooseSummariser never calls `reachable` (no network).
+            switch await Pipeline.chooseSummariser(config, reachable: { _ in false }, embeddedReadiness: deps.embeddedReadiness) {
+            case .use(let t): return .use(t, nil)
+            case .deferred(let why): return .deferred("\(why). Try again later.")
+            case .unavailable(let why): return .failed(why)
+            }
+        }
+        func verified(_ t: OllamaTarget) async -> Result<AskEndpoint, AskEndpointError> {
+            await AskEndpointGuard.resolveBounded(t.url, resolver: deps.resolver)
+        }
+        func useLocal() async -> Chosen {
+            switch await verified(s.local) {
+            case .success(let e): return .use(.ollama(url: s.local.url, model: s.local.model), e)
+            case .failure(let f): return f.kind == .unresolved ? .deferred(f.message) : .refused(f.message)
+            }
+        }
+        if s.backend == "local" { return await useLocal() }
+        switch await verified(s.server) {
+        case .success(let e):
+            if await deps.ollamaReachable(e) { return .use(.ollama(url: s.server.url, model: s.server.model), e) }
+        case .failure(let f):
+            if f.kind != .unresolved { return .refused(f.message) }   // not local / invalid / unverifiable: stop, nothing sent
+        }
+        if s.allowLocalFallback { return await useLocal() }
+        return .deferred("Server Ollama offline; local fallback not allowed yet. Try again later.")
     }
 
     // MARK: Single note

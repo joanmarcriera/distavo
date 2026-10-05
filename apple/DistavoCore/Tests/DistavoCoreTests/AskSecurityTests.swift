@@ -114,7 +114,7 @@ final class AskSecurityTests: XCTestCase {
         var cfg = Config(); cfg.summarise.backend = "embedded"; cfg.summarise.embeddedEnabled = true
         let deps = AskDeps(
             ollamaReachable: { _ in true }, embeddedReadiness: { _ in .ready },
-            complete: { _, _, _, _ in XCTFail("must not generate while busy"); return "x" },
+            complete: { _, _, _, _, _ in XCTFail("must not generate while busy"); return "x" },
             retrieve: { _, _, _ in
                 [SearchPassage(path: "/n/a.md", base: "a", title: "a", kind: .note, text: "budget")]
             },

@@ -141,6 +141,13 @@ final class AskEndpointTests: XCTestCase {
         override func stopLoading() {}
     }
 
+    private func liveDeps(_ cfg: URLSessionConfiguration, resolver: @escaping NetworkScope.HostResolver) -> AskDeps {
+        AskDeps.live(from: PipelineDeps(convertToWav: { _, _ in }, transcribe: { _, _ in [:] },
+                                        ollamaReachable: { _ in true }, summarise: { _, _, _, _ in "" }),
+                     retrieve: { _, _, _ in [] }, indexEnabled: { true },
+                     resolver: resolver, session: AskSession.make(cfg))
+    }
+
     func testLiveCompleteConnectsToTheValidatedIPNotTheName() async throws {
         Capture.requests = []
         let cfg = URLSessionConfiguration.ephemeral
@@ -149,27 +156,25 @@ final class AskEndpointTests: XCTestCase {
         let count = Count()
         // First lookup answers private, any later one would answer public (rebinding).
         let resolver: NetworkScope.HostResolver = { _ in count.n += 1; return count.n == 1 ? ["192.168.0.5"] : ["93.184.216.34"] }
-        let deps = AskDeps.live(from: PipelineDeps(convertToWav: { _, _ in }, transcribe: { _, _ in [:] },
-                                                    ollamaReachable: { _ in true }, summarise: { _, _, _, _ in "" }),
-                                retrieve: { _, _, _ in [] }, indexEnabled: { true },
-                                resolver: resolver, session: AskSession.make(cfg))
-        let text = try await deps.complete("PROMPT", .ollama(url: "http://nas.example.org:11434", model: "m"), SummariseOptions(), 100)
+        let deps = liveDeps(cfg, resolver: resolver)
+        let target = SummariseTarget.ollama(url: "http://nas.example.org:11434", model: "m")
+        guard case .success(let endpoint) = await AskEndpointGuard.resolveBounded("http://nas.example.org:11434", resolver: resolver) else {
+            return XCTFail("resolve")
+        }
+        let text = try await deps.complete("PROMPT", target, SummariseOptions(), 100, endpoint)
         XCTAssertEqual(text, "hi [1]")
-        XCTAssertEqual(count.n, 1)
+        XCTAssertEqual(count.n, 1, "one resolution for the whole question")
         XCTAssertEqual(Capture.requests.first?.url?.absoluteString, "http://192.168.0.5:11434/api/generate")
         XCTAssertEqual(Capture.requests.first?.value(forHTTPHeaderField: "Host"), "nas.example.org:11434")
     }
 
-    func testLiveCompleteRefusesAPublicAddressAtConnectTime() async {
+    func testLiveCompleteWithoutAVerifiedEndpointFailsClosed() async {
         Capture.requests = []
         let cfg = URLSessionConfiguration.ephemeral
         cfg.protocolClasses = [Capture.self]
-        let deps = AskDeps.live(from: PipelineDeps(convertToWav: { _, _ in }, transcribe: { _, _ in [:] },
-                                                    ollamaReachable: { _ in true }, summarise: { _, _, _, _ in "" }),
-                                retrieve: { _, _, _ in [] }, indexEnabled: { true },
-                                resolver: { _ in ["93.184.216.34"] }, session: AskSession.make(cfg))
+        let deps = liveDeps(cfg, resolver: { _ in ["93.184.216.34"] })
         do {
-            _ = try await deps.complete("SECRET", .ollama(url: "http://nas.example.org:11434", model: "m"), SummariseOptions(), 100)
+            _ = try await deps.complete("SECRET", .ollama(url: "http://nas.example.org:11434", model: "m"), SummariseOptions(), 100, nil)
             XCTFail("must refuse")
         } catch {
             XCTAssertFalse("\(error)".contains("SECRET"), "errors never echo the prompt")

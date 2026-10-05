@@ -91,39 +91,47 @@ final class AskEndpointRobustnessTests: XCTestCase {
         return withUnsafeBytes(of: &sa) { Array($0) }
     }
 
-    func testAddressStringsHandlesNilEmptyShortAndUnexpectedEntries() {
+    func testAddressStringsFailsClosedOnAnyUnreadableEntry() {
         XCTAssertEqual(NetworkScope.addressStrings(nil), [])
         let good = sockaddrIn(192, 168, 0, 5)
         let inSize = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let result = withChain([
-            (AF_INET, inSize, nil),                                // nil ai_addr
-            (AF_UNIX, inSize, good),                               // unexpected family
-            (AF_INET, 2, Array(good.prefix(2))),                   // length too short for sockaddr_in
-            (AF_INET6, inSize, good),                              // v6 family but v4-sized buffer
-            (AF_INET, inSize, good),                               // the only valid entry
-        ]) { NetworkScope.addressStrings($0) }
-        XCTAssertEqual(result, ["192.168.0.5"])
+        let valid: (Int32, socklen_t, [UInt8]?) = (AF_INET, inSize, good)
+        XCTAssertEqual(withChain([valid, valid, valid]) { NetworkScope.addressStrings($0) }, ["192.168.0.5", "192.168.0.5", "192.168.0.5"])
+        // 3 local + 1 unreadable of each kind -> nil (cannot verify), never "the 3 that parsed".
+        for bad in [(AF_INET, inSize, nil), (AF_UNIX, inSize, good), (AF_INET, 2, Array(good.prefix(2))),
+                    (AF_INET6, inSize, good)] as [(Int32, socklen_t, [UInt8]?)] {
+            XCTAssertNil(withChain([valid, valid, valid, bad]) { NetworkScope.addressStrings($0) })
+            XCTAssertNil(withChain([bad, valid, valid, valid]) { NetworkScope.addressStrings($0) })
+        }
     }
 
-    func testAllInvalidEntriesYieldEmptyWhichIsRefused() {
+    func testChainLongerThanTheBoundIsRefusedNotTruncated() {
         let inSize = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let result = withChain([(AF_UNIX, inSize, [UInt8](repeating: 0, count: 16)), (AF_INET, 0, nil)]) {
-            NetworkScope.addressStrings($0)
+        let valid: (Int32, socklen_t, [UInt8]?) = (AF_INET, inSize, sockaddrIn(10, 0, 0, 1))
+        XCTAssertNotNil(withChain(Array(repeating: valid, count: NetworkScope.maxChainEntries)) { NetworkScope.addressStrings($0) })
+        XCTAssertNil(withChain(Array(repeating: valid, count: NetworkScope.maxChainEntries + 1)) { NetworkScope.addressStrings($0) },
+                     "65 local addresses must be refused, not validated up to 64")
+    }
+
+    func testUnverifiableMarkerAndMixedResolverAnswersAreRefused() {
+        // 65 / "3 local + 1 unparseable" through the injectable resolver (the system resolver maps a nil chain to the marker).
+        let local = ["192.168.0.5", "10.0.0.2", "fd00::5"]
+        for ips in [local + [NetworkScope.unverifiableAnswer], local + ["bogus"], Array(repeating: "10.0.0.1", count: 64) + ["8.8.8.8"]] {
+            if case .success = AskEndpointGuard.resolve("https://ollama.example.org", resolver: { _ in ips }) { XCTFail("\(ips.count)") }
+            if case .success = AskEndpointGuard.resolve("http://ollama.example.org", resolver: { _ in ips }) { XCTFail("\(ips.count)") }
         }
-        XCTAssertEqual(result, [])
-        // An empty system resolution is refused by the guard.
-        if case .success = AskEndpointGuard.resolve("http://nas.example.org", resolver: { _ in result }) { XCTFail() }
+        // 3 local -> allowed (https by name keeps every address validated).
+        if case .failure(let e) = AskEndpointGuard.resolve("https://ollama.example.org", resolver: { _ in local }) { XCTFail(e.message) }
     }
 
     func testCyclicChainIsBounded() {
         let inSize = socklen_t(MemoryLayout<sockaddr_in>.size)
-        let out = withChain([(AF_INET, inSize, sockaddrIn(10, 0, 0, 1))]) { head -> [String] in
+        let out = withChain([(AF_INET, inSize, sockaddrIn(10, 0, 0, 1))]) { head -> [String]? in
             head?.pointee.ai_next = head   // corrupt: points at itself
             let r = NetworkScope.addressStrings(head)
             head?.pointee.ai_next = nil
             return r
         }
-        XCTAssertLessThanOrEqual(out.count, 64)
-        XCTAssertFalse(out.isEmpty)
+        XCTAssertNil(out, "a cyclic chain exceeds the bound and is refused")
     }
 }

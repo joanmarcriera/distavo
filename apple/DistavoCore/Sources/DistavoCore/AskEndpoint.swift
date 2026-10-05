@@ -17,7 +17,15 @@ import Foundation
 //                 second lookup. See docs/ask-local-only.md for the residual risk.
 
 public struct AskEndpointError: Error, Equatable {
+    public enum Kind: Equatable, Sendable {
+        case invalid        // unusable URL (parse, scheme, userinfo, %)
+        case notLocal       // resolved, and at least one address is not local
+        case unresolved     // the name did not resolve (server down / not found)
+        case unverifiable   // the lookup timed out: cannot verify the server is local
+    }
     public let message: String
+    public let kind: Kind
+    public init(message: String, kind: Kind = .notLocal) { self.message = message; self.kind = kind }
 }
 
 public enum AskEndpoint: Equatable, Sendable {
@@ -89,11 +97,13 @@ public enum AskEndpointGuard {
 
     public static func resolve(_ url: String, resolver: NetworkScope.HostResolver)
         -> Result<AskEndpoint, AskEndpointError> {
-        func fail(_ m: String) -> Result<AskEndpoint, AskEndpointError> { .failure(AskEndpointError(message: m)) }
+        func fail(_ m: String, _ k: AskEndpointError.Kind = .notLocal) -> Result<AskEndpoint, AskEndpointError> {
+            .failure(AskEndpointError(message: m, kind: k))
+        }
         // One parse of the URL: scheme, host, port and path all come from these components.
         guard let comps = URLComponents(string: url), let parsed = NetworkScope.parseHost(comps),
               let scheme = comps.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
-            return fail("Ask Your Notes could not use the configured Ollama address (\(String(url.prefix(80)))). Check Settings → Summaries.")
+            return fail("Ask Your Notes could not use the configured Ollama address (\(display(url))). It must be http(s)://host[:port] with no user:password and no unusual characters. Check Settings → Summaries.", .invalid)
         }
         let name = parsed.name
         let literal = NetworkScope.numericAddresses(name)
@@ -108,7 +118,7 @@ public enum AskEndpointGuard {
             addresses = resolver(name)
         }
         if addresses.isEmpty {
-            return fail("Ask Your Notes could not resolve the configured Ollama server (\(name)). Check it is running and reachable on your network, then try again.")
+            return fail("Ask Your Notes could not resolve the configured Ollama server (\(name)). Check it is running and reachable on your network, then try again.", .unresolved)
         }
         // The zone id is only ever carried on a link-local literal; judge addresses without it.
         // Resolver output is untrusted data: a zone suffix must be well-formed or the answer is refused.
@@ -120,7 +130,7 @@ public enum AskEndpointGuard {
             }
         }
         guard addresses.allSatisfy(zoneOK) else {
-            return fail("Ask Your Notes could not trust the address answer for the configured Ollama server (\(name)).")
+            return fail("Ask Your Notes could not trust the address answer for the configured Ollama server (\(name)).", .invalid)
         }
         let bare = addresses.map { $0.split(separator: "%").first.map(String.init) ?? $0 }
         guard bare.allSatisfy(isLocalAddress) else {
@@ -133,13 +143,53 @@ public enum AskEndpointGuard {
         }
         // Pin to a validated address (canonical text: legacy decimal/octal/hex forms are never
         // handed to URLSession). Prefer IPv4 when several were returned.
-        guard let pick = bare.first(where: { !$0.contains(":") }) ?? bare.first else {
-            return fail("Ask Your Notes could not resolve the configured Ollama server (\(name)).")
+        // Pick from the resolver's own strings so a validated zone (`fe80::1%en0`, the normal
+        // mDNS answer for an IPv6-only name) survives into the pinned URL.
+        let full = addresses.first(where: { !$0.contains(":") }) ?? addresses.first
+        guard let full, let pick = full.split(separator: "%").first.map(String.init) else {
+            return fail("Ask Your Notes could not resolve the configured Ollama server (\(name)).", .unresolved)
         }
-        let zone = pick.contains(":") ? parsed.zone : nil
+        let resolvedZone = full.firstIndex(of: "%").map { String(full[full.index(after: $0)...]) }
+        let zone = pick.contains(":") ? (resolvedZone ?? parsed.zone) : nil
         return .success(.pinned(.init(
             scheme: scheme, address: pick, zone: zone, port: port, path: path,
             hostHeader: literal == nil ? (port.map { "\(name):\($0)" } ?? name) : nil,
             addresses: addresses)))
+    }
+
+    /// scheme://host[:port] only — never userinfo, path or query (the configured URL can hold
+    /// `user:password@`). Falls back to a generic phrase when the URL cannot be parsed.
+    static func display(_ url: String) -> String {
+        guard let c = URLComponents(string: url), let scheme = c.scheme, let host = c.host, !host.isEmpty else {
+            return "unparseable address"
+        }
+        let shown = "\(scheme)://\(host)" + (c.port.map { ":\($0)" } ?? "")
+        return String(shown.prefix(80))
+    }
+
+    /// `resolve` with the (blocking) DNS lookup bounded by `timeout`: a lookup that does not
+    /// answer in time means "cannot verify the server is local", so it is refused and
+    /// nothing is sent. The abandoned lookup finishes harmlessly on its own thread.
+    public static func resolveBounded(
+        _ url: String, resolver: @escaping NetworkScope.HostResolver, timeout: TimeInterval = 5
+    ) async -> Result<AskEndpoint, AskEndpointError> {
+        final class Once: @unchecked Sendable {
+            private let lock = NSLock(); private var done = false
+            func take() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
+        }
+        return await withCheckedContinuation { cont in
+            let once = Once()
+            DispatchQueue.global(qos: .userInitiated).async {
+                let r = resolve(url, resolver: resolver)
+                if once.take() { cont.resume(returning: r) }
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + timeout) {
+                if once.take() {
+                    cont.resume(returning: .failure(AskEndpointError(
+                        message: "Ask Your Notes could not verify within \(Int(timeout)) seconds that the configured Ollama server is on your local network, so nothing was sent.",
+                        kind: .unverifiable)))
+                }
+            }
+        }
     }
 }

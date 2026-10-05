@@ -146,3 +146,30 @@ with at least two speakers.
 11. **Reset to original labels** resets the transcript, timestamps and mapping exactly. The note is restored to its pre-rename state only if you did not edit it since the last rename; otherwise it is left as it is and the notification says so. After a merge the button is replaced by a note and a "Show copies" button.
 
 Phase 2 (voice profiles) is not built; see `docs/voice-profiles-feasibility.md`.
+
+## Action items and decisions (#2941)
+
+Needs a signed build of each edition (Reminders permission and entitlements cannot be exercised
+unsigned or headless). Do NOT run from a build that shares your real config without a backup.
+
+- [ ] Settings > Notes > Action items: off by default on an existing install. Turn on, process (or
+      Regenerate) a recording: the note has `## Tasks` (lines like
+      `- [ ] Send quote — owner: Ana; due: 2026-10-12`) and `## Decisions`, and no `## Action items`.
+      Turn it off again: a regenerated note is back to the stock sections.
+- [ ] Menu bar > Open Action Items…: lists open items grouped by note, newest first; hand-written
+      `- [ ]` lines in other notes appear too; `.prev-` backups never do.
+- [ ] Tick an item: the note file now has `- [x]` on exactly that line (check with `git diff`/Finder
+      preview; nothing else changed). Edit that line by hand in an editor, then tick it in the
+      window: an error shows and the box reverts; file untouched.
+- [ ] Reminders (all three editions): click "Send to Reminders" on an item. macOS asks for Reminders
+      access ONCE, only now (never at launch). Allow: a reminder appears in the default list with
+      the task text, the due date (when parsed) and the meeting title + note file URL in Notes.
+      Click again: "Already in Reminders", no duplicate.
+- [ ] Deny (or revoke in System Settings > Privacy & Security > Reminders): the window explains how
+      to enable it and offers the settings link; ticking, "Open note" and refresh keep working.
+- [ ] Sandbox (App Store build): the same flow works with the Calendars entitlement
+      (`com.apple.security.personal-information.calendars`); if the prompt never appears or the save
+      fails, that entitlement is not enough for Reminders under the sandbox and needs another look.
+- [ ] Hardened runtime (Direct / Setapp): same flow; the prompt must appear (the Calendars
+      entitlement is in `Distavo.entitlements`). If macOS silently denies, check `codesign -d
+      --entitlements - Distavo.app`.

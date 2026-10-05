@@ -52,6 +52,8 @@ final class MeetingCaptureController: ObservableObject {
 
     /// Typed notes for the current recording (Vikunja #2949; see QuickNotes.swift).
     let quickNotes = QuickNotesModel()
+    /// Key-moment markers for the current recording (Vikunja #2950; see KeyMoments.swift).
+    let keyMoments = KeyMomentsModel()
 
     private var silenceMonitor: SilenceMonitor?
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
@@ -75,6 +77,7 @@ final class MeetingCaptureController: ObservableObject {
         self.configProvider = configProvider
         self.notify = notify
         self.log = log
+        quickNotes.onMarkKeyMoment = { [weak self] in self?.markKeyMoment() }   // #2950
         recoverOrphanedRecordings()
     }
 
@@ -127,6 +130,9 @@ final class MeetingCaptureController: ObservableObject {
     /// "Quick Notes…" menu item: open the floating notes panel (recording only).
     func showQuickNotes() { quickNotes.showPanel() }
 
+    /// "Mark Key Moment" (menu / Quick Notes button / hotkey): recording only.
+    func markKeyMoment() { keyMoments.mark() }
+
     func toggle() {
         if isRecording { stop(reason: .manual) } else { Task { await start() } }
     }
@@ -154,6 +160,7 @@ final class MeetingCaptureController: ObservableObject {
         self.recorder = nil
         isRecording = false
         quickNotes.endAndDelete()
+        keyMoments.endAndDelete()
         log("Meeting recording deleted on request: \(name ?? "?") (\(elapsedLabel))")
         notify("Recording deleted", "Nothing was saved or transcribed.")
     }
@@ -181,6 +188,17 @@ final class MeetingCaptureController: ObservableObject {
             quickNotes.begin(workDir: Config.resolvePath(configProvider().workDir),
                              base: DistavoState.baseFor(recordingsDir: folderProvider(), path: url),
                              startedAt: Date())
+            let cfg = configProvider()
+            let recDir = folderProvider().standardizedFileURL.path
+            let full = url.standardizedFileURL.path
+            let rel = full.hasPrefix(recDir + "/") ? String(full.dropFirst(recDir.count + 1)) : url.lastPathComponent
+            if let problem = keyMoments.begin(
+                workDir: Config.resolvePath(cfg.workDir),
+                base: DistavoState.baseFor(recordingsDir: folderProvider(), path: url), source: rel,
+                startedAt: startedAt ?? Date(),
+                hotkey: cfg.recording.bookmarkHotkeyEnabled ? cfg.recording.bookmarkHotkey : nil) {
+                log(problem); notify("Key-moment shortcut unavailable", problem)
+            }
         }
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
@@ -240,6 +258,7 @@ final class MeetingCaptureController: ObservableObject {
         self.recorder = nil
         isRecording = false
         quickNotes.end()   // keeps the sidecar, closes the panel
+        keyMoments.end()   // keeps the sidecar, releases the hotkey
 
         guard let outcome else { return }
         log("Meeting recording saved: \(outcome.url.lastPathComponent) (\(elapsedLabel))")

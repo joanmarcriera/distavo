@@ -168,6 +168,46 @@ their listed bundle id (or a dot-prefixed helper); that the per-process API work
 no prompt in the sandbox. Webex `com.cisco.webexmeetingsapp` is unverified; Webex's
 main app is `Cisco-Systems.Spark`.
 
+## Key moments and clip export (Vikunja #2950) - UNVERIFIED until run on a real build
+
+Unit tests cover the marker model, debounce, sidecar, the note section, clip-range clamping and a
+real AVFoundation export of generated WAVs (stereo 48 kHz and 16 kHz mono, duration within 0.1 s).
+They cannot press a global hotkey, record a real call or listen to a clip. Do these on a signed build
+(Direct), then repeat 1, 5 and 6 on the App Store build.
+
+1. **3 presses yield 3 correct markers.** Start a recording and note a stopwatch. Press **Mark Key Moment**
+   (menu) at about 0:20, the hotkey (enable it first, below) at about 0:50 and the **Mark key moment**
+   button in the Quick Notes panel at about 1:20. Each press flips the menu-bar icon to a green bookmark for
+   about a second and makes no sound (nothing audible lands in the recording). While recording,
+   `~/Library/Application Support/Distavo/work/<base>.bookmarks.json` lists three `offsetSeconds`
+   within about 1 s of the stopwatch. Two presses within 1 s give one marker.
+2. After processing, the note ends with `## Key moments` (before the `---` provenance footer, after
+   the model's sections), three lines `- [00:20] <sentence being spoken> (Speaker)` with the right times.
+   A recording with no presses has no such section and no sidecar. **Regenerate Note…** keeps the section.
+3. **Stop and delete recording** after pressing: the `.bookmarks.json` is gone. Crash test: press, `kill -9`,
+   relaunch; the recovered recording's note still lists the marker.
+4. **Hotkey.** Settings > Recording > Key moments: enable, press the default ⌃⌥⌘M while another app is
+   frontmost during a recording: a marker lands. It must do nothing when no recording runs (the key
+   combination is free again for other apps). Change the combination with the recorder field and check it
+   applies from the next recording; a plain key or Shift-only is refused.
+5. **Hotkey conflict.** Pick a combination another app owns (e.g. one a launcher uses) and record: a
+   "Key-moment shortcut unavailable" notification and an activity-log line appear, Settings shows the
+   warning under the shortcut, the menu item and the Quick Notes button still work. No Accessibility or
+   Input Monitoring prompt appears at any point (System Settings > Privacy must list neither for Distavo).
+6. **Clip export plays correctly.** Menu **Export Key Moment Clips…** (title shows the marker count; it says
+   "(no key moments yet)" or "(recording audio not found)" and is disabled otherwise). Choose a folder:
+   one `<base> clip 01m20s.m4a` per marker appears, a notification reports the count. Open each in
+   QuickTime: it starts about 15 s before the marker and runs about 30 s after (shorter at the very
+   start or end of the recording), the words around the marker are in the middle of it, and it plays
+   cleanly. (The clip keeps the recorder's stereo layout: microphone left, meeting audio right.) Export
+   again to the same folder: `... 2.m4a` files, nothing overwritten. Change the lead/tail in Settings and
+   re-export to confirm.
+7. Move the recording out of the recordings folder: the menu item reads "(recording audio not found)" and is
+   disabled. A recording shrunk to 16 kHz mono by "Shrink recordings once the note is written" still exports.
+8. **Sandboxed App Store build.** With the recordings folder granted through the bookmark prompt, steps 1,
+   2, 5 and 6 work; the export folder panel grants write access; the hotkey registers with no new
+   entitlement (none was added).
+
 ## Known caveats (documented, not bugs)
 
 - Loudspeakers (no headphones): the mic also hears the remote participants, so

@@ -49,7 +49,8 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .recording:
             return ["record", "silence", "stop", "short", "shrink", "compact", "speakers", "when done",
                     "open note", "open transcript", "retry", "bigger", "meeting detection", "detect", "call",
-                    "zoom", "teams", "facetime", "snooze"]
+                    "zoom", "teams", "facetime", "snooze",
+                    "key moment", "bookmark", "marker", "hotkey", "shortcut", "clip", "export clip"]
         case .transcription:
             return ["engine", "model", "whisper", "whisperx", "parakeet", "language", "spoken", "catalan",
                     "language pack", "speakers", "diarize", "download", "benchmark", "disk",

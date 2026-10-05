@@ -268,3 +268,9 @@ Needs a launched build (Direct and App Store); the window, drag and drop and Pau
 9. **Deferred**: stop Ollama with local fallback off, drop a file: row goes to "Waiting to retry" (not Failed); start Ollama, within one scan it processes. A too-short clip shows "Too short" and is not retried by Retry.
 10. App Store build: repeat 2 with files dragged from the Desktop and from an external volume (sandbox access for the dropped URLs must last until the LAST serial copy, minutes later).
 11. Leave the window open during a long run for ~10 minutes: CPU stays low (list refreshes every 3 s from disk, progress at about 4 Hz).
+## Key moments and clip export (#2950)
+
+Needs a real recording and a launched build; the hotkey, the icon cue, clip playback and the sandboxed
+export cannot be exercised headless. The step-by-step list is in
+[meeting-capture-verification.md](meeting-capture-verification.md#key-moments-and-clip-export-vikunja-2950---unverified-until-run-on-a-real-build):
+3 presses give 3 correct markers, clip -15 s/+30 s plays correctly, hotkey conflict, App Store build.

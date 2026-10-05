@@ -46,6 +46,22 @@ public struct WhisperXClient {
             URLQueryItem(name: "diarize", value: config.diarize ? "true" : "false"),
             URLQueryItem(name: "num_speakers", value: String(config.numSpeakers)),
         ]
+        // Custom vocabulary (Vikunja #2939): the whisper-asr-webservice /asr
+        // contract spells the prompt `initial_prompt`. Sent only for a non-empty
+        // glossary, so the request is byte-identical otherwise.
+        // URLQueryItem leaves "+" (and "&", "=") raw in a value, so "C++" would
+        // reach the server as "C  ": the prompt is percent-encoded by hand with
+        // only RFC 3986 unreserved characters left bare. The other parameters
+        // stay exactly as URLComponents encodes them.
+        let initialPrompt = Vocabulary.transcriberPrompt(config.vocabulary)
+        if !initialPrompt.isEmpty {
+            var unreserved = CharacterSet.alphanumerics
+            unreserved.insert(charactersIn: "-._~")
+            let encoded = initialPrompt.addingPercentEncoding(withAllowedCharacters: unreserved) ?? ""
+            let existing = components?.percentEncodedQueryItems ?? []
+            components?.percentEncodedQueryItems =
+                existing + [URLQueryItem(name: "initial_prompt", value: encoded)]
+        }
         guard let endpoint = components?.url else { throw WhisperXError("invalid WhisperX URL") }
 
         let boundary = "distavo-\(UUID().uuidString)"

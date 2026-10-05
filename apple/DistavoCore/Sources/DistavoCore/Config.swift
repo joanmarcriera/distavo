@@ -81,8 +81,15 @@ public struct TranscribeConfig: Codable, Equatable {
     /// existed, so it decodes to `[]` and nothing is routed differently until
     /// the user switches a pack on in Settings.
     public var languagePacks: [String]
+    /// Custom vocabulary (Vikunja #2939): names/jargon fed to the transcriber as
+    /// a prompt and to the summary prompt. Absent in older configs -> `[]`.
+    public var vocabulary: [String]
+    /// Ordered, case-insensitive whole-word find/replace map applied to the
+    /// cleaned transcript. Absent in older configs -> `[]`.
+    public var replacements: [ReplacementRule]
 
     enum CodingKeys: String, CodingKey {
+        case vocabulary, replacements
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
@@ -92,12 +99,14 @@ public struct TranscribeConfig: Codable, Equatable {
     public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 2,
-                preferredCatalanModel: String = "bsc-los", languagePacks: [String] = []) {
+                preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
+                vocabulary: [String] = [], replacements: [ReplacementRule] = []) {
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
         self.preferredCatalanModel = preferredCatalanModel
         self.languagePacks = languagePacks
+        self.vocabulary = vocabulary; self.replacements = replacements
     }
 
     public init(from decoder: Decoder) throws {
@@ -112,6 +121,11 @@ public struct TranscribeConfig: Codable, Equatable {
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
         preferredCatalanModel = try c.decodeIfPresent(String.self, forKey: .preferredCatalanModel) ?? d.preferredCatalanModel
         languagePacks = try c.decodeIfPresent([String].self, forKey: .languagePacks) ?? d.languagePacks
+        // Lenient like the other newer keys: a wrong type falls back to empty
+        // (and bad list entries are dropped) instead of failing the whole
+        // config load, which would reset every setting to defaults.
+        vocabulary = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .vocabulary))?.elements ?? d.vocabulary
+        replacements = (try? c.decodeIfPresent(LossyList<ReplacementRule>.self, forKey: .replacements))?.elements ?? d.replacements
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.

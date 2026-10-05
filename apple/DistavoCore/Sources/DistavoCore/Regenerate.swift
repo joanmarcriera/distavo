@@ -185,7 +185,11 @@ extension Pipeline {
             noteOwner: cfg.noteOwner, userSpeaker: cfg.userSpeaker, participants: participants,
             meetingDate: sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
-            customInstruction: options.customInstruction)
+            customInstruction: options.customInstruction,
+            // The glossary reaches the prompt exactly as in `processOne`. The cached
+            // transcript was already cleaned WITH the replacement map, so replacements
+            // are deliberately not re-applied here (Vikunja #2939).
+            glossary: cfg.transcribe.vocabulary)
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

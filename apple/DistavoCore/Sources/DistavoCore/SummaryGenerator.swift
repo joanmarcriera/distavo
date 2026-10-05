@@ -58,16 +58,19 @@ public struct SummaryRequest: Sendable {
     /// "Regenerate Note…" instruction (Vikunja #2947): part of the final prompt
     /// (`Prompt.build`) and counted in its budget; nil = nothing.
     public var customInstruction: String?
+    /// Custom vocabulary (Vikunja #2939); counted in the budget. Default empty.
+    public var glossary: [String]
 
     public init(transcript: String, noteOwner: String, userSpeaker: String,
                 participants: String? = nil, style: Prompt.Style = .classic,
                 meetingDate: Date? = nil, noteLanguage: String? = nil,
-                endOfTurnBlock: String? = nil, customInstruction: String? = nil) {
+                endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = []) {
         self.customInstruction = customInstruction
         self.transcript = transcript; self.noteOwner = noteOwner
         self.userSpeaker = userSpeaker; self.participants = participants
         self.style = style; self.meetingDate = meetingDate
         self.noteLanguage = noteLanguage; self.endOfTurnBlock = endOfTurnBlock
+        self.glossary = glossary
     }
 }
 
@@ -92,14 +95,16 @@ public enum SummaryDriver {
             contextSize: contextSize, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
-            customInstruction: request.customInstruction)
+            customInstruction: request.customInstruction,
+            glossary: request.glossary)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
             transcript: request.transcript, contextSize: contextSize,
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
             style: request.style, extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
-            customInstruction: request.customInstruction)
+            customInstruction: request.customInstruction,
+            glossary: request.glossary)
 
         switch plan {
         case .single:
@@ -140,7 +145,8 @@ public enum SummaryDriver {
             transcript: transcript, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, participants: request.participants,
             style: request.style, meetingDate: request.meetingDate,
-            noteLanguage: request.noteLanguage, customInstruction: request.customInstruction)
+            noteLanguage: request.noteLanguage, customInstruction: request.customInstruction,
+            glossary: request.glossary)
         guard let block = request.endOfTurnBlock?.trimmingCharacters(in: .whitespacesAndNewlines),
               !block.isEmpty else { return prompt }
         return prompt + "\n" + block + "\n"
@@ -163,7 +169,8 @@ public enum SummaryDriver {
             contextSize: contextSize, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
-            customInstruction: request.customInstruction)
+            customInstruction: request.customInstruction,
+            glossary: request.glossary)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
         var merged = EmbeddedSummaryPrompt.merge(partials: partials)
 

@@ -46,3 +46,12 @@ search #2942) are meant to read it too.
 
 Swift API (DistavoCore): `TranscriptSegments` (`Codable`), `TranscriptSegments.load(workDir:base:)`,
 `save(workDir:base:)`, `init?(whisperXResult:)`. Export: `TranscriptExportFormat.render(_:title:)`.
+
+## Replacements (custom vocabulary)
+
+When `transcribe.replacements` is non-empty, the same rules that correct the clean transcript are applied
+before the sidecar is saved, so exports match the note. `segments[].text` is corrected, and a `words[].word`
+is corrected when a rule matches inside that single word. A multi-word phrase rule corrects the segment
+text only: word tokens are left as heard (words are never re-timed or merged), and cue splitting that
+works from word tokens can therefore still show the original spelling. Speakers and times are never
+touched. With no replacements the file is byte-identical to before.

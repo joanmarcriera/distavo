@@ -123,21 +123,26 @@ public struct NoteContext: Equatable, Sendable {
     /// A one-off instruction from "Regenerate Note…" (Vikunja #2947); nil for
     /// every automatic run, which leaves the prompt byte-identical.
     public var customInstruction: String?
+    /// The user's custom vocabulary (`transcribe.vocabulary`, Vikunja #2939).
+    /// Empty (the default) leaves every prompt byte-identical.
+    public var glossary: [String]
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
-                noteLanguage: String? = nil, customInstruction: String? = nil) {
+                noteLanguage: String? = nil, customInstruction: String? = nil,
+                glossary: [String] = []) {
         self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
         self.participants = participants; self.meetingDate = meetingDate
         self.promptStyle = promptStyle; self.noteLanguage = noteLanguage
+        self.glossary = glossary
     }
 
     /// The full prompt for the Ollama path.
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
-                     noteLanguage: noteLanguage, customInstruction: customInstruction)
+                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary)
     }
 }
 
@@ -388,7 +393,8 @@ public enum Pipeline {
             // needs it regardless of the note-language setting (#2205).
             let dominantCode = dominantLanguageCode(from: result)
 
-            let clean = TranscriptCleaner.clean(TranscriptCleaner.segments(from: result))
+            let clean = TranscriptCleaner.clean(
+                TranscriptCleaner.segments(from: result), replacements: transcribeConfig.replacements)
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")
@@ -399,7 +405,11 @@ public enum Pipeline {
             TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
-            if let timed = TranscriptSegments(whisperXResult: result) {
+            if var timed = TranscriptSegments(whisperXResult: result) {
+                // Same replacement map as the clean transcript, so SRT/DOCX/PDF
+                // exports spell the term like the note does (Vikunja #2939).
+                let compiled = CompiledReplacements(transcribeConfig.replacements)
+                if !compiled.isEmpty { timed = timed.applying(compiled) }
                 do { try timed.save(workDir: workDir, base: base) }
                 catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }
             }
@@ -417,7 +427,8 @@ public enum Pipeline {
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
-                promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage)
+                promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
+                glossary: transcribeConfig.vocabulary)
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.

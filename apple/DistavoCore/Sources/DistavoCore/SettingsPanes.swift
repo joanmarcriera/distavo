@@ -51,7 +51,8 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
                     "open note", "open transcript", "retry", "bigger"]
         case .transcription:
             return ["engine", "model", "whisper", "whisperx", "parakeet", "language", "spoken", "catalan",
-                    "language pack", "speakers", "diarize", "download", "benchmark", "disk"]
+                    "language pack", "speakers", "diarize", "download", "benchmark", "disk",
+                    "vocabulary", "glossary", "dictionary", "replace", "names", "jargon", "spelling"]
         case .notes:
             return ["prompt", "facts first", "classic", "write notes in", "note language", "owner",
                     "speaker label", "your name", "english", "language", "original language",

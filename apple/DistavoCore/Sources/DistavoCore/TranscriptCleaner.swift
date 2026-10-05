@@ -73,7 +73,12 @@ public enum TranscriptCleaner {
 
     /// Group consecutive same-speaker turns under one `[SPEAKER_xx]` header,
     /// flushing on speaker change or when a turn would exceed `maxTurnChars`.
-    public static func clean(_ segments: [Segment], maxTurnChars: Int = 1800) -> String {
+    ///
+    /// `replacements` (Vikunja #2939) is the user's find/replace map, applied to
+    /// each finished turn's text (never the speaker header). Empty = untouched,
+    /// so the output is byte-identical to before the feature.
+    public static func clean(_ segments: [Segment], maxTurnChars: Int = 1800,
+                             replacements: [ReplacementRule] = []) -> String {
         var grouped: [(String, String)] = []
         var currentSpeaker: String?
         var parts: [String] = []
@@ -101,6 +106,11 @@ public enum TranscriptCleaner {
         }
         flush()
 
+        // Compiled once for all turns (regex construction dominates the cost).
+        let compiled = CompiledReplacements(replacements)
+        if !compiled.isEmpty {
+            grouped = grouped.map { ($0.0, compiled.apply($0.1)) }
+        }
         return grouped.map { "[\($0.0)]\n\($0.1)" }.joined(separator: "\n\n")
     }
 }

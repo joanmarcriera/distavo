@@ -136,6 +136,7 @@ public enum EmbeddedSummariser {
         participants: String? = nil,
         noteLanguage: String? = nil,
         customInstruction: String? = nil,
+        glossary: [String] = [],
         onProgress: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
 
@@ -153,7 +154,7 @@ public enum EmbeddedSummariser {
         let request = SummaryRequest(
             transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
             participants: participants, noteLanguage: noteLanguage,
-            customInstruction: customInstruction)
+            customInstruction: customInstruction, glossary: glossary)
         do {
             return try await SummaryDriver.run(
                 request, generator: FoundationModelsGenerator(), onProgress: report)

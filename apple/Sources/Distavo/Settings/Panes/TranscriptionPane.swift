@@ -46,6 +46,8 @@ struct TranscriptionPane: View {
                 .withHelp("Label who said what (SPEAKER_00, SPEAKER_01…). Turn off for a single-speaker recording.")
         }
 
+        VocabularySection(model: model)
+
         if model.usesBuiltInTranscription {
             Section("Models") {
                 modelManagementRows

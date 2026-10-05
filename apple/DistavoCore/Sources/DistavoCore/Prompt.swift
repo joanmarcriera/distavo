@@ -223,6 +223,20 @@ public enum Prompt {
 
     """
 
+    /// Inserted after the participants block when the user keeps a custom
+    /// vocabulary (Vikunja #2939). Absent for an empty glossary, so the prompt
+    /// stays byte-identical. The terms are capped (`Vocabulary.summaryTerms`)
+    /// so the on-device 4096-token budget can count them.
+    static let glossaryBlock = """
+    Names and terms to spell exactly as written here (speech-to-text may have misspelled them): {glossary}
+
+    """
+
+    static func glossaryText(_ glossary: [String]) -> String {
+        let terms = Vocabulary.summaryTerms(glossary)
+        return terms.isEmpty ? "" : glossaryBlock.replacingOccurrences(of: "{glossary}", with: terms.joined(separator: ", "))
+    }
+
     /// Long, unambiguous form for the metadata block, e.g.
     /// "Wednesday 16 September 2026, 16:13 (Europe/London)". British English
     /// on purpose: the prompt asks for it and the model then copies the style.
@@ -262,9 +276,10 @@ public enum Prompt {
     public static func build(transcript: String, noteOwner: String, userSpeaker: String,
                              participants: String? = nil, style: Style = .classic,
                              meetingDate: Date? = nil, noteLanguage: String? = nil,
-                             customInstruction: String? = nil) -> String {
+                             customInstruction: String? = nil, glossary: [String] = []) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let block = hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint)
+        let block = (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
+            + glossaryText(glossary)
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : template

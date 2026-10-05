@@ -13,55 +13,29 @@ import FluidAudio
 /// only one handler may exist at runtime.
 struct ModelDownloadButton: View {
     @ObservedObject var controller: WatcherController
-    let modelIDs: [String]
-    let totalMB: Int
-    @State private var running = false
-    @State private var resultMessage: String?
-    /// Set the instant Cancel is tapped — the SDK downloads can't be interrupted
-    /// mid-file, so this overrides `controller.modelProgress` until the current
-    /// model finishes and `prefetch` actually stops, rather than leaving the
-    /// button looking unresponsive.
-    @State private var cancelRequested = false
+    /// Download state lives on the model (not view `@State`) so switching Settings
+    /// panes — which unmounts this view — never loses an in-flight download or its Cancel.
+    @ObservedObject var model: SettingsModel
 
     private var statusText: String? {
-        if running {
-            return cancelRequested ? "Cancelling after the current model…" : (controller.modelProgress ?? "Starting…")
+        if model.downloadRunning {
+            return model.downloadCancelRequested ? "Cancelling after the current model…" : (controller.modelProgress ?? "Starting…")
         }
-        return resultMessage
+        return model.downloadResultMessage
     }
 
     var body: some View {
         HStack {
-            Button(running ? "Downloading…" : "Download now (\(totalMB) MB)") { start() }
-                .disabled(running || modelIDs.isEmpty)
-            if running {
+            Button(model.downloadRunning ? "Downloading…" : "Download now (\(model.downloadTotalMB) MB)") { model.startDownload() }
+                .disabled(model.downloadRunning || model.downloadSet.isEmpty)
+            if model.downloadRunning {
                 Button("Cancel") {
-                    cancelRequested = true
+                    model.downloadCancelRequested = true
                     Task { await ModelCoordinator.shared.cancelDownloads() }
                 }
             }
             if let statusText {
                 Text(statusText).font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func start() {
-        running = true
-        cancelRequested = false
-        resultMessage = nil
-        Task {
-            do {
-                let outcome = try await ModelCoordinator.shared.prefetch(ids: modelIDs, includeDetector: true) { model in
-                    try await ModelPrefetcher.download(model)
-                }
-                await MainActor.run {
-                    resultMessage = outcome == .cancelled
-                        ? "Cancelled — models downloaded so far are kept" : "Ready"
-                    running = false
-                }
-            } catch {
-                await MainActor.run { resultMessage = error.localizedDescription; running = false }
             }
         }
     }

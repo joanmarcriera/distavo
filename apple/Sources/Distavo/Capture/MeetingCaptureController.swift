@@ -91,6 +91,22 @@ final class MeetingCaptureController: ObservableObject {
         }
     }
 
+    /// Automation entry (App Intents / `distavo://record/start`): start if idle.
+    /// Returns whether a recording is now running.
+    func startRecording() async -> Bool {
+        if !isRecording { await start() }
+        return isRecording
+    }
+
+    /// Automation entry: stop a running recording (same path as the menu's Stop).
+    /// Returns false when nothing was recording.
+    @discardableResult
+    func stopRecording() -> Bool {
+        guard isRecording else { return false }
+        stop(reason: .manual)
+        return true
+    }
+
     func toggle() {
         if isRecording { stop(reason: .manual) } else { Task { await start() } }
     }

@@ -40,8 +40,16 @@ final class QuickNotesModel: ObservableObject {
         items = []; draft = ""; isActive = true
     }
 
-    /// The recording stopped (kept): the sidecar stays, the panel closes.
+    /// The recording stopped (kept): an uncommitted draft is committed (so a
+    /// note typed but not yet Returned survives Stop or a silence auto-stop),
+    /// everything is flushed to disk, the sidecar stays and the panel closes.
     func end() {
+        commitDraft()
+        flush()
+        reset()
+    }
+
+    private func reset() {
         panel?.close(); panel = nil
         isActive = false; workDir = nil; base = nil; startedAt = nil
         items = []; draft = ""
@@ -49,8 +57,9 @@ final class QuickNotesModel: ObservableObject {
 
     /// The recording was thrown away: nothing may outlive it.
     func endAndDelete() {
-        if let workDir, let base { ScratchpadNotes.delete(workDir: workDir, base: base) }
-        end()
+        pending?.cancel(); pending = nil
+        if let workDir, let base { ioQueue.sync { ScratchpadNotes.delete(workDir: workDir, base: base) } }
+        reset()
     }
 
     /// Commit the draft as a line stamped with the current recording offset.
@@ -75,13 +84,37 @@ final class QuickNotesModel: ObservableObject {
         items[i].text = text; persist()
     }
 
-    /// Write (or, when empty, remove) the sidecar. A failed write is only
-    /// logged: losing a note must never disturb the recording.
+    /// Disk writes happen off the main thread, serially.
+    private let ioQueue = DispatchQueue(label: "uk.co.riera.distavo.quicknotes", qos: .utility)
+    private var pending: DispatchWorkItem?
+    /// Quiet period before a burst of edits is written (typing is not I/O-bound).
+    private static let debounce: TimeInterval = 0.5
+
+    private func snapshot() -> ScratchpadNotes {
+        ScratchpadNotes(lines: items.map { .init(offsetSeconds: $0.offsetSeconds, text: $0.text, flagged: $0.flagged) })
+    }
+
+    /// Schedule a debounced write; `flush()` (at `end()`) makes it final.
     private func persist() {
         guard let workDir, let base else { return }
-        let pad = ScratchpadNotes(lines: items.map {
-            .init(offsetSeconds: $0.offsetSeconds, text: $0.text, flagged: $0.flagged)
-        })
+        let pad = snapshot()
+        pending?.cancel()
+        let work = DispatchWorkItem { Self.write(pad, workDir: workDir, base: base) }
+        pending = work
+        ioQueue.asyncAfter(deadline: .now() + Self.debounce, execute: work)
+    }
+
+    /// Cancel any pending write and write the current state now.
+    private func flush() {
+        pending?.cancel(); pending = nil
+        guard let workDir, let base else { return }
+        let pad = snapshot()
+        ioQueue.sync { Self.write(pad, workDir: workDir, base: base) }
+    }
+
+    /// Write (or, when empty, remove) the sidecar. A failed write is only
+    /// logged: losing a note must never disturb the recording.
+    private nonisolated static func write(_ pad: ScratchpadNotes, workDir: URL, base: String) {
         if pad.sanitised().isEmpty { ScratchpadNotes.delete(workDir: workDir, base: base); return }
         do { try pad.save(workDir: workDir, base: base) }
         catch { print("[Distavo] could not save the quick notes: \(error.localizedDescription)") }
@@ -101,6 +134,8 @@ final class QuickNotesModel: ObservableObject {
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.level = .floating
+        // Typed notes are private: keep the panel out of screen shares and recordings.
+        panel.sharingType = .none
         panel.isReleasedWhenClosed = false
         panel.contentViewController = NSHostingController(rootView: QuickNotesView(model: self))
         panel.center()
@@ -149,7 +184,7 @@ private struct QuickNotesView: View {
             TextField("Note…  (Return to add, ! to flag)", text: $model.draft)
                 .textFieldStyle(.roundedBorder)
                 .onSubmit { model.commitDraft() }
-            Text("Saved on this Mac with the recording. The summary lists each note under Highlights.")
+            Text("Saved on this Mac with the recording, hidden from screen sharing. The summary lists each note under Highlights.")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(12)

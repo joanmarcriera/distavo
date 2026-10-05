@@ -196,3 +196,10 @@ Needs a launched build (any edition) with a real recording; the panel, focus and
 7. Crash recovery: type a note, `kill -9` Distavo mid-recording, relaunch. The `.wav.part` is recovered to `<name>.wav` and the note it produces carries the Highlights.
 8. A recording with no notes typed: no sidecar, no Highlights section, summary prompt unchanged.
 9. On-device (Apple) model with 20 long lines: the note still generates (lines are capped at 20 lines / 140 chars / 800 chars total).
+
+### Quick Notes follow-ups (#2949)
+
+10. Type a note but do NOT press Return, then Stop (and, separately, let the silence auto-stop fire): the note is still in the sidecar and the Highlights. **Stop and delete recording** discards an unsent draft too.
+11. Screen sharing: share your screen in Zoom/Meet while the panel is open; participants must NOT see the Quick Notes panel (`sharingType = .none`). The panel's footer says it is hidden from screen sharing.
+12. Edits are written after about half a second of quiet (off the main thread); typing stays smooth in a long session, and Stop flushes everything.
+13. Move a too-short recording to the Bin from the menu: its `<base>.scratchpad.json` is removed.

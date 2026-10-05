@@ -55,7 +55,7 @@ struct RegenerateNoteView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Regenerate note").font(.headline)
-            Text("Re-writes the summary from the saved transcript — nothing is transcribed again. The current note is kept next to the new one as “….prev-<date>.md”.")
+            Text("Re-writes the summary from the saved transcript — nothing is transcribed again. The current note is kept next to the new one as “….prev-<date>.md”. Notes made before this version do not remember the detected language, so with “Write notes in: match the meeting” they follow the language set in Settings.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
 
             if notes.isEmpty {

@@ -19,3 +19,5 @@ Needs a signed or Debug build of the real app; do NOT run it alongside your dail
 Not exercised by unit tests: the SwiftUI window, notifications, the real Ollama / Foundation Models / Gemma paths with a custom instruction.
 
 Notes made before this version regenerate fine as long as the work folder still holds `<base>.transcript.clean.txt` (every note the pipeline has written since the transcript cache was introduced); notes whose work folder was cleared, or imported without processing, cannot be regenerated.
+
+Language parity: with Settings -> Notes -> "Write notes in" = match the meeting, regenerate a note from an auto-detected Catalan meeting processed on this version: it must stay Catalan (the detected language is kept in `<base>.transcript.meta.json`). A note processed before this version has no such file and falls back to the spoken language set in Settings.

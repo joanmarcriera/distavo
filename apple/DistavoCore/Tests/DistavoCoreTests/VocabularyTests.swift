@@ -65,6 +65,40 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(apply(text, []), text)
     }
 
+    func testUnspacedScriptsMatchInsideSentences() {
+        XCTAssertEqual(apply("田中さんが来ました", rules(("田中", "Tanaka"))), "Tanakaさんが来ました")
+        XCTAssertEqual(apply("สวัสดีครับคุณสมชาย", rules(("สมชาย", "Somchai"))), "สวัสดีครับคุณSomchai")
+        XCTAssertEqual(apply("안녕하세요김철수씨", rules(("김철수", "Kim"))), "안녕하세요Kim씨")
+        // Spaced scripts keep their word boundaries.
+        XCTAssertEqual(apply("category", rules(("cat", "dog"))), "category")
+    }
+
+    func testCompiledRulesAreReusableAcrossTurns() {
+        let compiled = CompiledReplacements(rules(("slum", "Slurm"), ("", "x")))
+        XCTAssertFalse(compiled.isEmpty)
+        XCTAssertEqual(compiled.apply("a slum"), "a Slurm")
+        XCTAssertEqual(compiled.apply("slum again"), "Slurm again")
+        XCTAssertTrue(CompiledReplacements(rules(("", "x"))).isEmpty)
+    }
+
+    // MARK: Lenient config
+
+    func testMalformedVocabularyNeverResetsTheConfig() throws {
+        func decode(_ json: String) throws -> Config {
+            try JSONDecoder().decode(Config.self, from: Data(json.utf8))
+        }
+        let wrongTypes = try decode(#"{"note_owner": "Marc", "transcribe": {"model": "small", "vocabulary": "oops", "replacements": 5}}"#)
+        XCTAssertEqual(wrongTypes.transcribe.model, "small")
+        XCTAssertEqual(wrongTypes.noteOwner, "Marc")
+        XCTAssertEqual(wrongTypes.transcribe.vocabulary, [])
+        XCTAssertEqual(wrongTypes.transcribe.replacements, [])
+
+        let mixed = try decode(#"{"transcribe": {"vocabulary": ["Slurm", 7, "Lustre"], "replacements": [{"from": "a", "to": "b"}, {"to": "x"}, {"from": "c"}, "junk", {"from": "d", "to": 3}]}}"#)
+        XCTAssertEqual(mixed.transcribe.vocabulary, ["Slurm", "Lustre"])
+        XCTAssertEqual(mixed.transcribe.replacements,
+                       rules(("a", "b"), ("c", ""), ("d", "")))
+    }
+
     // MARK: Cleaner
 
     func testCleanerEmptyMapIsByteIdenticalAndHeadersAreSafe() {
@@ -267,8 +301,11 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(blank, empty)
         let withTerms = try await whisperXQuery(vocabulary: ["Slurm", "EMBL-EBI"])
         XCTAssertTrue(withTerms.hasPrefix(empty), "existing params must be unchanged and first")
-        XCTAssertTrue(withTerms.contains("initial_prompt=Slurm,%20EMBL-EBI.")
-                      || withTerms.contains("initial_prompt=Slurm, EMBL-EBI."), withTerms)
+        XCTAssertTrue(withTerms.contains("initial_prompt=Slurm%2C%20EMBL-EBI."), withTerms)
+        // "+" must reach the server as %2B, not as a space.
+        let plus = try await whisperXQuery(vocabulary: ["C++", "A&B=1"])
+        XCTAssertTrue(plus.contains("initial_prompt=C%2B%2B%2C%20A%26B%3D1."), plus)
+        XCTAssertTrue(plus.hasPrefix(empty))
     }
 
     // MARK: End to end

@@ -20,6 +20,32 @@ public struct ReplacementRule: Codable, Equatable, Sendable {
     public var to: String
 
     public init(from: String, to: String) { self.from = from; self.to = to }
+
+    enum CodingKeys: String, CodingKey { case from, to }
+
+    /// Tolerant: a missing or wrong-typed `to` means "" (delete the word); a
+    /// missing `from` throws, and `LossyList` then drops just this rule.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        from = try c.decode(String.self, forKey: .from)
+        to = (try? c.decodeIfPresent(String.self, forKey: .to)).flatMap { $0 } ?? ""
+    }
+}
+
+/// Decodes an array element by element, dropping the ones that fail, so one
+/// malformed entry never costs the user the rest of the list (or the config).
+struct LossyList<Element: Decodable>: Decodable {
+    var elements: [Element]
+    private struct Skip: Decodable {}
+    init(from decoder: Decoder) throws {
+        var container = try decoder.unkeyedContainer()
+        var out: [Element] = []
+        while !container.isAtEnd {
+            if let element = try? container.decode(Element.self) { out.append(element) }
+            else { _ = try? container.decode(Skip.self) }   // advance past the bad element
+        }
+        elements = out
+    }
 }
 
 public enum Vocabulary {
@@ -128,15 +154,44 @@ public enum Vocabulary {
 
     /// Characters that make up a "word" for boundary purposes: any Unicode
     /// letter or number, a combining mark (decomposed accents) or underscore.
-    private static let wordClass = "\\p{L}\\p{N}\\p{M}_"
+    fileprivate static let wordClass = "\\p{L}\\p{N}\\p{M}_"
 
-    /// Apply `rules` in order. Case-insensitive, whole-word (Unicode-aware, so
-    /// accented Catalan/Spanish words are not split), multi-word phrases
-    /// supported, an empty `from` is ignored, and `to` is inserted literally
-    /// (no regex templating). A rule never touches substrings: "cat" leaves
-    /// "category" and "concatenate" alone.
+    /// True when `text` contains a script written without spaces between words
+    /// (Han, Hiragana, Katakana, Hangul, Thai). `\p{L}` covers those, so
+    /// word-boundary lookarounds would stop a rule matching inside a sentence.
+    static func usesUnspacedScript(_ text: String) -> Bool {
+        text.unicodeScalars.contains { s in
+            switch s.value {
+            case 0x3400...0x4DBF, 0x4E00...0x9FFF, 0xF900...0xFAFF, 0x20000...0x2FA1F,  // Han
+                 0x3040...0x309F, 0x30A0...0x30FF, 0x31F0...0x31FF,                      // kana
+                 0x1100...0x11FF, 0x3130...0x318F, 0xAC00...0xD7AF,                      // Hangul
+                 0x0E00...0x0E7F:                                                        // Thai
+                return true
+            default: return false
+            }
+        }
+    }
+
+    /// Apply `rules` in order; see `CompiledReplacements`.
     public static func applyReplacements(_ text: String, rules: [ReplacementRule]) -> String {
-        var result = text
+        CompiledReplacements(rules).apply(text)
+    }
+}
+
+/// A replacement rule set compiled once and reused for every turn of a
+/// transcript. Case-insensitive, whole-word (Unicode-aware, so accented
+/// Catalan/Spanish words are not split), multi-word phrases supported, an
+/// empty `from` is ignored, and `to` is inserted literally (no regex
+/// templating). A rule never touches substrings: "cat" leaves "category" and
+/// "concatenate" alone. Rules containing Han/kana/Hangul/Thai text skip the
+/// word boundaries, since those scripts have no spaces between words.
+public struct CompiledReplacements {
+    private let compiled: [(regex: NSRegularExpression, template: String)]
+
+    public var isEmpty: Bool { compiled.isEmpty }
+
+    public init(_ rules: [ReplacementRule]) {
+        var out: [(NSRegularExpression, String)] = []
         for rule in rules {
             let from = rule.from.trimmingCharacters(in: .whitespacesAndNewlines)
             if from.isEmpty { continue }
@@ -144,13 +199,21 @@ public enum Vocabulary {
             let body = from.split(whereSeparator: \.isWhitespace)
                 .map { NSRegularExpression.escapedPattern(for: String($0)) }
                 .joined(separator: "\\s+")
-            let pattern = "(?<![\(wordClass)])\(body)(?![\(wordClass)])"
+            let pattern = Vocabulary.usesUnspacedScript(from)
+                ? body
+                : "(?<![\(Vocabulary.wordClass)])\(body)(?![\(Vocabulary.wordClass)])"
             guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive])
             else { continue }
+            out.append((regex, NSRegularExpression.escapedTemplate(for: rule.to)))
+        }
+        compiled = out
+    }
+
+    public func apply(_ text: String) -> String {
+        var result = text
+        for (regex, template) in compiled {
             let range = NSRange(result.startIndex..., in: result)
-            result = regex.stringByReplacingMatches(
-                in: result, options: [], range: range,
-                withTemplate: NSRegularExpression.escapedTemplate(for: rule.to))
+            result = regex.stringByReplacingMatches(in: result, options: [], range: range, withTemplate: template)
         }
         return result
     }

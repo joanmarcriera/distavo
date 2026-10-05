@@ -32,7 +32,7 @@ struct VocabularySection: View {
 
             HStack {
                 Text("Replacements").font(.callout)
-                HelpButton(text: "Fixes applied to the transcript before it is summarised, so the transcript and the note both use your spelling. Matches whole words only, ignoring capitals (cat does not touch category), and runs top to bottom. Works with every engine, including Fast (Parakeet).")
+                HelpButton(text: "Fixes applied to the transcript before it is summarised, so the transcript and the note both use your spelling. Matches whole words only, ignoring capitals (cat does not touch category), and runs top to bottom. Works with every engine, including Fast (Parakeet). For Chinese, Japanese, Korean and Thai, which have no spaces between words, a replacement matches anywhere in the text, so choose a distinctive phrase.")
             }
             ForEach(model.draft.transcribe.replacements.indices, id: \.self) { index in
                 HStack {

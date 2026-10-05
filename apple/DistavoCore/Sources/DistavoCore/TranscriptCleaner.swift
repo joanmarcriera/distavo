@@ -106,8 +106,10 @@ public enum TranscriptCleaner {
         }
         flush()
 
-        if !replacements.isEmpty {
-            grouped = grouped.map { ($0.0, Vocabulary.applyReplacements($0.1, rules: replacements)) }
+        // Compiled once for all turns (regex construction dominates the cost).
+        let compiled = CompiledReplacements(replacements)
+        if !compiled.isEmpty {
+            grouped = grouped.map { ($0.0, compiled.apply($0.1)) }
         }
         return grouped.map { "[\($0.0)]\n\($0.1)" }.joined(separator: "\n\n")
     }

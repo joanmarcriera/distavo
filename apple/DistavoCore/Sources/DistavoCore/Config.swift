@@ -121,8 +121,11 @@ public struct TranscribeConfig: Codable, Equatable {
         numSpeakers = try c.decodeIfPresent(Int.self, forKey: .numSpeakers) ?? d.numSpeakers
         preferredCatalanModel = try c.decodeIfPresent(String.self, forKey: .preferredCatalanModel) ?? d.preferredCatalanModel
         languagePacks = try c.decodeIfPresent([String].self, forKey: .languagePacks) ?? d.languagePacks
-        vocabulary = try c.decodeIfPresent([String].self, forKey: .vocabulary) ?? d.vocabulary
-        replacements = try c.decodeIfPresent([ReplacementRule].self, forKey: .replacements) ?? d.replacements
+        // Lenient like the other newer keys: a wrong type falls back to empty
+        // (and bad list entries are dropped) instead of failing the whole
+        // config load, which would reset every setting to defaults.
+        vocabulary = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .vocabulary))?.elements ?? d.vocabulary
+        replacements = (try? c.decodeIfPresent(LossyList<ReplacementRule>.self, forKey: .replacements))?.elements ?? d.replacements
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.

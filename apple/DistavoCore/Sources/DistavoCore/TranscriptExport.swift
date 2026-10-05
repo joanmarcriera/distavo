@@ -20,7 +20,10 @@ public enum TranscriptExportFormat: String, CaseIterable, Sendable {
     }
 
     /// Render `transcript`. `title` heads the document formats (HTML/DOCX/PDF).
-    public func render(_ transcript: TranscriptSegments, title: String) throws -> Data {
+    public func render(_ input: TranscriptSegments, title: String) throws -> Data {
+        // Corrupt timings (NaN, 1e300, end < start) are repaired or dropped
+        // here so no exporter can trap on them.
+        let transcript = input.sanitised()
         switch self {
         case .srt: return Data(SubtitleExport.srt(transcript).utf8)
         case .vtt: return Data(SubtitleExport.vtt(transcript).utf8)
@@ -35,16 +38,22 @@ public enum TranscriptExportFormat: String, CaseIterable, Sendable {
 // MARK: - Time formatting
 
 enum TimeFormat {
+    /// Finite and within 0...1000 h, so Int conversion can never trap on
+    /// corrupt input (1e300, NaN, infinity).
+    static func bounded(_ seconds: Double) -> Double {
+        seconds.isFinite ? min(max(0, seconds), TranscriptSegments.maxSeconds) : 0
+    }
+
     /// `HH:MM:SS<sep>mmm`, from integer milliseconds so rounding never yields ".1000".
     static func clock(_ seconds: Double, separator: String) -> String {
-        let total = Int((max(0, seconds) * 1000).rounded())
+        let total = Int((bounded(seconds) * 1000).rounded())
         let ms = total % 1000, s = (total / 1000) % 60, m = (total / 60_000) % 60, h = total / 3_600_000
         return String(format: "%02d:%02d:%02d%@%03d", h, m, s, separator, ms)
     }
 
     /// Compact label for documents: `m:ss`, or `h:mm:ss` from an hour up.
     static func label(_ seconds: Double) -> String {
-        let t = Int(max(0, seconds).rounded(.down))
+        let t = Int(bounded(seconds).rounded(.down))
         let h = t / 3600, m = (t / 60) % 60, s = t % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
@@ -87,11 +96,22 @@ public enum SubtitleExport {
                 out.append(Cue(start: seg.start, end: seg.end, speaker: seg.speaker, text: text))
             }
         }
-        return out.map { cue in
+        // Stretch zero-length cues, then keep the list monotonic and
+        // non-overlapping: a cue never starts before the previous one began
+        // nor ends after the next one starts.
+        var fixed = out.map { cue -> Cue in
             var c = cue
+            c.start = TimeFormat.bounded(c.start)
+            c.end = max(TimeFormat.bounded(c.end), c.start)
             if c.end <= c.start { c.end = c.start + minCueSeconds }
             return c
         }
+        for i in fixed.indices.dropFirst() { fixed[i].start = max(fixed[i].start, fixed[i - 1].start) }
+        for i in fixed.indices {
+            if i + 1 < fixed.count { fixed[i].end = min(fixed[i].end, fixed[i + 1].start) }
+            fixed[i].end = max(fixed[i].end, fixed[i].start)
+        }
+        return fixed
     }
 
     private static func split(_ words: [TranscriptSegments.Word], speaker: String?) -> [Cue] {
@@ -134,6 +154,11 @@ public enum SubtitleExport {
         return lines.joined(separator: "\n")
     }
 
+    static func escapeVTT(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+    }
+
     /// SubRip: 1-based index, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, text, blank line.
     /// The speaker prefixes every cue ("SPEAKER_00: …") so a cue read alone is attributed.
     public static func srt(_ transcript: TranscriptSegments) -> String {
@@ -151,12 +176,11 @@ public enum SubtitleExport {
     public static func vtt(_ transcript: TranscriptSegments) -> String {
         var out = "WEBVTT\n\n"
         for (i, cue) in cues(transcript).enumerated() {
-            let text = wrapped(cue.text).replacingOccurrences(of: "&", with: "&amp;")
-                .replacingOccurrences(of: "<", with: "&lt;").replacingOccurrences(of: ">", with: "&gt;")
+            let text = escapeVTT(wrapped(cue.text))
             let body: String
             if let speaker = cue.speaker {
-                // A voice name must not contain ">" or a newline.
-                let name = speaker.replacingOccurrences(of: ">", with: "").replacingOccurrences(of: "\n", with: " ")
+                // A voice name is escaped like cue text and must not contain a newline.
+                let name = escapeVTT(speaker.replacingOccurrences(of: "\n", with: " "))
                 body = "<v \(name)>\(text)</v>"
             } else {
                 body = text

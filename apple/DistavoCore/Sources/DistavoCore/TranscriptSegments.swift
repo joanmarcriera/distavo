@@ -82,14 +82,38 @@ public struct TranscriptSegments: Codable, Equatable, Sendable {
         self.init(segments: out)
     }
 
+    /// Largest timestamp accepted (1000 hours). Anything beyond is corrupt
+    /// data from a buggy server or a hand-edited file, not a recording.
+    public static let maxSeconds = 3_600_000.0
+
+    /// A finite, in-range number, else nil (non-finite, negative or absurd).
     private static func number(_ value: Any?) -> Double? {
-        if let d = value as? Double { return d.isFinite ? d : nil }
-        if let n = value as? NSNumber { return n.doubleValue.isFinite ? n.doubleValue : nil }
-        return nil
+        let d: Double
+        if let x = value as? Double { d = x }
+        else if let n = value as? NSNumber { d = n.doubleValue }
+        else { return nil }
+        return validTime(d) ? d : nil
     }
+
+    static func validTime(_ d: Double) -> Bool { d.isFinite && d >= 0 && d <= maxSeconds }
 
     /// Millisecond precision keeps the file small and the Float->Double noise out.
     private static func ms(_ seconds: Double) -> Double { (seconds * 1000).rounded() / 1000 }
+
+    /// Drop segments/words whose times are invalid, and repair `end < start`
+    /// by clamping, so bad data never reaches an exporter.
+    func sanitised() -> TranscriptSegments {
+        var out: [Segment] = []
+        for var seg in segments {
+            guard Self.validTime(seg.start), Self.validTime(seg.end) else { continue }
+            seg.end = max(seg.start, seg.end)
+            seg.words = seg.words?.filter { Self.validTime($0.start) && Self.validTime($0.end) }
+                .map { w -> Word in var w = w; w.end = max(w.start, w.end); return w }
+            if seg.words?.isEmpty == true { seg.words = nil }
+            out.append(seg)
+        }
+        return TranscriptSegments(version: version, segments: out)
+    }
 
     private static func label(_ value: Any?) -> String? {
         guard let s = value as? String, !s.isEmpty, s != "SPEAKER_UNKNOWN" else { return nil }
@@ -105,7 +129,9 @@ public struct TranscriptSegments: Codable, Equatable, Sendable {
     /// nil when absent (a recording processed before this feature) or unreadable.
     public static func load(workDir: URL, base: String) -> TranscriptSegments? {
         guard let data = try? Data(contentsOf: url(workDir: workDir, base: base)) else { return nil }
-        return try? JSONDecoder().decode(TranscriptSegments.self, from: data)
+        guard let decoded = try? JSONDecoder().decode(TranscriptSegments.self, from: data) else { return nil }
+        let clean = decoded.sanitised()
+        return clean.segments.isEmpty ? nil : clean
     }
 
     /// Pretty-printed with sorted keys: stable bytes, diffable, human-readable.
@@ -117,6 +143,6 @@ public struct TranscriptSegments: Codable, Equatable, Sendable {
 
     public func save(workDir: URL, base: String) throws {
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-        try encoded().write(to: Self.url(workDir: workDir, base: base), options: .atomic)
+        try sanitised().encoded().write(to: Self.url(workDir: workDir, base: base), options: .atomic)
     }
 }

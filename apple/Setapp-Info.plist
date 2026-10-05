@@ -36,6 +36,10 @@
 	<array>
 		<string>_http._tcp</string>
 	</array>
+	<key>NSRemindersFullAccessUsageDescription</key>
+	<string>Distavo adds the action items you choose to your Reminders. Nothing is sent anywhere else.</string>
+	<key>NSRemindersUsageDescription</key>
+	<string>Distavo adds the action items you choose to your Reminders. Nothing is sent anywhere else.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Distavo connects to the WhisperX and Ollama servers you run on your local network to transcribe and summarise recordings.</string>
 	<key>NSPrincipalClass</key>

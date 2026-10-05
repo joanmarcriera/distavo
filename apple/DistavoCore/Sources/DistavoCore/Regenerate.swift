@@ -211,8 +211,10 @@ extension Pipeline {
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
             glossary: cfg.transcribe.vocabulary,
-            template: regenerateTemplate(options: options, config: cfg, workDir: workDir,
-                                         sourceBase: sourceBase, sourcePath: sourcePath))
+            template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
+                regenerateTemplate(options: options, config: cfg, workDir: workDir,
+                                   sourceBase: sourceBase, sourcePath: sourcePath),
+                style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems))
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

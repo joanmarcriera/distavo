@@ -80,6 +80,7 @@ struct StatusMenu: View {
         Button("Regenerate Note…") { controller.showRegenerateNote() }
         Button("Search Notes…") { controller.showSearchNotes() }
         Button("Rename Speakers…") { controller.showRenameSpeakers() }
+        Button("Open Action Items…") { controller.showActionItems() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)
         Button(controller.hasLastNote && !controller.canExportLastTranscript

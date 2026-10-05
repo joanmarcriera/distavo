@@ -454,6 +454,7 @@ final class WatcherController: ObservableObject {
             }
             log("Saved note: \(result.base)")
             indexForSearch(base: result.base, note: result.notePath)   // #2942
+            logTasksReport(result.notePath)                            // #2941
             if result.message.contains("recording compacted") {
                 log(result.message.replacingOccurrences(of: "note written; ", with: "")
                     .replacingOccurrences(of: "recording compacted", with: "Recording compacted"))
@@ -788,6 +789,41 @@ final class WatcherController: ObservableObject {
         Task { [weak self] in await self?.runVariant(variant, on: sourcePath) }
     }
 
+    /// "Open Action Items…" (Vikunja #2941): open checkboxes across the notes folder.
+    func showActionItems() {
+        ActionItemsWindowController.shared.show(
+            notesDir: Config.resolvePath(config.notesDir), workDir: Config.resolvePath(config.workDir),
+            toggle: { [weak self] item, done in try await self?.toggleActionItem(item, done: done) })
+    }
+
+    /// Tick/untick one action item. Runs under the same single-flight lock as a scan,
+    /// regenerate or variant run so it never interleaves with a rewrite of the same note:
+    /// waits up to ~3 s for the lock, else throws `ActionItemsError.busy`.
+    func toggleActionItem(_ item: ActionItem, done: Bool) async throws {
+        var waited = 0
+        while isScanning {
+            if waited >= 30 { throw ActionItemsError.busy }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            waited += 1
+        }
+        isScanning = true
+        defer { isScanning = false }
+        try await Task.detached { try ActionItems.toggle(item: item, to: done) }.value
+        let note = URL(fileURLWithPath: item.notePath)
+        indexForSearch(base: note.deletingPathExtension().lastPathComponent, note: note)   // #2942
+    }
+
+    /// Informational activity-log line about the `## Tasks` section of a fresh note when the
+    /// option is on (#2941). Never affects the note.
+    private func logTasksReport(_ note: URL?) {
+        guard config.summarise.actionItems, let note,
+              let text = try? String(contentsOf: note, encoding: .utf8) else { return }
+        let r = SummaryValidator.tasksReport(text)
+        if !r.hasSection { log("Tasks: the model wrote no ## Tasks section"); return }
+        log("Tasks: \(r.wellFormed) checkbox item(s)"
+            + (r.malformed.isEmpty ? "" : ", \(r.malformed.count) line(s) not in checkbox format (kept as written)"))
+    }
+
     /// "Regenerate Note…" (Vikunja #2947): open the picker over the newest notes.
     func showRegenerateNote() {
         let notesDir = Config.resolvePath(config.notesDir)
@@ -844,6 +880,7 @@ final class WatcherController: ObservableObject {
             unseenDone = true
             log("Regenerated note: \(base) — \(result.message)")
             indexForSearch(base: base, note: result.notePath)   // #2942
+            logTasksReport(result.notePath)                     // #2941
             notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
         default:
             status = "Idle"

@@ -47,6 +47,12 @@ public struct SummaryTemplate: Equatable, Sendable, Identifiable {
     /// Sentence(s) telling the model what kind of meeting this is; "" = none.
     public var guidance: String
     public var sections: [Section]
+    /// Set only by `ActionItemsPrompt` on the synthesised stock layout: keep every stock
+    /// rule verbatim (the facts-first ledger rule included) - only the swapped sections differ.
+    var keepsStockRules = false
+    /// Set by `ActionItemsPrompt` on every layout with the strict Tasks section: the two
+    /// classic rules that contradict the Tasks format are reworded (`reconcileRules`).
+    var strictTasks = false
 
     public init(id: String, name: String, summary: String = "", guidance: String = "",
                 sections: [Section]) {
@@ -182,7 +188,8 @@ public struct SummaryTemplate: Equatable, Sendable, Identifiable {
                  unless: "highest-roi follow-up", "30-minute post-meeting plan")
         dropRule(startingWith: "- The suggested email is written BY",
                  unless: "suggested follow-up email")
-        if facts {
+        if strictTasks { text = ActionItemsPrompt.reconcileRules(text) }
+        if facts && !keepsStockRules {
             text = text.replacingOccurrences(
                 of: "if the ledger has a rate, the commercial section states it; if it has a start date or an availability date, the timeline states it with who said it.",
                 with: "every ledger fact that belongs in one of the sections below is stated there, with who said it.")

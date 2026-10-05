@@ -415,6 +415,7 @@ public enum GemmaSummariser {
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String? = nil,
         glossary: [String] = [], template: SummaryTemplate? = nil,
+        scratchpad: ScratchpadNotes? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil,
         root: URL = EmbeddedModelStore.modelsDirectory,
         manager: SummaryModelManager = .shared
@@ -426,7 +427,7 @@ public enum GemmaSummariser {
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
                 meetingDate: meetingDate, noteLanguage: noteLanguage,
-                customInstruction: customInstruction, glossary: glossary, template: template,
+                customInstruction: customInstruction, glossary: glossary, template: template, scratchpad: scratchpad,
                 onProgress: onProgress,
                 root: root, manager: manager)
         }
@@ -437,7 +438,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String?,
-        glossary: [String], template: SummaryTemplate?,
+        glossary: [String], template: SummaryTemplate?, scratchpad: ScratchpadNotes?,
         onProgress: (@Sendable (String) -> Void)?,
         root: URL, manager: SummaryModelManager
     ) async throws -> String {
@@ -462,7 +463,8 @@ public enum GemmaSummariser {
             endOfTurnBlock: EndOfTurnBlock.build(
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
                 ownerSpeaker: userSpeaker, template: template),
-            customInstruction: customInstruction, glossary: glossary, template: template)
+            customInstruction: customInstruction, glossary: glossary, template: template,
+            scratchpad: scratchpad)
         do {
             let raw = try await SummaryDriver.run(request, generator: generator, onProgress: report)
             LocalSummaryFailureTracker.shared.noteSuccess(model: model.id)
@@ -530,6 +532,7 @@ public enum GemmaPipelineRoute {
             participants: context.participants, style: context.promptStyle,
             meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
             customInstruction: context.customInstruction,
-            glossary: context.glossary, template: context.template, root: root, manager: manager)
+            glossary: context.glossary, template: context.template,
+            scratchpad: context.scratchpad, root: root, manager: manager)
     }
 }

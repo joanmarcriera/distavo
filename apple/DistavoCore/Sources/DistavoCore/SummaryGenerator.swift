@@ -62,12 +62,15 @@ public struct SummaryRequest: Sendable {
     public var glossary: [String]
     /// Summary template (#2940) replacing the stock section list; nil = stock.
     public var template: SummaryTemplate?
+    /// Typed scratchpad notes (#2949); part of the final prompt and its budget.
+    public var scratchpad: ScratchpadNotes?
 
     public init(transcript: String, noteOwner: String, userSpeaker: String,
                 participants: String? = nil, style: Prompt.Style = .classic,
                 meetingDate: Date? = nil, noteLanguage: String? = nil,
                 endOfTurnBlock: String? = nil, customInstruction: String? = nil, glossary: [String] = [],
-                template: SummaryTemplate? = nil) {
+                template: SummaryTemplate? = nil, scratchpad: ScratchpadNotes? = nil) {
+        self.scratchpad = scratchpad
         self.customInstruction = customInstruction
         self.transcript = transcript; self.noteOwner = noteOwner
         self.userSpeaker = userSpeaker; self.participants = participants
@@ -97,7 +100,7 @@ public enum SummaryDriver {
                 userSpeaker: request.userSpeaker, style: request.style,
                 extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
                 customInstruction: request.customInstruction, glossary: request.glossary,
-                template: t).transcriptTokens
+                template: t, scratchpad: request.scratchpad).transcriptTokens
         }
         let templated = budget(template)
         return templated > 0 && Double(templated) >= templateBudgetFloor * Double(budget(nil))
@@ -137,7 +140,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template)
+            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
@@ -145,7 +148,7 @@ public enum SummaryDriver {
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
             style: request.style, extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template)
+            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
 
         switch plan {
         case .single:
@@ -187,7 +190,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, participants: request.participants,
             style: request.style, meetingDate: request.meetingDate,
             noteLanguage: request.noteLanguage, customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template)
+            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
         guard let block = request.endOfTurnBlock?.trimmingCharacters(in: .whitespacesAndNewlines),
               !block.isEmpty else { return prompt }
         return prompt + "\n" + block + "\n"
@@ -211,7 +214,7 @@ public enum SummaryDriver {
             userSpeaker: request.userSpeaker, style: request.style,
             extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage,
             customInstruction: request.customInstruction,
-            glossary: request.glossary, template: request.template)
+            glossary: request.glossary, template: request.template, scratchpad: request.scratchpad)
         // No room for the notes at all: stop rather than prompt with an empty transcript.
         guard budget.transcriptTokens >= minimumReduceTokens else { throw SummaryDriverError.contextTooSmall }
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)

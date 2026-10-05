@@ -129,7 +129,8 @@ extension PipelineDeps {
                     transcript: transcript, noteOwner: context.noteOwner,
                     userSpeaker: context.userSpeaker, participants: context.participants,
                     noteLanguage: noteLanguage, customInstruction: context.customInstruction,
-                    glossary: context.glossary, template: context.template)
+                    glossary: context.glossary, template: context.template,
+                    scratchpad: context.scratchpad)
             }
             return try await ollamaSummarise(transcript, target, options, context)
         }

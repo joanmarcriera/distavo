@@ -277,10 +277,12 @@ public enum Prompt {
                              participants: String? = nil, style: Style = .classic,
                              meetingDate: Date? = nil, noteLanguage: String? = nil,
                              customInstruction: String? = nil, glossary: [String] = [],
-                             template: SummaryTemplate? = nil) -> String {
+                             template: SummaryTemplate? = nil,
+                             scratchpad: ScratchpadNotes? = nil) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let block = (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
             + glossaryText(glossary)
+            + (scratchpad?.promptBlock() ?? "")   // typed notes (#2949); "" = byte-identical
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : Self.template

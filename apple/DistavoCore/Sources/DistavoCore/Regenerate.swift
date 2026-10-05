@@ -214,7 +214,8 @@ extension Pipeline {
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
                 regenerateTemplate(options: options, config: cfg, workDir: workDir,
                                    sourceBase: sourceBase, sourcePath: sourcePath),
-                style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems))
+                style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
+            scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949: keeps the highlights
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.
@@ -227,7 +228,8 @@ extension Pipeline {
         do {
             func attempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
-                let cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 let text = cleaned + footer
                 return (text, SummaryValidator.validate(text))
             }

@@ -130,11 +130,15 @@ public struct NoteContext: Equatable, Sendable {
     /// for the stock section list - the prompt is then byte-identical to before.
     /// Honoured by Ollama, Gemma and Apple's on-device model.
     public var template: SummaryTemplate?
+    /// Notes typed during the recording (Vikunja #2949); nil = prompt byte-identical.
+    public var scratchpad: ScratchpadNotes?
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
                 noteLanguage: String? = nil, customInstruction: String? = nil,
-                glossary: [String] = [], template: SummaryTemplate? = nil) {
+                glossary: [String] = [], template: SummaryTemplate? = nil,
+                scratchpad: ScratchpadNotes? = nil) {
+        self.scratchpad = scratchpad
         self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
         self.participants = participants; self.meetingDate = meetingDate
@@ -148,7 +152,7 @@ public struct NoteContext: Equatable, Sendable {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
                      noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary,
-                     template: template)
+                     template: template, scratchpad: scratchpad)
     }
 }
 
@@ -442,7 +446,8 @@ public enum Pipeline {
                     folder: SummaryTemplateCatalog.folder(of: path, in: recordingsDir),
                     sidecarID: LanguageOverride.load(
                         workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
-                    style: config.summarise.promptStyle, enabled: config.summarise.actionItems))
+                    style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
+                scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.
@@ -452,9 +457,11 @@ public enum Pipeline {
                 // preamble): print rather than writing to the real
                 // ActivityLog file, so a unit test exercising it never
                 // touches disk outside its own temp dirs.
-                let cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { message in
+                var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { message in
                     print("[Distavo] \(message)")
                 }
+                // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
+                if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 let noteText = cleaned + provenanceFooter(from: result)
                 return (noteText, SummaryValidator.validate(noteText))
             }

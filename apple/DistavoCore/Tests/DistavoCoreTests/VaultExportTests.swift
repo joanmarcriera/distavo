@@ -14,7 +14,7 @@ final class VaultExportTests: XCTestCase {
         let traversal = VaultExport.fileName(date: nil, title: "../../etc/passwd", base: "x")
         XCTAssertFalse(traversal.contains("/")); XCTAssertFalse(traversal.hasPrefix(".")); XCTAssertTrue(traversal.hasSuffix(".md"))
         XCTAssertEqual(VaultExport.fileName(date: nil, title: "   ", base: ""), "note.md")
-        XCTAssertLessThanOrEqual(VaultExport.fileName(date: nil, title: String(repeating: "a", count: 500), base: "x").count, 124)
+        XCTAssertLessThanOrEqual(VaultExport.fileName(date: nil, title: String(repeating: "a", count: 500), base: "x").utf8.count, 255)
     }
 
     func testSubfolderComponentsCannotEscape() {

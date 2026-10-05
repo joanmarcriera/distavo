@@ -19,15 +19,15 @@ final class NoteMetaTests: XCTestCase {
     }
 
     func testRequestNamesOnlyTheEnabledLines() {
-        let both = NoteMeta.requestText(NotesConfig(autoTitle: true, autoTags: true))
+        let both = NoteMeta.requestText(NotesConfig(frontmatter: true, autoTitle: true, autoTags: true))
         XCTAssertTrue(both.contains("Distavo-Title:") && both.contains("Distavo-Tags:"))
-        let t = NoteMeta.requestText(NotesConfig(autoTitle: true))
+        let t = NoteMeta.requestText(NotesConfig(frontmatter: true, autoTitle: true))
         XCTAssertTrue(t.contains("Distavo-Title:")); XCTAssertFalse(t.contains("Distavo-Tags:"))
-        XCTAssertFalse(NoteMeta.requestText(NotesConfig(autoTags: true)).contains("Distavo-Title:"))
+        XCTAssertFalse(NoteMeta.requestText(NotesConfig(frontmatter: true, autoTags: true)).contains("Distavo-Title:"))
     }
 
     func testRequestReachesThePromptAndFitsTheInstructionCap() {
-        let notes = NotesConfig(autoTitle: true, autoTags: true)
+        let notes = NotesConfig(frontmatter: true, autoTitle: true, autoTags: true)
         let merged = NoteMeta.mergedInstruction(String(repeating: "x", count: 5000), notes: notes)!
         XCTAssertLessThanOrEqual(merged.count, Prompt.maxCustomInstructionChars)
         XCTAssertTrue(merged.hasSuffix(NoteMeta.requestText(notes)), "the request is kept whole")

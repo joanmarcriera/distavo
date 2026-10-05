@@ -526,7 +526,10 @@ public final class SearchIndex: @unchecked Sendable {
         guard let data = try? Data(contentsOf: file, options: .mappedIfSafe) else { return false }
         let capped = data.count > Self.maxBodyBytes ? data.prefix(Self.maxBodyBytes) : data
         // A truncated multibyte tail makes strict decoding fail; lossy keeps the rest.
-        let body = String(decoding: capped, as: UTF8.self)
+        let raw = String(decoding: capped, as: UTF8.self)
+        // A note may open with YAML frontmatter (#2954): index only the body, and prefer
+        // the frontmatter title (the AI title) over the first heading.
+        let body = kind == .note ? NoteFrontmatter.strip(raw) : raw
         let name = file.lastPathComponent
         let base = kind == .note
             ? (name as NSString).deletingPathExtension
@@ -534,7 +537,8 @@ public final class SearchIndex: @unchecked Sendable {
         let speakers = kind == .transcript
             ? "|" + Self.speakerLabels(inTranscript: body).joined(separator: "|") + "|" : ""
         let (mtime, size) = Self.stat(file)
-        let title = kind == .note ? (Self.heading(inNote: body) ?? base) : base
+        let frontTitle = kind == .note ? NoteFrontmatter.value("title", in: raw) : nil
+        let title = kind == .note ? (frontTitle.flatMap { $0.isEmpty ? nil : $0 } ?? Self.heading(inNote: body) ?? base) : base
         let path = Self.canonical(file.path)
         // `refreshSpeakers` doubles as "standalone call": reconcile already holds a transaction.
         if refreshSpeakers { _ = run("BEGIN") }

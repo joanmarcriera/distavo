@@ -47,3 +47,27 @@ recordings processed with this version). Ideally one with two speakers and diari
 10. **App Store edition:** saving to Desktop/Documents via the panel works (user-selected
     read-write entitlement is already present in `apple/Distavo-AppStore.entitlements`).
 11. A `Process a recording with…` variant exports from its own sidecar (`<base>@<suffix>`).
+
+## Custom vocabulary and replacements (Vikunja #2939)
+
+Settings > Transcription > Vocabulary.
+
+1. Record or pick a short clip that says an uncommon name or acronym the model
+   gets wrong (e.g. "Slurm" heard as "slum"). Baseline: process it with an empty
+   vocabulary and note the misspelling.
+2. Built-in engine, Whisper model (not Fast/Parakeet): add the term under
+   "Names and jargon", re-process. Expect the transcript to spell it correctly.
+   Expect no change in the other words. If the transcript came out empty or
+   starts with the term list, the activity log must show "Vocabulary prompt
+   degraded the transcript - retrying without it" and the recording must still
+   produce a transcript.
+3. WhisperX server: same check; the request carries `initial_prompt` (server
+   access log), and is absent when the list is empty.
+4. Fast (Parakeet) engine: the list has no effect on the transcript (no prompt
+   support); a replacement rule does.
+5. Add a replacement "slum" -> "Slurm": transcript (`*.transcript.clean.txt`) and
+   the note both say "Slurm"; "category" style substrings are untouched.
+6. Apple on-device summariser with a 40-term glossary and a long meeting: the
+   note is still produced (glossary is capped and counted in the 4096-token budget).
+7. Upgrade path: launch with an old `watcher-config.json` (no `vocabulary` or
+   `replacements`): Settings shows both empty and nothing else changes.

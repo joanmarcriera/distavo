@@ -15,10 +15,9 @@ import Foundation
 // receive the resulting strings through the existing config seam.
 
 /// One find/replace rule. `from` matches case-insensitively as whole words.
-public struct ReplacementRule: Codable, Equatable, Sendable, Identifiable {
+public struct ReplacementRule: Codable, Equatable, Sendable {
     public var from: String
     public var to: String
-    public var id: String { from + "\u{1F}" + to }
 
     public init(from: String, to: String) { self.from = from; self.to = to }
 }
@@ -81,6 +80,17 @@ public enum Vocabulary {
     /// The terms the summary prompt names (normalised and capped).
     public static func summaryTerms(_ terms: [String]) -> [String] {
         capped(normalisedTerms(terms), maxTerms: maxSummaryTerms, maxChars: maxSummaryCharacters)
+    }
+
+    /// Known Whisper failure with a conditioning prompt: empty output, or the
+    /// model parroting the prompt back as the transcript. The built-in engine
+    /// uses this to retry once without the prompt so a glossary can never
+    /// cost a recording its transcript.
+    public static func promptBackfired(transcript: String, prompt: String) -> Bool {
+        let text = TranscriptCleaner.normaliseSpace(transcript)
+        if text.isEmpty { return true }
+        let echo = TranscriptCleaner.normaliseSpace(prompt.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
+        return !echo.isEmpty && text.lowercased().hasPrefix(echo.lowercased())
     }
 
     // MARK: Replacement engine

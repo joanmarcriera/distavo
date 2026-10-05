@@ -99,6 +99,13 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(Vocabulary.transcriberPrompt([String(repeating: "x", count: 600)]), "")
     }
 
+    func testPromptBackfireDetection() {
+        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "  ", prompt: "Slurm."))
+        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "slurm, EMBL-EBI. And then", prompt: "Slurm, EMBL-EBI."))
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "We use Slurm daily", prompt: "Slurm, EMBL-EBI."))
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "Slurm", prompt: ""))
+    }
+
     // MARK: Summary prompt
 
     private func build(style: Prompt.Style, glossary: [String]? = nil) -> String {

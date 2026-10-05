@@ -414,6 +414,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String? = nil,
+        glossary: [String] = [],
         onProgress: (@Sendable (String) -> Void)? = nil,
         root: URL = EmbeddedModelStore.modelsDirectory,
         manager: SummaryModelManager = .shared
@@ -425,7 +426,7 @@ public enum GemmaSummariser {
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
                 meetingDate: meetingDate, noteLanguage: noteLanguage,
-                customInstruction: customInstruction, onProgress: onProgress,
+                customInstruction: customInstruction, glossary: glossary, onProgress: onProgress,
                 root: root, manager: manager)
         }
     }
@@ -435,6 +436,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String?,
+        glossary: [String],
         onProgress: (@Sendable (String) -> Void)?,
         root: URL, manager: SummaryModelManager
     ) async throws -> String {
@@ -459,7 +461,7 @@ public enum GemmaSummariser {
             endOfTurnBlock: EndOfTurnBlock.build(
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
                 ownerSpeaker: userSpeaker),
-            customInstruction: customInstruction)
+            customInstruction: customInstruction, glossary: glossary)
         do {
             let raw = try await SummaryDriver.run(request, generator: generator, onProgress: report)
             LocalSummaryFailureTracker.shared.noteSuccess(model: model.id)
@@ -527,6 +529,6 @@ public enum GemmaPipelineRoute {
             participants: context.participants, style: context.promptStyle,
             meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
             customInstruction: context.customInstruction,
-            root: root, manager: manager)
+            glossary: context.glossary, root: root, manager: manager)
     }
 }

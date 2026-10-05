@@ -243,8 +243,9 @@ final class AskNotesTests: XCTestCase {
         for url in ["http://localhost:11434", "http://127.0.0.1:11434", "http://192.168.0.5:11434",
                     "http://truenas:11434", "http://nas.local:11434", "http://10.1.2.3:11434"] {
             let spy = Spy()
+            // Names must RESOLVE (to a local address) — their shape alone is not trusted.
             let o = await AskNotes.ask(question: "budget", scope: .allNotes, config: config(url: url),
-                                       deps: deps(spy, passages: [passage("a", "budget")]))
+                                       deps: deps(spy, passages: [passage("a", "budget")], resolver: { _ in ["192.168.0.5"] }))
             XCTAssertNotNil(answered(o), url)
             XCTAssertEqual(spy.prompts.count, 1, url)
         }

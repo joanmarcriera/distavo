@@ -113,22 +113,31 @@ public struct AskDeps {
     public static func live(
         from pipeline: PipelineDeps,
         retrieve: @escaping (String, Int, Int) async -> [SearchPassage],
-        indexEnabled: @escaping () -> Bool
+        indexEnabled: @escaping () -> Bool,
+        resolver: @escaping NetworkScope.HostResolver = NetworkScope.systemResolver,
+        session: URLSession? = nil
     ) -> AskDeps {
         // Never follow a redirect: a 307 keeps the POST body, so a LAN host redirecting to a
         // public URL would otherwise receive the question and excerpts.
-        let ollama = OllamaClient(session: AskSession.noRedirect)
+        let ollama = OllamaClient(session: session ?? AskSession.noRedirect)
         return AskDeps(
             ollamaReachable: pipeline.ollamaReachable, embeddedReadiness: pipeline.embeddedReadiness,
             complete: { prompt, target, options, _ in
                 guard case let .ollama(url, model) = target else {
                     throw OllamaError("On-device answering is not available in this build.")
                 }
-                // Re-check immediately before sending (the guard in `ask` ran earlier).
-                if let why = AskBackend.localOnlyViolation(target) { throw OllamaError(why) }
-                return try await ollama.generate(url: url, model: model, prompt: prompt, options: options)
+                // Resolve ONCE, validate every address, and connect to that validated address
+                // (no second resolution that DNS rebinding could answer differently).
+                let endpoint: AskEndpoint
+                switch AskEndpointGuard.resolve(url, resolver: resolver) {
+                case .success(let e): endpoint = e
+                case .failure(let f): throw OllamaError(f.message)
+                }
+                return try await ollama.generate(
+                    url: endpoint.requestURL, model: model, prompt: prompt, options: options,
+                    headers: endpoint.hostHeader.map { ["Host": $0] } ?? [:])
             },
-            retrieve: retrieve, indexEnabled: indexEnabled)
+            retrieve: retrieve, indexEnabled: indexEnabled, resolver: resolver)
     }
 }
 
@@ -160,23 +169,8 @@ public enum AskBackend {
         _ target: SummariseTarget, resolver: NetworkScope.HostResolver = NetworkScope.systemResolver
     ) -> String? {
         guard case .ollama(let url, _) = target else { return nil }
-        if isLocalEndpoint(url, resolver: resolver) { return nil }
-        let host = URLComponents(string: url)?.host ?? url
-        return "Ask Your Notes only works with a local model, but the configured Ollama server (\(host)) is not on this Mac or your local network. Point Settings → Summaries at a local or LAN Ollama, or pick an on-device model."
-    }
-
-    /// Strict: an IP literal must be loopback or private; a hostname must be `localhost`,
-    /// a bare single-label name or `*.local`, or EVERY address it resolves to must be
-    /// loopback or private (an empty/failed resolution is not local).
-    static func isLocalEndpoint(_ url: String, resolver: NetworkScope.HostResolver) -> Bool {
-        guard let host = NetworkScope.hostOf(url), !host.isEmpty else { return false }
-        func local(_ ip: String) -> Bool { NetworkScope.isLoopbackAddress(ip) || NetworkScope.isPrivateAddress(ip) }
-        if NetworkScope.ipv4Bytes(host) != nil || NetworkScope.ipv6Bytes(host) != nil { return local(host) }
-        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") || !host.contains(".") {
-            return true
-        }
-        let ips = resolver(host)
-        return !ips.isEmpty && ips.allSatisfy(local)
+        if case .failure(let f) = AskEndpointGuard.resolve(url, resolver: resolver) { return f.message }
+        return nil
     }
 }
 
@@ -191,8 +185,23 @@ enum AskSession {
             completionHandler(nil)
         }
     }
+
+    /// Ephemeral, no cookies/cache/credentials, and NEVER a proxy: an empty proxy
+    /// dictionary stops URLSession handing a LAN request to a system/PAC proxy that
+    /// sits outside the LAN.
+    static func hardened(_ c: URLSessionConfiguration = .ephemeral) -> URLSessionConfiguration {
+        c.connectionProxyDictionary = [:]
+        c.httpCookieStorage = nil
+        c.httpShouldSetCookies = false
+        c.urlCache = nil
+        c.urlCredentialStorage = nil
+        c.requestCachePolicy = .reloadIgnoringLocalCacheData
+        c.waitsForConnectivity = false
+        return c
+    }
+
     static func make(_ configuration: URLSessionConfiguration = .ephemeral) -> URLSession {
-        URLSession(configuration: configuration, delegate: NoRedirect(), delegateQueue: nil)
+        URLSession(configuration: hardened(configuration), delegate: NoRedirect(), delegateQueue: nil)
     }
     static let noRedirect = make()
 }
@@ -277,7 +286,8 @@ public enum AskNotes {
             return .deferred("\(retry.localizedDescription) Try again later.")
         } catch {
             if Task.isCancelled { return .cancelled }
-            return .failed((error as? LocalizedError)?.errorDescription ?? "\(error)")
+            // Clipped, and never the prompt: errors come from the engine/transport only.
+            return .failed(String(((error as? LocalizedError)?.errorDescription ?? "\(error)").prefix(300)))
         }
         if Task.isCancelled { return .cancelled }
         let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)

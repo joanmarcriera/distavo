@@ -28,7 +28,8 @@ public struct OllamaClient {
     /// POST {url}/api/generate — returns the trimmed `response` text or throws.
     public func generate(
         url: String, model: String, prompt: String,
-        options: SummariseOptions, timeout: TimeInterval = 3600
+        options: SummariseOptions, timeout: TimeInterval = 3600,
+        headers: [String: String] = [:]
     ) async throws -> String {
         guard let endpoint = URL(string: url.trimmedTrailingSlashes() + "/api/generate") else {
             throw OllamaError("invalid Ollama URL")
@@ -37,6 +38,7 @@ public struct OllamaClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }   // e.g. Host when the URL host was pinned to an IP (Ask)
         // "think": false — thinking models (gemma4) reason by default on Ollama, burn the
         // token budget and degenerate into empty/looping notes (Vikunja #2666). Notes need
         // the answer only, so always opt out.

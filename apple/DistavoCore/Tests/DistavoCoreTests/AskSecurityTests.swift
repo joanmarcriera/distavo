@@ -36,7 +36,8 @@ final class AskSecurityTests: XCTestCase {
             XCTAssertEqual(NetworkScope.isLocalNetworkHost(url), lan, url)
             XCTAssertEqual(NetworkScope.isLoopbackHost(url), loop, url)
             if lan || loop {
-                XCTAssertNil(AskBackend.localOnlyViolation(.ollama(url: url, model: "m"), resolver: publicResolver), url)
+                // Names resolve to a LAN address here; literals ignore the resolver.
+                XCTAssertNil(AskBackend.localOnlyViolation(.ollama(url: url, model: "m"), resolver: { _ in ["192.168.0.5"] }), url)
             } else {
                 XCTAssertNotNil(AskBackend.localOnlyViolation(.ollama(url: url, model: "m"), resolver: publicResolver), url)
             }

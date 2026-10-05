@@ -702,6 +702,41 @@ final class CalendarMatchTests: XCTestCase {
         XCTAssertNotNil(Pipeline.meetingDate(for: URL(fileURLWithPath: "/x/2026-09-16 16.13.08.m4a")), "bare name still dated")
     }
 
+    func testLookupEvidenceAcceptsOnlyTheRecordersExactNameOrMediaMetadata() async {
+        let exact = ["Meeting 2026-10-05 10.00.00.wav", "/a/b/Meeting 2026-10-05 10.00.00.WAV"]
+        for n in exact { XCTAssertNotNil(Pipeline.exactRecorderNameDate(URL(fileURLWithPath: n.hasPrefix("/") ? n : "/x/\(n)")), n) }
+        let rejected = ["2026-10-05 10.30.00 Budget.wav", "Meeting 2026-10-05 10.00.00 copy.wav", "x Meeting 2026-10-05 10.00.00.wav",
+                        "2026-10-05 10.00.00.wav", "Meeting 2026-10-05 10.00.00.m4a", "Meeting 2026-10-05 10.00.00 2.wav",
+                        "Budget 2026-10-05 10.00.00.wav", "Meeting 2026-13-45 99.99.99.wav"]
+        for n in rejected {
+            XCTAssertNil(Pipeline.exactRecorderNameDate(URL(fileURLWithPath: "/x/\(n)")), n)
+            // No such file: no media metadata either, so no evidence at all.
+            let ev = await Pipeline.recordingStartEvidence(URL(fileURLWithPath: "/nonexistent/\(n)"))
+            XCTAssertNil(ev, n)
+        }
+        // The permissive prompt rule is unchanged for those same names.
+        XCTAssertNotNil(Pipeline.meetingDate(for: URL(fileURLWithPath: "/nonexistent/2026-10-05 10.30.00 Budget.wav")))
+    }
+
+    func testTitleLikeFileNameDoesNotDriveALookup() async throws {
+        let env = try makeEnv()
+        let url = try recording(env, "2026-10-05 10.30.00 Budget.wav")
+        let seen = Seen()
+        var d = deps(seen, events: [standup(local(10), local(11))])
+        d.recordingStart = { await Pipeline.recordingStartEvidence($0) }   // the real evidence rule
+        _ = await Pipeline.processOne(path: url, config: env.config, deps: d, stableChecks: 1, stableDelay: 0)
+        let base = DistavoState.baseFor(recordingsDir: env.recordings, path: url)
+        XCTAssertEqual(seen.lookups, 0)
+        XCTAssertNil(CalendarMatchStore.load(workDir: env.work, base: base))
+        // The recorder's own name does look up.
+        let own = try recording(env, "Meeting 2026-10-05 10.00.00.wav")
+        let seen2 = Seen()
+        var d2 = deps(seen2, events: [standup(local(10), local(11))])
+        d2.recordingStart = { await Pipeline.recordingStartEvidence($0) }
+        _ = await Pipeline.processOne(path: own, config: env.config, deps: d2, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(seen2.lookups, 1)
+    }
+
     func testCalendarRenamedTimeLikeTitleUsesTheSidecarStart() async throws {
         let env = try makeEnv()
         let url = try recording(env, "2026-10-05 10.30.00 Standup.wav")   // renamed file, title looks like a time

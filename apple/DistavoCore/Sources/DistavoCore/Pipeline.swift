@@ -624,11 +624,26 @@ public enum Pipeline {
         return recorderNameFormatter(timeZone).date(from: String(stem[range]))
     }
 
-    /// Recording start from trustworthy evidence: the recorder's file name, else
-    /// the media's embedded creation date (AVAsset common metadata). nil when
-    /// neither exists - filesystem dates are NOT evidence.
+    /// The built-in recorder's own file name, exactly (`MeetingRecorder.fileName`:
+    /// "Meeting yyyy-MM-dd HH.mm.ss.wav"), anchored at both ends. Unlike
+    /// `recorderNameDate` (the permissive PROMPT rule, unchanged from before
+    /// #2946) this is the only name accepted as calendar-lookup evidence: other
+    /// names, a calendar-folded title or an imported file's name, are
+    /// attacker-influenceable.
+    static func exactRecorderNameDate(_ url: URL, timeZone: TimeZone = .current) -> Date? {
+        guard url.pathExtension.lowercased() == "wav" else { return nil }
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard stem.range(of: #"^Meeting \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$"#, options: .regularExpression) != nil
+        else { return nil }
+        return recorderNameDate(stem, timeZone: timeZone)
+    }
+
+    /// Recording start evidence for the calendar lookup of a file WITHOUT a
+    /// calendar sidecar: the recorder's exact file name, else the media's embedded
+    /// creation date (AVAsset common metadata). nil when neither exists -
+    /// filesystem dates and any other file name are NOT evidence.
     public static func recordingStartEvidence(_ url: URL) async -> Date? {
-        if let d = recorderNameDate(url.deletingPathExtension().lastPathComponent) { return d }
+        if let d = exactRecorderNameDate(url) { return d }
         let asset = AVURLAsset(url: url)
         guard let item = try? await asset.load(.creationDate),
               let date = try? await item.load(.dateValue) else { return nil }

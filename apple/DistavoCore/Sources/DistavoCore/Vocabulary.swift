@@ -27,8 +27,9 @@ public enum Vocabulary {
     /// Whisper's prompt window is 224 tokens (half the 448 context). Terms are
     /// short and often rare words (many sub-word tokens), so budget ~2.5
     /// characters per token: 500 characters stays safely under 224 tokens.
-    /// WhisperKit additionally trims to its own maximum, so this is a bound on
-    /// what we *send*, not the only safeguard.
+    /// The built-in engine then re-checks with the real tokenizer
+    /// (`transcriberPrompt(_:maxTokens:tokenCount:)`), dropping trailing terms,
+    /// because WhisperKit keeps the LAST tokens and would cut the first terms.
     public static let maxTranscriberPromptCharacters = 500
 
     /// Summary prompt cap: at most this many terms / characters. Keeps the
@@ -82,15 +83,45 @@ public enum Vocabulary {
         capped(normalisedTerms(terms), maxTerms: maxSummaryTerms, maxChars: maxSummaryCharacters)
     }
 
-    /// Known Whisper failure with a conditioning prompt: empty output, or the
-    /// model parroting the prompt back as the transcript. The built-in engine
-    /// uses this to retry once without the prompt so a glossary can never
-    /// cost a recording its transcript.
-    public static func promptBackfired(transcript: String, prompt: String) -> Bool {
+    /// Audio at least this long cannot plausibly be silent, so an empty
+    /// prompted transcript counts as the prompt having blanked the output.
+    public static let minSecondsForEmptyToBeSuspicious = 30.0
+
+    /// Known Whisper failure with a conditioning prompt: the model parroting
+    /// the glossary back as the whole transcript, or (for audio long enough
+    /// that silence is implausible) blanking the output. The built-in engine
+    /// retries once without the prompt on `true`.
+    ///
+    /// An echo means the transcript is almost entirely glossary terms: with
+    /// every term removed less than 10 letters/digits remain. A recording that
+    /// merely OPENS with a glossary word ("Anna, shall we start...") is a good
+    /// transcript and is never flagged. A short empty clip is plain silence.
+    public static func promptBackfired(transcript: String, terms: [String],
+                                       audioSeconds: Double?) -> Bool {
         let text = TranscriptCleaner.normaliseSpace(transcript)
-        if text.isEmpty { return true }
-        let echo = TranscriptCleaner.normaliseSpace(prompt.trimmingCharacters(in: CharacterSet(charactersIn: ".")))
-        return !echo.isEmpty && text.lowercased().hasPrefix(echo.lowercased())
+        if text.isEmpty { return (audioSeconds ?? 0) >= minSecondsForEmptyToBeSuspicious }
+        var rest = text
+        for term in normalisedTerms(terms) {
+            rest = rest.replacingOccurrences(of: term, with: "", options: .caseInsensitive)
+        }
+        let remaining = rest.unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.count
+        return remaining < 10
+    }
+
+    /// The glossary prompt that fits `maxTokens` as measured by `tokenCount`
+    /// (the model's real tokenizer). WhisperKit keeps the LAST tokens of an
+    /// over-long prompt, which would silently cut the user's FIRST (most
+    /// important) terms, so whole terms are dropped from the END here instead.
+    public static func transcriberPrompt(_ terms: [String], maxTokens: Int,
+                                         tokenCount: (String) -> Int) -> String {
+        var kept = capped(normalisedTerms(terms), maxTerms: Int.max,
+                          maxChars: maxTranscriberPromptCharacters)
+        while !kept.isEmpty {
+            let prompt = kept.joined(separator: ", ") + "."
+            if tokenCount(" " + prompt) <= maxTokens { return prompt }
+            kept.removeLast()
+        }
+        return ""
     }
 
     // MARK: Replacement engine

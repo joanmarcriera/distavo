@@ -235,17 +235,25 @@ public actor EmbeddedTranscriber {
                 // glossary. Prompts are known to occasionally blank or echo the
                 // output on some models, so a failed prompted pass is retried
                 // once without it (below) rather than costing the transcript.
-                let glossary = Vocabulary.transcriberPrompt(config.vocabulary)
                 var promptTokens: [Int] = []
-                if !glossary.isEmpty, let tokenizer = whisper.tokenizer {
+                if !Vocabulary.normalisedTerms(config.vocabulary).isEmpty, let tokenizer = whisper.tokenizer {
                     // Leading space = how Whisper tokenises text that follows <|startofprev|>.
-                    promptTokens = tokenizer.encode(text: " " + glossary)
-                    options.promptTokens = promptTokens
+                    // WhisperKit keeps the LAST 223 prompt tokens, so fit the prompt
+                    // here by dropping trailing terms: the user's first terms survive.
+                    let prompt = Vocabulary.transcriberPrompt(
+                        config.vocabulary, maxTokens: 223,
+                        tokenCount: { tokenizer.encode(text: $0).count })
+                    if !prompt.isEmpty {
+                        promptTokens = tokenizer.encode(text: " " + prompt)
+                        options.promptTokens = promptTokens
+                    }
                 }
                 var transcribed = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
                 if !promptTokens.isEmpty {
                     let text = transcribed.map(\.text).joined(separator: " ")
-                    if Vocabulary.promptBackfired(transcript: text, prompt: glossary) {
+                    if Vocabulary.promptBackfired(
+                        transcript: text, terms: config.vocabulary,
+                        audioSeconds: AudioConverter.durationSeconds(of: wavURL)) {
                         await self.report("Vocabulary prompt degraded the transcript — retrying without it…")
                         options.promptTokens = nil
                         transcribed = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)

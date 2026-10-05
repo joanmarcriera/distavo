@@ -100,10 +100,62 @@ final class VocabularyTests: XCTestCase {
     }
 
     func testPromptBackfireDetection() {
-        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "  ", prompt: "Slurm."))
-        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "slurm, EMBL-EBI. And then", prompt: "Slurm, EMBL-EBI."))
-        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "We use Slurm daily", prompt: "Slurm, EMBL-EBI."))
-        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "Slurm", prompt: ""))
+        // Echo of the glossary (any case/punctuation) is a backfire.
+        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "slurm, EMBL-EBI.", terms: ["Slurm", "EMBL-EBI"], audioSeconds: 5))
+        // A real transcript that merely opens with a glossary word is not.
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "Anna, shall we start the meeting now?", terms: ["Anna"], audioSeconds: 60))
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "We use Slurm daily", terms: ["Slurm", "EMBL-EBI"], audioSeconds: 60))
+    }
+
+    func testEmptyOutputOnlySuspiciousForLongAudio() {
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "  ", terms: ["Slurm"], audioSeconds: 8))
+        XCTAssertFalse(Vocabulary.promptBackfired(transcript: "", terms: ["Slurm"], audioSeconds: nil))
+        XCTAssertTrue(Vocabulary.promptBackfired(transcript: "", terms: ["Slurm"], audioSeconds: 120))
+    }
+
+    func testTokenFittedPromptDropsTrailingTermsAndKeepsFirst() {
+        let terms = (0..<50).map { "Term\($0)" }
+        // Fake tokenizer: one token per character.
+        let prompt = Vocabulary.transcriberPrompt(terms, maxTokens: 40, tokenCount: { $0.count })
+        XCTAssertTrue(prompt.hasPrefix("Term0, Term1,"))
+        XCTAssertLessThanOrEqual(prompt.count + 1, 40)
+        XCTAssertFalse(prompt.contains("Term49"))
+        XCTAssertEqual(Vocabulary.transcriberPrompt(terms, maxTokens: 2, tokenCount: { $0.count }), "")
+    }
+
+    func testPipelineUsesVariantTranscribeConfigForGlossary() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-\(UUID().uuidString)")
+        let rec = root.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
+        let input = rec.appendingPathComponent("demo.opus")
+        try Data([0, 1, 2, 3]).write(to: input)
+        var cfg = Config()
+        cfg.recordingsDir = rec.path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        cfg.transcribe.vocabulary = ["BaseTerm"]
+        var variantCfg = cfg.transcribe
+        variantCfg.vocabulary = ["VariantTerm"]
+        let seen = SeenBox()
+        let deps = PipelineDeps(
+            convertToWav: { _, dest in
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data([0]).write(to: dest)
+            },
+            transcribe: { _, t in
+                seen.vocabulary = t.vocabulary
+                return ["segments": [["speaker": "SPEAKER_00", "text": "hello there"]]]
+            },
+            ollamaReachable: { _ in true },
+            summarise: { transcript, _, _, context in
+                seen.prompt = context.prompt(transcript: transcript)
+                return PipelineTests.validNote
+            })
+        let variant = ProcessVariant(suffix: "v", transcribe: variantCfg)
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: deps, stableChecks: 1, stableDelay: 0, variant: variant)
+        XCTAssertEqual(seen.vocabulary, ["VariantTerm"])
+        XCTAssertTrue(seen.prompt.contains(": VariantTerm\n"))
+        XCTAssertFalse(seen.prompt.contains("BaseTerm"))
     }
 
     // MARK: Summary prompt

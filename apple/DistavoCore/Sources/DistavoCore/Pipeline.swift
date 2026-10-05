@@ -424,7 +424,7 @@ public enum Pipeline {
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
-                glossary: config.transcribe.vocabulary)
+                glossary: transcribeConfig.vocabulary)
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.

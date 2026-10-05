@@ -87,13 +87,13 @@ public enum SummaryDriver {
         let finalBudget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, style: request.style,
-            extraInstructions: request.endOfTurnBlock)
+            extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
 
         let plan = EmbeddedSummaryPlanner.plan(
             transcript: request.transcript, contextSize: contextSize,
             noteOwner: request.noteOwner, userSpeaker: request.userSpeaker,
-            style: request.style, extraInstructions: request.endOfTurnBlock)
+            style: request.style, extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage)
 
         switch plan {
         case .single:
@@ -156,7 +156,7 @@ public enum SummaryDriver {
         let budget = EmbeddedSummaryBudget.final(
             contextSize: contextSize, noteOwner: request.noteOwner,
             userSpeaker: request.userSpeaker, style: request.style,
-            extraInstructions: request.endOfTurnBlock)
+            extraInstructions: request.endOfTurnBlock, noteLanguage: request.noteLanguage)
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
         var merged = EmbeddedSummaryPrompt.merge(partials: partials)
 

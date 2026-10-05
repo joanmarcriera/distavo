@@ -206,6 +206,22 @@ final class SummaryDriverTests: XCTestCase {
 
     // MARK: End-of-turn block budget (review finding)
 
+    /// The language rule is measured as sent (#2956); nil changes nothing.
+    func testNoteLanguageIsCountedInTheFinalBudget() {
+        let before = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        let nilLang = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                                                  noteLanguage: nil)
+        XCTAssertEqual(before, nilLang)
+        let expected = EmbeddedSummaryTokens.estimate(
+            Prompt.build(transcript: "", noteOwner: "Marc", userSpeaker: "SPEAKER_00"))
+        XCTAssertEqual(nilLang.instructionTokens, expected)
+        let french = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00",
+                                                 noteLanguage: "fr")
+        XCTAssertEqual(french.instructionTokens, EmbeddedSummaryTokens.estimate(
+            Prompt.build(transcript: "", noteOwner: "Marc", userSpeaker: "SPEAKER_00", noteLanguage: "fr")))
+        XCTAssertGreaterThan(french.instructionTokens, before.instructionTokens)
+    }
+
     /// A transcript that fits the final budget without the block must be
     /// map-reduced once the block's tokens are counted.
     func testEndOfTurnBlockTokensShrinkTheFinalBudget() {

@@ -36,6 +36,10 @@
 	<array>
 		<string>_http._tcp</string>
 	</array>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Distavo reads the title and attendees of the calendar event that overlaps a recording to name the note. It never changes your calendar and nothing leaves your Mac.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>Distavo reads the title and attendees of the calendar event that overlaps a recording to name the note. It never changes your calendar and nothing leaves your Mac.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Distavo adds the action items you choose to your Reminders. Nothing is sent anywhere else.</string>
 	<key>NSRemindersUsageDescription</key>

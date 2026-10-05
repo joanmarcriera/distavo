@@ -238,6 +238,13 @@ public enum CalendarAttendees {
         return base + ". " + line
     }
 
+    /// The attendees whose names still appear in `participants` (all-case/accent
+    /// insensitive); none when the text is nil or blank.
+    public static func mentioned(in participants: String?, attendees: [String]) -> [String] {
+        let haystack = fold(participants ?? "")
+        return attendees.filter { haystack.contains(fold($0)) }
+    }
+
     /// The participants text the "Who was in this meeting?" window writes.
     public static func hintsText(_ attendees: [String]) -> String {
         "Other participants: " + attendees.joined(separator: ", ")

@@ -11,6 +11,9 @@ extension PipelineDeps {
     /// DistavoCore) so the core package stays dependency-free.
     static func appLive() -> PipelineDeps {
         var deps = PipelineDeps.live()
+        // Calendar-aware titling (#2946): inert unless `calendar.enabled`; returns [] without access
+        // (never prompts from the background pipeline).
+        deps.calendarLookup = { start, end in EventKitCalendarProvider.shared.candidates(from: start, to: end) }
 
         let serverTranscribe = deps.transcribe
         deps.transcribe = { wavURL, rawTranscribeConfig in

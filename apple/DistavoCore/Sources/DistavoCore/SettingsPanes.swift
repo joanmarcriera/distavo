@@ -61,7 +61,8 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
                     "translate", "french", "german", "always write",
                     "template", "meeting type", "stand-up", "standup", "1:1", "interview", "sales call",
                     "lecture", "custom template", "folder template", "headings", "sections",
-                    "action items", "tasks", "decisions", "reminders", "checkbox", "todo"]
+                    "action items", "tasks", "decisions", "reminders", "checkbox", "todo",
+                    "calendar", "event", "attendees", "rename", "meeting title"]
         case .summaries:
             return ["ollama", "backend", "server", "local", "apple intelligence", "on-device", "gemma",
                     "summary model", "bigger model", "fallback"]

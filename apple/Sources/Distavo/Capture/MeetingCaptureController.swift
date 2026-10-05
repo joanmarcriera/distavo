@@ -263,14 +263,25 @@ final class MeetingCaptureController: ObservableObject {
         let ask = config.askSpeakersOnStop && silenceMinutes == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
-        let outcome = recorder.stop(deferFinalize: ask)
+        let recStart = recorder.startedAt ?? startedAt ?? Date()
+        // Calendar event overlapping the recording (#2946); nil when off / no access / no match.
+        let calendarMatch = CalendarRecordingStep.lookup(start: recStart, config: config)
+        let outcome = recorder.stop(deferFinalize: ask || calendarMatch != nil)
         self.recorder = nil
         isRecording = false
         quickNotes.end()   // keeps the sidecar, closes the panel
         keyMoments.end()   // keeps the sidecar, releases the hotkey
 
         guard let outcome else { return }
-        log("Meeting recording saved: \(outcome.url.lastPathComponent) (\(elapsedLabel))")
+        // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
+        var savedURL = outcome.url
+        if let calendarMatch {
+            savedURL = CalendarRecordingStep.apply(
+                calendarMatch, recording: outcome.url, start: recStart, config: config,
+                recordingsDir: folderProvider(), askingSpeakers: ask, log: log)
+            if !ask { recorder.finalizeDeferred(as: savedURL) }
+        }
+        log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")
         if !outcome.systemAudioHeard {
             notify("Recording saved — but no system audio was captured",
                    "If you denied the System Audio Recording permission, enable it under "
@@ -286,10 +297,10 @@ final class MeetingCaptureController: ObservableObject {
                    + "and your input device. The other participants were captured fine.")
         } else if let silenceMinutes {
             notify("Recording stopped after \(silenceMinutes) min of silence",
-                   "\(outcome.url.lastPathComponent) saved — Distavo will transcribe it shortly.")
+                   "\(savedURL.lastPathComponent) saved — Distavo will transcribe it shortly.")
         } else {
             notify("Meeting recording saved",
-                   "\(outcome.url.lastPathComponent) — Distavo will transcribe it shortly.")
+                   "\(savedURL.lastPathComponent) — Distavo will transcribe it shortly.")
         }
         if let silenceMinutes {
             log("Recording stopped automatically after \(silenceMinutes) min of silence")
@@ -304,10 +315,15 @@ final class MeetingCaptureController: ObservableObject {
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
             let detection = startLanguageDetection(partURL: outcome.url.appendingPathExtension("part"))
-            askSpeakers(for: outcome.url, config: config, detection: detection)
+            askSpeakers(for: savedURL, config: config, detection: detection,
+                        prefillOthers: config.calendar.attendeesAsParticipants
+                            ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "")
+            if calendarMatch != nil {
+                CalendarRecordingStep.pruneAttendees(recording: savedURL, recordingsDir: folderProvider(), config: config)
+            }
             Task {
                 _ = await detection?.value
-                recorder.finalizeDeferred()
+                recorder.finalizeDeferred(as: savedURL)
             }
         }
     }
@@ -392,7 +408,8 @@ final class MeetingCaptureController: ObservableObject {
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
-    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?) {
+    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
+                             prefillOthers: String = "") {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -401,7 +418,7 @@ final class MeetingCaptureController: ObservableObject {
         count.alignment = .right
         let myRole = NSTextField(string: "")
         myRole.placeholderString = "e.g. candidate, host, the one taking notes"
-        let others = NSTextField(string: "")
+        let others = NSTextField(string: prefillOthers)   // calendar attendees (#2946), editable
         others.placeholderString = "e.g. Edward, Cambridge University — interviewer"
         others.usesSingleLineMode = false
         others.lineBreakMode = .byWordWrapping

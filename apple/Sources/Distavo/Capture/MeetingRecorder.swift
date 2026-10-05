@@ -207,11 +207,13 @@ final class MeetingRecorder {
 
     private var deferred: (part: URL, url: URL)?
 
-    /// Balance and publish a take held back by `stop(deferFinalize: true)`.
-    func finalizeDeferred() {
+    /// Balance and publish a take held back by `stop(deferFinalize: true)`,
+    /// under `url` when given (a calendar-event name, Vikunja #2946) - the
+    /// caller has already moved the take's sidecars to that name's base.
+    func finalizeDeferred(as url: URL? = nil) {
         guard let pending = deferred else { return }
         deferred = nil
-        queue.async { Self.finalize(part: pending.part, to: pending.url) }
+        queue.async { Self.finalize(part: pending.part, to: url ?? pending.url) }
 
     }
 

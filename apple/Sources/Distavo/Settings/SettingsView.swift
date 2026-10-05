@@ -36,14 +36,22 @@ struct SettingsView: View {
         _model = StateObject(wrappedValue: SettingsModel(controller: controller))
     }
 
-    private var selection: Binding<SettingsPane?> {
-        Binding(
-            get: { SettingsPane.resolve(stored: storedPane, among: model.visiblePanes) },
-            set: { if let pane = $0 { storedPane = pane.rawValue } })
+    private var filteredPanes: [SettingsPane] {
+        SettingsPane.filter(model.visiblePanes, query: query)
     }
 
-    private var current: SettingsPane {
-        SettingsPane.resolve(stored: storedPane, among: model.visiblePanes)
+    /// Pane shown now: the remembered one, or the first match if the filter hides it;
+    /// nil when nothing matches.
+    private var current: SettingsPane? {
+        SettingsPane.effectiveSelection(
+            current: SettingsPane.resolve(stored: storedPane, among: model.visiblePanes),
+            filtered: filteredPanes)
+    }
+
+    private var selection: Binding<SettingsPane?> {
+        Binding(
+            get: { current },
+            set: { if let pane = $0 { storedPane = pane.rawValue } })
     }
 
     var body: some View {
@@ -68,7 +76,7 @@ struct SettingsView: View {
                 .padding([.horizontal, .top], 10)
                 .padding(.bottom, 6)
                 .accessibilityLabel("Filter settings panes")
-            List(SettingsPane.filter(model.visiblePanes, query: query), selection: selection) { pane in
+            List(filteredPanes, selection: selection) { pane in
                 Label(pane.title, systemImage: pane.symbolName)
                     .tag(pane)
             }
@@ -78,10 +86,18 @@ struct SettingsView: View {
     // MARK: Detail
 
     private var detailForm: some View {
-        Form { detail(for: current) }
-            .formStyle(.grouped)
-            .navigationTitle(current.title)
-            .safeAreaInset(edge: .bottom) { bottomBar }
+        Group {
+            if let current {
+                Form { detail(for: current) }
+                    .formStyle(.grouped)
+                    .navigationTitle(current.title)
+            } else {
+                Text("No matching settings")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .safeAreaInset(edge: .bottom) { bottomBar }
     }
 
     /// One case per pane. Panes are plain Views taking the shared model.

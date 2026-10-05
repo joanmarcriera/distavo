@@ -116,7 +116,7 @@ struct TranscriptionPane: View {
         if !unselectable.isEmpty {
             SettingCaption("Not offered on this Mac (needs more memory): \(unselectable.map(\.displayName).joined(separator: ", ")).")
         }
-        ModelDownloadButton(controller: model.controller, modelIDs: model.downloadSet, totalMB: model.downloadTotalMB)
+        ModelDownloadButton(controller: model.controller, model: model)
         HStack {
             if let usage = model.modelsOnDisk {
                 Text("Models on disk: \(usage)").font(.callout)

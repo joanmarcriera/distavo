@@ -49,4 +49,10 @@ final class SettingsPanesTests: XCTestCase {
         XCTAssertEqual(SettingsPane.resolve(stored: "bogus", among: v), .general)
         XCTAssertEqual(SettingsPane.resolve(stored: nil, among: v), .general)
     }
+
+    func testEffectiveSelectionFollowsFilter() {
+        XCTAssertEqual(SettingsPane.effectiveSelection(current: .notes, filtered: [.general, .notes]), .notes)
+        XCTAssertEqual(SettingsPane.effectiveSelection(current: .about, filtered: [.summaries, .notes]), .summaries)
+        XCTAssertNil(SettingsPane.effectiveSelection(current: .about, filtered: []))
+    }
 }

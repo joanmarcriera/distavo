@@ -30,6 +30,10 @@ final class SettingsModel: ObservableObject {
     @Published var saved = false
     @Published var modelsOnDisk: String? = EmbeddedModelStore.hasDownloadedModels()
         ? EmbeddedModelStore.diskUsageLabel() : nil
+    /// "Download now" state — hoisted here so it survives pane switches (see ModelDownloadButton).
+    @Published var downloadRunning = false
+    @Published var downloadCancelRequested = false
+    @Published var downloadResultMessage: String?
     #if EDITION_DIRECT
     @Published var autoUpdates = true
     #endif
@@ -242,6 +246,27 @@ final class SettingsModel: ObservableObject {
                 if on { ids.insert(id) } else { ids.remove(id) }
                 self.draft.transcribe.languagePacks = EmbeddedModelCatalog.languagePacks.map(\.id).filter { ids.contains($0) }
             })
+    }
+
+    /// Start the model prefetch for the current choice; a second start while one runs is a no-op.
+    func startDownload() {
+        guard !downloadRunning else { return }
+        let ids = downloadSet
+        downloadRunning = true
+        downloadCancelRequested = false
+        downloadResultMessage = nil
+        Task {
+            do {
+                let outcome = try await ModelCoordinator.shared.prefetch(ids: ids, includeDetector: true) { model in
+                    try await ModelPrefetcher.download(model)
+                }
+                downloadResultMessage = outcome == .cancelled
+                    ? "Cancelled — models downloaded so far are kept" : "Ready"
+            } catch {
+                downloadResultMessage = error.localizedDescription
+            }
+            downloadRunning = false
+        }
     }
 
     // MARK: Connections

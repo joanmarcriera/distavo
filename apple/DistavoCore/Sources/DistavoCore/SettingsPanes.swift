@@ -95,6 +95,12 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         return visible.first ?? .general
     }
 
+    /// The pane to show while a filter is active: `current` if it still matches,
+    /// otherwise the first match, or nil when nothing matches ("No matching settings").
+    public static func effectiveSelection(current: SettingsPane, filtered: [SettingsPane]) -> SettingsPane? {
+        filtered.contains(current) ? current : filtered.first
+    }
+
     private static func fold(_ s: String) -> String {
         s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
     }

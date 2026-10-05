@@ -2,7 +2,8 @@ import Foundation
 
 // Assembles the final note text from the summary body (Vikunja #2954):
 //
-//     [frontmatter]  body  [## Tracked terms]  [provenance footer]
+//     frontmatter, model body (with ## Highlights), ## Key moments, ## Tracked terms, provenance footer
+//     (the body handed in already includes Highlights and Key moments; each section appears once)
 //
 // Used by `Pipeline.processOne` and `Pipeline.regenerate`. With `NotesConfig` at its
 // defaults (everything off / empty) `assemble` returns exactly `body + footer`, so an

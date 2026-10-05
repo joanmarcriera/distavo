@@ -218,3 +218,26 @@ public struct CompiledReplacements {
         return result
     }
 }
+
+extension TranscriptSegments {
+    /// The timed segments with the replacement map applied (Vikunja #2939):
+    /// each segment's `text`, and each word token on its own (so a rule matches
+    /// a word only when it fits inside a single word). A multi-word phrase rule
+    /// corrects the segment text and leaves word tokens as they are: words are
+    /// never re-timed or merged. Speakers and times are untouched; a word a
+    /// rule deletes outright is dropped with its timing.
+    public func applying(_ rules: CompiledReplacements) -> TranscriptSegments {
+        if rules.isEmpty { return self }
+        var copy = self
+        for i in copy.segments.indices {
+            copy.segments[i].text = rules.apply(copy.segments[i].text)
+            if let words = copy.segments[i].words {
+                let fixed = words.map { w -> Word in
+                    var w = w; w.word = rules.apply(w.word); return w
+                }.filter { !$0.word.isEmpty }
+                copy.segments[i].words = fixed.isEmpty ? nil : fixed
+            }
+        }
+        return copy
+    }
+}

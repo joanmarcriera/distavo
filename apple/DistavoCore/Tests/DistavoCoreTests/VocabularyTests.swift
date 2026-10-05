@@ -192,6 +192,69 @@ final class VocabularyTests: XCTestCase {
         XCTAssertFalse(seen.prompt.contains("BaseTerm"))
     }
 
+    // MARK: Timed sidecar (#2943)
+
+    private func runWithTimedResult(replacements: [ReplacementRule]) async throws -> (TranscriptSegments, String?) {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-side-\(UUID().uuidString)")
+        let rec = root.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
+        let input = rec.appendingPathComponent("demo.opus")
+        try Data([0, 1, 2, 3]).write(to: input)
+        var cfg = Config()
+        cfg.recordingsDir = rec.path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        cfg.transcribe.replacements = replacements
+        let deps = PipelineDeps(
+            convertToWav: { _, dest in
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data([0]).write(to: dest)
+            },
+            transcribe: { _, _ in
+                ["segments": [[
+                    "start": 0.0, "end": 3.0, "speaker": "SPEAKER_00", "text": "We run the slum cluster",
+                    "words": [["word": "We", "start": 0.0, "end": 0.5], ["word": "run", "start": 0.5, "end": 1.0],
+                              ["word": "the", "start": 1.0, "end": 1.5], ["word": "slum", "start": 1.5, "end": 2.2],
+                              ["word": "cluster", "start": 2.2, "end": 3.0]],
+                ]]]
+            },
+            ollamaReachable: { _ in true },
+            summarise: { _, _, _, _ in PipelineTests.validNote })
+        let r = await Pipeline.processOne(path: input, config: cfg, deps: deps, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done)
+        let work = URL(fileURLWithPath: cfg.workDir)
+        let timed = try XCTUnwrap(TranscriptSegments.load(workDir: work, base: "demo"))
+        let raw = try? String(contentsOf: TranscriptSegments.url(workDir: work, base: "demo"), encoding: .utf8)
+        return (timed, raw)
+    }
+
+    func testSidecarCarriesReplacementsAndExportShowsThem() async throws {
+        let (timed, _) = try await runWithTimedResult(replacements: rules(("slum", "Slurm")))
+        XCTAssertEqual(timed.segments[0].text, "We run the Slurm cluster")
+        XCTAssertEqual(timed.segments[0].words?.map(\.word), ["We", "run", "the", "Slurm", "cluster"])
+        XCTAssertEqual(timed.segments[0].words?[3].start, 1.5)
+        XCTAssertEqual(timed.segments[0].speaker, "SPEAKER_00")
+        XCTAssertTrue(SubtitleExport.srt(timed).contains("Slurm cluster"))
+        XCTAssertFalse(SubtitleExport.srt(timed).contains("slum"))
+    }
+
+    func testSidecarIsByteIdenticalWithoutReplacements() async throws {
+        let (timed, raw) = try await runWithTimedResult(replacements: [])
+        XCTAssertEqual(timed.segments[0].text, "We run the slum cluster")
+        let unreplaced = try await runWithTimedResult(replacements: rules(("", "x"))).1
+        XCTAssertEqual(raw, unreplaced)
+    }
+
+    func testPhraseRuleCorrectsSegmentTextButNotWordTokens() {
+        let seg = TranscriptSegments.Segment(
+            start: 0, end: 2, text: "we use ember ebi daily", speaker: "SPEAKER_00",
+            words: [.init(word: "we", start: 0, end: 0.3), .init(word: "ember", start: 0.3, end: 0.8),
+                    .init(word: "ebi", start: 0.8, end: 1.2)])
+        let fixed = TranscriptSegments(segments: [seg]).applying(CompiledReplacements(rules(("ember ebi", "EMBL-EBI"))))
+        XCTAssertEqual(fixed.segments[0].text, "we use EMBL-EBI daily")
+        XCTAssertEqual(fixed.segments[0].words, seg.words)
+    }
+
     // MARK: Regenerate and the custom instruction (#2947)
 
     func testRegenerateCarriesGlossaryButDoesNotReapplyReplacements() async throws {

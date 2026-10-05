@@ -405,7 +405,11 @@ public enum Pipeline {
             TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
-            if let timed = TranscriptSegments(whisperXResult: result) {
+            if var timed = TranscriptSegments(whisperXResult: result) {
+                // Same replacement map as the clean transcript, so SRT/DOCX/PDF
+                // exports spell the term like the note does (Vikunja #2939).
+                let compiled = CompiledReplacements(transcribeConfig.replacements)
+                if !compiled.isEmpty { timed = timed.applying(compiled) }
                 do { try timed.save(workDir: workDir, base: base) }
                 catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }
             }

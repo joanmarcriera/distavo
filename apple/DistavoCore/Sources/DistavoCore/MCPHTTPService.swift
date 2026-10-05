@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // The HTTP-level policy of the loopback MCP server (Vikunja #2955, Direct edition): who may
 // talk to it and how. Pure and clock-injected; the Network.framework glue in the app target
@@ -21,12 +22,12 @@ import Foundation
 
 /// Constant-time equality for secrets (no early exit on the first differing byte).
 public enum ConstantTime {
+    /// Both sides are hashed first, so the comparison always runs over two fixed-size
+    /// 32-byte digests: the time does not depend on the lengths or on where they differ.
     public static func equals(_ a: String, _ b: String) -> Bool {
-        let x = Array(a.utf8), y = Array(b.utf8)
-        var diff = x.count ^ y.count
-        for i in 0..<max(x.count, y.count) {
-            diff |= Int(i < x.count ? x[i] : 0) ^ Int(i < y.count ? y[i] : 0)
-        }
+        let x = Array(SHA256.hash(data: Data(a.utf8))), y = Array(SHA256.hash(data: Data(b.utf8)))
+        var diff: UInt8 = 0
+        for i in 0..<32 { diff |= x[i] ^ y[i] }
         return diff == 0
     }
 }
@@ -97,8 +98,11 @@ public struct MCPHTTPService {
         guard limiter.allow(now: now) else {
             return .reject(.error(429, "Too many requests", headers: [("Retry-After", "60")]))
         }
-        guard let auth = head.header("authorization"), auth.hasPrefix("Bearer "),
-              ConstantTime.equals(String(auth.dropFirst(7)), token) else {
+        // Always run the comparison (a missing header compares "" against the token), so
+        // "no token", "wrong length" and "wrong token" take the same path and give the same answer.
+        let auth = head.header("authorization") ?? ""
+        let presented = auth.hasPrefix("Bearer ") ? String(auth.dropFirst(7)) : ""
+        guard ConstantTime.equals(presented, token), !presented.isEmpty else {
             return .reject(.error(401, "Unauthorized", headers: [("WWW-Authenticate", "Bearer")]))
         }
         let type = (head.header("content-type") ?? "").lowercased()

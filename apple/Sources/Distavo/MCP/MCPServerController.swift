@@ -2,88 +2,58 @@
 import AppKit
 import DistavoCore
 
-/// Owns the loopback MCP server's lifecycle (Vikunja #2955, Direct edition only).
+/// App-side owner of the loopback MCP server (Vikunja #2955, Direct edition only). A thin
+/// wrapper: the state machine (fail-closed, fresh token per start, revoke-then-restart on
+/// regenerate) is `MCPLifecycle` in DistavoCore, tested with a fake listener and keychain.
 ///
-/// Nothing listens unless `config.mcp.enabled` is true. `apply(config:)` is called at launch
-/// and on every Settings save; turning the toggle off, or quitting, stops the listener and
-/// drops open connections immediately. The server is READ-ONLY: its providers only list/read
-/// files in the notes folder (`MCPNoteCatalog`) and query the existing search index when the
-/// user has already enabled it. It never starts recordings, writes, deletes or runs anything.
+/// Nothing listens unless `config.mcp.enabled`. `apply(config:)` runs at launch and on every
+/// Settings save; turning the toggle off, or quitting, stops the listener synchronously. The
+/// server is READ-ONLY: it only lists/reads files in the notes folder (`MCPNoteCatalog`) and
+/// queries the search index when the user already enabled it.
 @MainActor
 final class MCPServerController: ObservableObject {
     static let shared = MCPServerController()
 
-    enum Status: Equatable {
-        case off
-        case starting
-        case running(port: Int)
-        case failed(String)
-    }
-
-    @Published private(set) var status: Status = .off
-    /// Bumped when the token changes so views can refresh.
-    @Published private(set) var tokenRevision = 0
-    /// Activity-log hook, set by the WatcherController.
+    @Published private(set) var status: MCPStatus = .off
+    /// Activity-log hook, set by the WatcherController. Only fixed strings are logged: never the
+    /// token, headers, request bodies or note text.
     var log: ((String) -> Void)?
 
-    private let server = MCPServer()
-    private var running: (port: Int, notesDir: URL)?
+    private let lifecycle: MCPLifecycle
 
-    /// Start, restart or stop to match `config`.
-    func apply(config: Config) {
-        guard config.mcp.enabled else { stop(); return }
-        let notesDir = Config.resolvePath(config.notesDir)
-        if let running, running.port == config.mcp.port, running.notesDir == notesDir,
-           status != .off, !isFailed { return }
-        guard let token = MCPTokenStore.token() else {
-            status = .failed("The Keychain is not available, so no access token could be created.")
-            return
+    private init() {
+        lifecycle = MCPLifecycle(listener: MCPServer(), tokens: MCPKeychainTokens()) { notesDir in
+            Self.providers(notesDir: notesDir)
         }
-        start(port: config.mcp.port, notesDir: notesDir, token: token)
-    }
-
-    private var isFailed: Bool { if case .failed = status { return true }; return false }
-
-    private func start(port: Int, notesDir: URL, token: String) {
-        status = .starting
-        running = (port, notesDir)
-        let providers = Self.providers(notesDir: notesDir)
-        server.start(port: port, token: token, providers: providers) { [weak self] state in
+        lifecycle.onStatusChange = { [weak self] new in
             Task { @MainActor in
                 guard let self else { return }
-                switch state {
-                case .running(let p):
-                    self.status = .running(port: p)
-                    self.log?("MCP server listening on 127.0.0.1:\(p) (read-only)")
-                case .failed(let why):
-                    self.status = .failed(TerminalSafe.neutralised(why))
-                    self.running = nil
-                    self.log?("MCP server could not start")
-                case .stopped:
-                    self.status = .off
+                self.status = new
+                switch new {
+                case .running(let p): self.log?("MCP server listening on 127.0.0.1:\(p) (read-only)")
+                case .off: break
+                case .failed: self.log?("MCP server is off (could not start)")
+                case .starting: break
                 }
             }
         }
     }
 
-    /// Stop immediately (toggle off, quit).
-    func stop() {
-        guard running != nil || status != .off else { return }
-        server.stop()
-        running = nil
-        if status != .off { log?("MCP server stopped") }
-        status = .off
+    /// Start, restart or stop to match `config`.
+    func apply(config: Config) {
+        lifecycle.apply(enabled: config.mcp.enabled, port: config.mcp.port,
+                        notesDir: Config.resolvePath(config.notesDir))
+        if !config.mcp.enabled { status = .off }
     }
 
-    /// New token; running clients holding the old one are locked out at once.
+    /// Stop immediately (quit).
+    func stop() { lifecycle.stop(); status = .off }
+
+    /// New token: the server is stopped first (old token dead at once), then restarted.
     func regenerateToken(config: Config) {
-        guard MCPTokenStore.regenerate() != nil else {
-            status = .failed("The Keychain is not available, so no access token could be created.")
-            return
-        }
-        tokenRevision += 1
+        lifecycle.regenerateToken(enabled: config.mcp.enabled, port: config.mcp.port,
+                                  notesDir: Config.resolvePath(config.notesDir))
         log?("MCP access token regenerated")
-        if config.mcp.enabled { running = nil; apply(config: config) }
     }
 
     // MARK: client config
@@ -91,29 +61,37 @@ final class MCPServerController: ObservableObject {
     var url: String? { if case .running(let p) = status { return "http://127.0.0.1:\(p)/mcp" } else { return nil } }
 
     func copyToken() {
-        guard let token = MCPTokenStore.token() else { return }
-        copy(token)
+        guard let token = lifecycle.currentToken else { return }
+        copySecret(token)
     }
 
     /// JSON snippet for MCP clients that take an HTTP server with headers (includes the secret).
     func copyClientConfig() {
-        guard let url, let token = MCPTokenStore.token() else { return }
+        guard let url, let token = lifecycle.currentToken else { return }
         let obj: [String: Any] = ["mcpServers": ["distavo": [
             "type": "http", "url": url, "headers": ["Authorization": "Bearer \(token)"]]]]
         guard let data = try? JSONSerialization.data(withJSONObject: obj, options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
         else { return }
-        copy(String(decoding: data, as: UTF8.self))
+        copySecret(String(decoding: data, as: UTF8.self))
     }
 
-    private func copy(_ text: String) {
+    /// Put a secret on the pasteboard marked concealed + transient (clipboard managers that honour
+    /// the nspasteboard.org convention skip it) and clear it again after a minute if untouched.
+    private func copySecret(_ text: String) {
         let pb = NSPasteboard.general
         pb.clearContents()
         pb.setString(text, forType: .string)
+        pb.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"))
+        pb.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+        let count = pb.changeCount
+        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+            if NSPasteboard.general.changeCount == count { NSPasteboard.general.clearContents() }
+        }
     }
 
     // MARK: providers
 
-    private static func providers(notesDir: URL) -> MCPProviders {
+    private nonisolated static func providers(notesDir: URL) -> MCPProviders {
         let info = Bundle.main.infoDictionary
         let version = info?["CFBundleShortVersionString"] as? String ?? "0"
         return MCPProviders(

@@ -26,7 +26,7 @@ struct MCPServerSection: View {
                     Text("Port")
                     TextField("automatic", text: portText)
                         .frame(width: 90).multilineTextAlignment(.trailing)
-                    HelpButton(text: "Leave empty to pick a free port each time the server starts. Choose a fixed port (1024 to 65535) if you want to keep the same address in your AI app’s settings.")
+                    HelpButton(text: "Leave empty (recommended): a free port is chosen each time the server starts, and the URL in “Copy client config” changes with it. A fixed port (1024 to 65535) keeps the address, but if another program already has that port the server stays OFF and says so; it never switches ports on its own. A token is only as safe as the port it is sent to, so prefer the automatic port.")
                 }
                 statusRow
                 HStack {
@@ -48,7 +48,7 @@ struct MCPServerSection: View {
 
     @ViewBuilder private var statusRow: some View {
         switch server.status {
-        case .off: SettingCaption("Not running. Save to start.")
+        case .off: SettingCaption("Not running. Save to start. A new access token is made each time the server starts, so copy the client config again after saving.")
         case .starting: SettingCaption("Starting…")
         case .running: SettingCaption("Running at \(server.url ?? "")")
         case .failed(let why): SettingCaption("Not running: \(why)")

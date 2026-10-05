@@ -15,13 +15,7 @@ import DistavoCore
 /// Limits here: at most `MCPHTTPService.maxConnections` open connections, and a hard
 /// whole-request deadline (`requestDeadline`) so a slow-drip client cannot hold a slot.
 /// One request per connection; the response always closes it.
-final class MCPServer: @unchecked Sendable {
-
-    enum State: Equatable {
-        case stopped
-        case running(port: Int)
-        case failed(String)
-    }
+final class MCPServer: MCPListening, @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "uk.co.riera.distavo.mcp.server")
     private var listener: NWListener?
@@ -29,8 +23,8 @@ final class MCPServer: @unchecked Sendable {
     private var connections: [ObjectIdentifier: Connection] = [:]
     private var generation = 0
 
-    /// Start (or restart) listening. `onState` is called on the server queue.
-    func start(port: Int, token: String, providers: MCPProviders, onState: @escaping @Sendable (State) -> Void) {
+    /// Start (or restart) listening. `onEvent` is called on the server queue.
+    func start(port: Int, token: String, providers: MCPProviders, onEvent onState: @escaping (MCPListenerEvent) -> Void) {
         queue.async { [self] in
             teardown()
             generation += 1
@@ -40,6 +34,9 @@ final class MCPServer: @unchecked Sendable {
             params.requiredLocalEndpoint = NWEndpoint.hostPort(host: .ipv4(.loopback), port: nwPort)
             params.requiredInterfaceType = .loopback
             params.acceptLocalOnly = true
+            // Exclusive bind: never share the port (no SO_REUSEADDR/REUSEPORT semantics), so a
+            // port that is taken fails the start instead of coexisting with another listener.
+            params.allowLocalEndpointReuse = false
             let listener: NWListener
             do { listener = try NWListener(using: params) } catch {
                 onState(.failed("Could not open the port: \(error.localizedDescription)")); return
@@ -71,11 +68,12 @@ final class MCPServer: @unchecked Sendable {
     }
 
     /// Stop listening and drop every open connection immediately.
-    func stop(then done: (@Sendable () -> Void)? = nil) {
-        queue.async { [self] in
+    /// SYNCHRONOUS: when this returns the listener is cancelled, every connection is dropped
+    /// and the in-memory token (inside `service`) is gone, so nothing can authenticate any more.
+    func stop() {
+        queue.sync {
             generation += 1
             teardown()
-            done?()
         }
     }
 

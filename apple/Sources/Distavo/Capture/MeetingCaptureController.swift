@@ -107,6 +107,20 @@ final class MeetingCaptureController: ObservableObject {
         return true
     }
 
+    private var startFromOfferInFlight = false
+
+    /// Start-only entry for the meeting-detection offer (Vikunja #2945): unlike
+    /// `toggle()` it can never turn a start still waiting on a permission or
+    /// pre-flight dialog into a stop, and ignores a second tap meanwhile.
+    func startIfIdle() {
+        guard !isRecording, !startFromOfferInFlight else { return }
+        startFromOfferInFlight = true
+        Task {
+            await start()
+            startFromOfferInFlight = false
+        }
+    }
+
     func toggle() {
         if isRecording { stop(reason: .manual) } else { Task { await start() } }
     }

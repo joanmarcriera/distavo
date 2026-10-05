@@ -18,6 +18,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private static let stopActionID = "distavo.silence.stop"
     private static let keepActionID = "distavo.silence.keep"
 
+    /// Meeting auto-detect offer (Vikunja #2945): "Record" / "Not now".
+    enum MeetingAction { case record, notNow }
+    static let meetingCategory = "distavo.meeting"
+    static let meetingIdentifier = "distavo.meeting"
+    private static let recordActionID = "distavo.meeting.record"
+    private static let notNowActionID = "distavo.meeting.notnow"
+    /// Called on the main actor when the user taps a meeting action.
+    @MainActor var onMeetingAction: ((MeetingAction) -> Void)?
+
     /// Called on the main actor when the user taps a silence action.
     @MainActor var onSilenceAction: ((SilenceAction) -> Void)?
 
@@ -33,6 +42,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.silenceCategory,
                                    actions: [stop, keep], intentIdentifiers: [], options: []),
+            UNNotificationCategory(identifier: Self.meetingCategory,
+                                   actions: [UNNotificationAction(identifier: Self.recordActionID,
+                                                                  title: "Record", options: [.foreground]),
+                                             UNNotificationAction(identifier: Self.notNowActionID,
+                                                                  title: "Not now", options: [])],
+                                   intentIdentifiers: [], options: []),
         ])
     }
 
@@ -67,6 +82,32 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.removePendingNotificationRequests(withIdentifiers: [Self.silenceIdentifier])
     }
 
+    /// Post (or replace) the "call detected - record it?" offer (Vikunja #2945).
+    func notifyMeeting(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.categoryIdentifier = Self.meetingCategory
+        UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: Self.meetingIdentifier, content: content, trigger: nil))
+    }
+
+    func removeMeetingNotification() {
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: [Self.meetingIdentifier])
+        center.removePendingNotificationRequests(withIdentifiers: [Self.meetingIdentifier])
+    }
+
+    /// True when the user has allowed banners (so the offer can be a notification;
+    /// otherwise the caller falls back to a menu-bar hint).
+    static func notificationsAllowed() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional: return true
+        default: return false
+        }
+    }
+
     // MARK: UNUserNotificationCenterDelegate
 
     /// Distavo is a menu-bar app that is always "foreground": show banners anyway.
@@ -76,6 +117,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
+        let meeting: MeetingAction? = switch response.actionIdentifier {
+        case Self.recordActionID: .record
+        case Self.notNowActionID: .notNow
+        default: nil
+        }
+        if let meeting {
+            RunLoop.main.perform(inModes: [.common]) { [weak self] in
+                MainActor.assumeIsolated { self?.onMeetingAction?(meeting) }
+            }
+            return
+        }
         let action: SilenceAction
         switch response.actionIdentifier {
         case Self.stopActionID: action = .stop

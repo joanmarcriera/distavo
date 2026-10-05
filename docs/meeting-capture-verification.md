@@ -92,6 +92,82 @@ defaults delete uk.co.riera.distavo distavo.didExplainCapture
    - Mic muted but the call audio playing (and the reverse) is never "silence".
    - The recorder cannot run in CI; this section is the only end-to-end check.
 
+## Meeting detection (Vikunja #2945) — UNVERIFIED until run on signed builds
+
+Unit tests cover the policy (`MeetingDetectorTests`, `MeetingDetectionConfigTests`).
+Everything below needs a real Mac and a real call. **Run it on BOTH a Direct build
+and a sandboxed App Store (TestFlight / Release-AppStore, signed) build** — the
+open questions are (a) whether Core Audio's per-process objects
+(`kAudioHardwarePropertyProcessObjectList`, then per process
+`kAudioProcessPropertyIsRunningInput` / `…BundleID` / `…PID`, macOS 14.2+) return
+real values, with no TCC prompt, under the App Sandbox, and (b) whether each call
+app captures under its own bundle id or a helper's. The signal is "WHICH process
+captures input", not the device-level "running somewhere" flag (that is also true
+while music plays on a headset). It is a read-only query: no stream, tap or
+aggregate device. No entitlement or usage string was added. If the App Store build
+never prompts while Direct does, report it (the reading is then `nil`; step 9).
+
+Setup: Settings → Recording → Meeting detection → turn ON "Offer to record when a
+call starts" (default list: Zoom, Teams, FaceTime, Webex, Slack, Discord). Allow
+notifications for Distavo. Do not launch a second Distavo build while your real
+one runs (shared config).
+
+1. **Off by default** — fresh config (or delete the `meeting_detection` block):
+   toggle is OFF; start a Zoom/FaceTime call: no prompt, ever. With it off, Activity
+   Monitor shows no extra wake-ups from Distavo (the timer exists only while on).
+2. **Prompt within 5 s** — ON; join/start a Zoom call (or FaceTime call to
+   yourself/another device) with the mic live. A notification "Zoom is using the
+   microphone — Record this call?" with **Record** and **Not now** buttons appears
+   within 5 s of the mic going live (debounce is 2 s) and names the app that is
+   actually capturing, even with other listed apps (Slack, Discord) open in the
+   background. Repeat for FaceTime and Teams if installed; note which bundle id
+   (see the log line "Meeting offer: … (<id>)") fired, especially for Teams/Zoom
+   helpers.
+3. **Record** — click Record: the normal pre-flight/permission flow (first time) then
+   the menu shows "Stop recording"; the recording works exactly as via the menu.
+   Nothing was recorded before the click (no purple indicator beforehand).
+4. **One prompt per call** — stay on the call for 2 min: no second prompt. Hang up,
+   start a new call: prompted again.
+5. **Not now** — end the call, start another, click Not now: no prompt for that app
+   for the snooze time (default 30 min; check a short value like 1 min and that the
+   next call after it expires prompts again). Other listed apps still prompt.
+6. **No prompt while recording** — start Record from the menu BEFORE the call
+   starts, then join: no prompt. Stop the recording mid-call: no prompt for the same
+   call and none for 30 s afterwards.
+7. **Notifications denied** (System Settings → Notifications → Distavo off): on a
+   call, open the menu-bar menu: "📞 Zoom is using the microphone" with **Record this
+   call** / **Not now** is shown instead. It disappears when the app stops capturing,
+   when a recording starts by any route, and when the feature is switched off.
+8. **Non-listed / idle / headset music** — a non-listed app capturing the mic (voice
+   memo, dictation) while Zoom/Slack/Discord are merely open: no prompt. Listed app
+   open, no call: no prompt. **Play music through a Bluetooth/USB headset with Slack
+   or Discord open: no prompt.** A call in app X while Keynote is frontmost: the offer
+   names X, and Not now snoozes X only.
+9. **Sandbox diagnosis (App Store build)** — if step 2 fails only in the sandboxed
+   build, check `~/Library/Logs/Distavo/distavo.log` ("Meeting detection on", and on
+   a call "Meeting offer: …"). Run `log stream --predicate 'process == "Distavo"'`
+   during a call to see sandbox denials, and note whether any TCC prompt appeared
+   (none is expected; if one does, stop and report). Report whether the process list
+   or the per-process flags fail. With the reading `nil`, only the optional frontmost
+   fallback (`meeting_detection.allow_frontmost_fallback`, no UI, default false)
+   remains; it says "A call may be in progress" and names no app.
+10. **Record start-only** — click Record while the pre-flight dialog is still open
+    from an earlier click: it never turns into a stop.
+11. **Browser caveat** — add your browser's id (`com.google.Chrome`, …) and open
+    meet.google.com with the mic on. Chrome and other Chromium/Electron apps often
+    capture from a helper process (e.g. `com.google.Chrome.helper`); helpers match
+    their listed app by dotted prefix, but whether the Core Audio process object
+    reports the helper's or the parent's id is unconfirmed - check the log line.
+    Any other mic use in that browser (a voice message) also prompts (documented).
+    Remove it again afterwards.
+12. **Sleep/wake** — enable, sleep the Mac with a call app open, wake mid-call: no
+    prompt storm; a call that is still live prompts once after about 2 s.
+
+Unconfirmed without a real call: that Zoom/Teams/FaceTime/Slack/Discord capture under
+their listed bundle id (or a dot-prefixed helper); that the per-process API works with
+no prompt in the sandbox. Webex `com.cisco.webexmeetingsapp` is unverified; Webex's
+main app is `Cisco-Systems.Spark`.
+
 ## Known caveats (documented, not bugs)
 
 - Loudspeakers (no headphones): the mic also hears the remote participants, so

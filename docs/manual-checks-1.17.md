@@ -182,3 +182,53 @@ unsigned or headless). Do NOT run from a build that shares your real config with
   A corrupt ledger is moved aside as `reminders-exported.json.corrupt-<time>` (never silently reset).
 - Ticking writes one byte in place (symlinks, tags and permissions are kept). The window scans the
   newest 500 notes only. Ticks wait up to ~3 s for a scan/regenerate to finish, else say to retry.
+## Transcript viewer (Vikunja #2951)
+
+Needs a signed or Debug build of the real app and a recording processed with this version (the
+timed sidecar `<base>.segments.json` only exists for those); do NOT run it beside your daily
+Distavo. Do once in Direct and once in the App Store edition (the latter reads the recording through
+the folder bookmark). Use one two-speaker recording of 10+ minutes, ideally also a 1-2 hour one.
+
+Playback and seek
+1. Menu bar -> **Open Transcript…**: window opens on the newest note; transcript grouped by speaker
+   turns, header lines `SPEAKER_00  ·  m:ss`. The bottom bar is enabled and shows `0:00 / <length>`.
+2. Click a word in the middle of a paragraph: audio jumps there and plays. Measure click-to-sound
+   with the screen recording at 60 fps: it must be under 0.3 s (try mp3/m4a and a WAV). Repeat 10
+   times; also click a word already highlighted and a word in a distant turn.
+3. While playing, the highlighted word follows the speech within about one word; the highlight moves
+   smoothly (no flicker, no visible re-layout) and the window follows the playing word by
+   scrolling it to the middle. Scroll by hand: following pauses for ~4 s then resumes.
+4. Space plays/pauses (text area focused, Edit off). Option-Command-Left/Right skip 5 s. Speed 1x/1.5x/2x
+   changes playback speed live without a seek.
+5. Click a speaker header: seeks to the start of that turn.
+6. Playback sources: a recording the app already compacted to a 16 kHz mono WAV plays; a stereo
+   in-app meeting recording (mic left, system audio right) plays both sides; a .mp4/.mov source plays audio.
+7. Move the recording out of the recordings folder, reopen the window: it opens, shows the text,
+   the bar is disabled with the line "Playback is off: the recording file was not found…"; reading
+   and editing still work.
+8. 2-hour transcript: window opens in about a second; during playback CPU stays low (Activity Monitor,
+   Distavo under ~10%); scrolling and typing stay responsive.
+
+Editing
+9. **Edit**: click into a paragraph and fix a word. Typing works; Return does nothing; you cannot
+   type into or delete a speaker header, and Backspace at the start of a paragraph does not merge
+   paragraphs. Save and Discard appear; the Note picker is disabled.
+10. **Save** (Command-S): banner says saved and that the note is stale. Work folder now has
+    `<base>.segments.orig.json` and `<base>.transcript.clean.orig.txt` (unchanged bytes of the
+    pre-edit files) next to the edited `<base>.segments.json` / `<base>.transcript.clean.txt`. Edit and save again:
+    the `.orig` files do not change. The note file is NOT modified by saving.
+11. The edited paragraph still plays and highlights as one block; unedited paragraphs still highlight word by word.
+12. **Re-summarise**: runs, the notes folder gets a new `<base>.md` built from the edited text
+    (check the corrected word appears) and `<base>.prev-<stamp>.md` holds the old note. Banner reports the outcome.
+13. **Revert to original transcript…**: confirm; text returns to the first version, `.orig` files
+    remain, Re-summarise would rewrite from it.
+14. Edit something, then close the window with the red button: prompt Save / Discard / Cancel; Cancel keeps it open;
+    Save keeps the window open if the save fails (make the work folder read-only to try: nothing changes on disk).
+15. Open Search Notes… (search enabled) and look for the corrected word: it is found in the transcript hit after a save.
+16. Old recording without a sidecar: window shows the cleaned transcript read-only, banner says timestamps were not saved,
+    Edit is disabled, the playback bar is disabled; Re-summarise still works.
+17. Dark mode: header text and the highlight are readable.
+
+Not covered by unit tests: all of the above window behaviour, AVPlayer seek latency, the highlight cadence,
+auto-scroll, and the App Store sandbox read of the recording. Speaker relabelling is supported by the edit
+model (`SegmentEdit.speaker`) but there is no UI for it in this version.

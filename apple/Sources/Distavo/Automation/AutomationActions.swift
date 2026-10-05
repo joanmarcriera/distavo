@@ -194,6 +194,12 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in AutomationHub.shared.controller?.removeStaleAutomationTemps() }
     }
 
+    /// Unsaved transcript edits (Vikunja #2951): ask Save / Discard / Cancel; no
+    /// transcript window with edits = quit as before.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated { TranscriptWindowController.shared.confirmTerminate() ? .terminateNow : .terminateCancel }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let command = AutomationCommand.parse(url) else {

@@ -3,7 +3,7 @@ import SwiftUI
 /// Menu-bar-only app (LSUIElement). The controller starts its scan loop on init
 /// and opens onboarding/settings via a dedicated AppKit window (see
 /// SettingsWindowController) rather than the SwiftUI Settings scene.
-@main
+/// The process entry point is `DistavoMain` (DistavoMain.swift), which calls `main()` below.
 struct DistavoApp: App {
     /// Receives `distavo://` URLs and the Finder Service (Automation/, #2953).
     @NSApplicationDelegateAdaptor(AutomationAppDelegate.self) private var automationDelegate

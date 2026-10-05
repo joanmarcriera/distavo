@@ -42,6 +42,9 @@ public struct CLIEnvironment {
     /// (an exclusive create), so a race between the check and the write cannot clobber.
     public var writeFile: (_ path: String, _ data: Data, _ overwrite: Bool) throws -> Void
     public var version: String
+    /// Whether standard output is a terminal (isatty). Output bound for a terminal is
+    /// neutralised (`TerminalSafe`); a file or pipe receives the text faithfully.
+    public var stdoutIsTerminal: Bool
 
     public init(loadConfig: @escaping () -> Config,
                 fileInfo: @escaping (String) -> CLIFileInfo?,
@@ -52,12 +55,14 @@ public struct CLIEnvironment {
                 writeStdout: @escaping (Data) -> Void,
                 writeStderr: @escaping (String) -> Void,
                 writeFile: @escaping (String, Data, Bool) throws -> Void,
-                version: String) {
+                version: String,
+                stdoutIsTerminal: Bool = false) {
         self.loadConfig = loadConfig; self.fileInfo = fileInfo
         self.convertToWav = convertToWav; self.transcribe = transcribe
         self.makeTempDir = makeTempDir; self.removeDir = removeDir
         self.writeStdout = writeStdout; self.writeStderr = writeStderr
         self.writeFile = writeFile; self.version = version
+        self.stdoutIsTerminal = stdoutIsTerminal
     }
 }
 
@@ -90,7 +95,7 @@ public struct CLIRunner {
     public func run(args: [String]) async -> Int32 {
         switch CLIArguments.parse(args) {
         case .failure(let error):
-            env.writeStderr("distavo: \(error.message)\nTry 'Distavo --help'.\n")
+            env.writeStderr(TerminalSafe.neutralised("distavo: \(error.message)\nTry 'Distavo --help'.\n"))
             return CLIExit.usage.rawValue
         case .success(.help):
             env.writeStdout(Data((Self.usage + "\n").utf8))
@@ -179,7 +184,8 @@ public struct CLIRunner {
 
         // 6. Deliver.
         if o.writesToStdout {
-            env.writeStdout(data)
+            env.writeStdout(env.stdoutIsTerminal
+                ? Data(TerminalSafe.neutralised(String(decoding: data, as: UTF8.self)).utf8) : data)
         } else if let out = o.output {
             do { try env.writeFile(out, data, o.force) } catch {
                 return fail(.input, "could not write \(CLIArguments.shown(out)): \(Self.describe(error))")
@@ -191,7 +197,7 @@ public struct CLIRunner {
     // MARK: helpers
 
     private func fail(_ code: CLIExit, _ message: String) -> CLIExit {
-        env.writeStderr("distavo: \(message)\n")
+        env.writeStderr(TerminalSafe.neutralised("distavo: \(message)\n"))
         return code
     }
 

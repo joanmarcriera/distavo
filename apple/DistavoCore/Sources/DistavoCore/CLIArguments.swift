@@ -98,9 +98,7 @@ public enum CLIArguments {
 
     /// Printable, truncated form of an untrusted argument for error messages.
     static func shown(_ s: String) -> String {
-        let clean = String(String.UnicodeScalarView(s.unicodeScalars.map {
-            $0.value < 0x20 || $0.value == 0x7f ? "?" : $0
-        }))
+        let clean = TerminalSafe.neutralised(s)
         return clean.count > 60 ? String(clean.prefix(60)) + "…" : clean
     }
 

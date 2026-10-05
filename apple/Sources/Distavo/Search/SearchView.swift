@@ -53,6 +53,10 @@ struct SearchView: View {
                 }
             }
             .listStyle(.inset)
+            Divider()
+            Text("Search keeps a local index of your notes and transcripts on this Mac. It is created when you first open this window; “Delete search index” removes it, and nothing is indexed again until you open Search Notes… again.")
+                .font(.caption).foregroundStyle(.secondary)
+                .padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(minWidth: 520, minHeight: 360)
         .onAppear { fieldFocused = true }

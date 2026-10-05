@@ -15,6 +15,13 @@ Menu bar -> **Search Notes…** opens a window that searches every note and ever
 
 `SearchIndex.passages(matching:limit:words:)` returns ~300-word passages around the matches of the best-ranked documents; `search(...)` returns snippets with score, date and speakers.
 
-## Privacy
+## Opt-in and privacy
 
-The index contains transcript text. It stays on this Mac and is covered by the same local-first rule as the notes. The window's ellipsis menu has **Rebuild search index** and **Delete search index** (removes the file; it is recreated the next time the window opens or a note is written).
+The index contains transcript text, so it is **opt-in by use**: nothing is created, read or written until you open **Search Notes…** for the first time. That first open sets an "index enabled" flag (`search.indexEnabled` in UserDefaults, default off; not a Config key), shows "Indexing…" and builds the index. Until then the launch reconcile and the after-note-written indexing do nothing, so existing installs behave exactly as before.
+
+The index stays on this Mac. The window's ellipsis menu has **Rebuild search index** and **Delete search index**. Delete clears the flag, cancels any pending search/refresh and removes the file; it stays deleted — nothing is indexed again — until you open Search Notes… again.
+
+## Robustness
+
+- A folder that cannot be listed (unplugged drive, unresolved sandbox bookmark) is not treated as empty: its rows are kept; only rows under folders that listed successfully are removed.
+- The database is opened with a 2 s busy timeout (Direct and Setapp share the path). It is deleted and rebuilt only when SQLite reports corruption / not-a-database, or the schema version was read and differs; a locked or otherwise unavailable file is left untouched and search is simply unavailable for that call.

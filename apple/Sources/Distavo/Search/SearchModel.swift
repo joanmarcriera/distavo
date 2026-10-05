@@ -31,6 +31,7 @@ final class SearchModel: ObservableObject {
     var notesDir = URL(fileURLWithPath: "/")
     var workDir = URL(fileURLWithPath: "/")
     private var pending: Task<Void, Never>?
+    private var refreshing: Task<Void, Never>?
 
     init(index: SearchIndex) { self.index = index }
 
@@ -41,9 +42,7 @@ final class SearchModel: ObservableObject {
         pending = Task { [index] in
             try? await Task.sleep(nanoseconds: 150_000_000)
             if Task.isCancelled { return }
-            let found = await Task.detached(priority: .userInitiated) {
-                index.search(q, speaker: spk, kind: kind, limit: 100)
-            }.value
+            let found = await SearchWork.run { index.search(q, speaker: spk, kind: kind, limit: 100) }
             if Task.isCancelled { return }
             hits = found
             if !found.contains(where: { $0.path == selection }) { selection = found.first?.path }
@@ -57,12 +56,15 @@ final class SearchModel: ObservableObject {
     func refresh(rebuild: Bool = false) {
         let (idx, notes, work) = (index, notesDir, workDir)
         busy = true
-        Task {
-            let names = await Task.detached(priority: .utility) { () -> [String] in
+        message = "Indexing…"
+        refreshing?.cancel()
+        refreshing = Task {
+            let names = await SearchWork.run { () -> [String] in
                 if rebuild { idx.rebuild(notesDir: notes, workDir: work) }
                 else { idx.reconcile(notesDir: notes, workDir: work) }
                 return idx.speakers()
-            }.value
+            }
+            if Task.isCancelled { return }
             speakers = names
             if let s = speaker, !names.contains(s) { speaker = nil }
             busy = false
@@ -71,12 +73,15 @@ final class SearchModel: ObservableObject {
     }
 
     func deleteIndex() {
+        // Disable first so any in-flight or queued work is inert, then remove the file.
+        // Nothing is indexed again until the user reopens "Search Notes…".
+        WatcherController.searchGate.disable()
+        pending?.cancel(); refreshing?.cancel()
+        busy = false
+        hits = []; speakers = []; selection = nil
+        message = "Search index deleted. Nothing is indexed until you open Search Notes… again."
         let idx = index
-        Task {
-            await Task.detached { idx.deleteAll() }.value
-            hits = []; speakers = []; selection = nil
-            message = "Search index deleted. It is rebuilt when you reopen this window."
-        }
+        SearchWork.fire { idx.deleteAll() }
     }
 
     /// Return / double-click: open the note (for a transcript hit, its note if
@@ -90,7 +95,7 @@ final class SearchModel: ObservableObject {
         guard FileManager.default.fileExists(atPath: target.path) else {
             message = "That file no longer exists."
             Task { [index, notesDir, workDir] in
-                await Task.detached { index.reconcile(notesDir: notesDir, workDir: workDir) }.value
+                _ = await SearchWork.run { index.remove(path: hit.path); return index.reconcile(notesDir: notesDir, workDir: workDir) }
                 scheduleSearch()
             }
             return

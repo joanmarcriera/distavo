@@ -102,7 +102,8 @@ signed, running build.
 3. Up/Down arrows move the selection while the field has focus; **Return** and **double-click** open the note in the default app. For a Transcripts hit, the note with the same name opens (the transcript file if the note was deleted).
 4. Kind control (Notes & transcripts / Notes / Transcripts) and the Speaker popup (labels such as SPEAKER_00 from your transcripts) narrow the results.
 5. Process a new recording, then search for a phrase from it: the new note is found without reopening the window. Edit a note by hand in an editor, reopen the window, search for the new text. Delete a note in Finder, reopen: it is gone from results (a stale hit shows "That file no longer exists").
-6. Ellipsis menu -> **Delete search index**: `~/Library/Application Support/Distavo/search-index.sqlite` disappears; reopen the window and it is recreated. **Rebuild search index** repopulates it.
+0. Before ever opening Search Notes…, `~/Library/Application Support/Distavo/search-index.sqlite` must not exist, even after processing a recording. Opening the window for the first time shows "Indexing…" and creates it.
+6. Ellipsis menu -> **Delete search index**: the file disappears and stays gone even after processing another recording; it is recreated only when you open Search Notes… again. **Rebuild search index** repopulates it.
 7. Quit Distavo, overwrite the index file with garbage, relaunch: Distavo works normally and search is rebuilt.
 
 Not exercised by unit tests: the SwiftUI window, focus, key handling, opening in the default app, the App Store container path.

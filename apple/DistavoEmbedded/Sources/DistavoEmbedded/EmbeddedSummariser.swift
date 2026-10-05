@@ -182,6 +182,38 @@ public enum EmbeddedSummariser {
         #endif
     }
 
+    /// One generic completion on Apple's model (Vikunja #2948, "Ask Your Notes"):
+    /// the prompt is sent as given — no note prompt, no note post-processing.
+    /// NOT serialised through `ModelCoordinator` (Apple note summaries are not
+    /// either): the caller (Ask) refuses to start while a recording is being
+    /// processed and the UI allows one Ask at a time. Checks cancellation right
+    /// before generating. The answer is clamped against the measured prompt size
+    /// when the OS can measure it.
+    public static func complete(prompt: String, maxOutputTokens: Int) async throws -> String {
+        if let reason = unavailableReason() { throw reason }
+        #if canImport(FoundationModels)
+        guard #available(macOS 26, *) else { throw EmbeddedSummariserError.unsupportedOS }
+        do {
+            try Task.checkCancellation()
+            let generator = FoundationModelsGenerator()
+            var out = maxOutputTokens
+            if let measured = await generator.tokenCount(prompt) {
+                let available = generator.contextSize - measured - EmbeddedSummaryBudget.defaultSafetyMargin
+                guard available > 100 else {
+                    throw EmbeddedSummariserError.failed("the question and excerpts were too long for the on-device model's window")
+                }
+                out = min(out, available)
+            }
+            let text = try await generator.generate(prompt, maxOutputTokens: out)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.isEmpty { throw EmbeddedSummariserError.emptyResult }
+            return text
+        }
+        #else
+        throw EmbeddedSummariserError.unsupportedOS
+        #endif
+    }
+
     #if canImport(FoundationModels)
     /// Apple's on-device model as a `SummaryGenerator`: a fresh session per
     /// call, Foundation Models' errors mapped onto Distavo's own error type.

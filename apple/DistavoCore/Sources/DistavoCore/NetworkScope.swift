@@ -19,41 +19,168 @@ public enum NetworkScope {
     /// hosts return false. Pure string check, no DNS. (Kept as the fast path and
     /// for callers that must stay synchronous and network-free.)
     public static func isLocalNetworkHost(_ urlString: String) -> Bool {
-        guard let host = URLComponents(string: urlString)?.host, !host.isEmpty else { return false }
-        if host == "localhost" || host == "127.0.0.1" || host == "::1" { return false }
-        if host.hasSuffix(".local") { return true }
-        if host.hasPrefix("10.") || host.hasPrefix("192.168.") { return true }
-        if host.hasPrefix("172.") {
-            let parts = host.split(separator: ".")
-            if parts.count >= 2, let second = Int(parts[1]), (16...31).contains(second) { return true }
+        guard let host = hostOf(urlString), !host.isEmpty else { return false }
+        if host == "localhost" { return false }
+        // An IP literal is judged by its numeric range ONLY. Prefix tests on the raw
+        // string would also match public names like `10.evil.example` (security fix).
+        if let nums = numericAddresses(host) {
+            return nums.allSatisfy { isPrivateAddress($0) && !isLoopbackAddress($0) }
         }
+        if host.hasSuffix(".local") { return true }
         if !host.contains(".") { return true }  // bare hostname → likely a LAN name
         return false
+    }
+
+    /// The host the connection will use, parsed ONCE from the URL's percent-ENCODED host
+    /// (never from a decoded or re-parsed string), or nil when the URL is rejected.
+    ///
+    /// - `name`: lower-case, no brackets, no zone id, no trailing dot.
+    /// - A `%` is accepted only inside a bracketed IPv6 literal as `%25<zone>` where the
+    ///   address is link-local (fe80::/10) and the zone is `[A-Za-z0-9._~-]+`; any other
+    ///   host containing `%` (encoded or decoded) is rejected, as is a bracketed
+    ///   non-IPv6 host, an unbracketed host containing `:`, and any userinfo.
+    struct ParsedHost: Equatable {
+        let name: String
+        let zone: String?
+        let bracketed: Bool
+    }
+
+    static func parseHost(_ urlString: String) -> ParsedHost? {
+        URLComponents(string: urlString).flatMap(parseHost)
+    }
+
+    /// Same, from components the caller already parsed (so the validator and the request
+    /// builder share ONE parse of the URL).
+    static func parseHost(_ c: URLComponents) -> ParsedHost? {
+        guard c.user == nil, c.password == nil,
+              var raw = c.percentEncodedHost, !raw.isEmpty else { return nil }
+        let bracketed = raw.hasPrefix("[") && raw.hasSuffix("]")
+        if raw.hasPrefix("[") != raw.hasSuffix("]") { return nil }
+        if bracketed { raw = String(raw.dropFirst().dropLast()) }
+        var zone: String?
+        if raw.contains("%") {
+            guard bracketed, let r = raw.range(of: "%25") else { return nil }
+            let z = String(raw[r.upperBound...])
+            raw = String(raw[..<r.lowerBound])
+            guard !z.isEmpty, !raw.contains("%"), !z.contains("%"),
+                  z.unicodeScalars.allSatisfy({ ($0.isASCII && ($0.properties.isAlphabetic || ("0"..."9").contains(Character($0)))) || "._~-".unicodeScalars.contains($0) }),
+                  let v6 = ipv6Bytes(raw), v6[0] == 0xfe, (v6[1] & 0xc0) == 0x80 else { return nil }
+            zone = z
+        }
+        if bracketed { guard ipv6Bytes(raw) != nil else { return nil } }
+        else if raw.contains(":") { return nil }
+        raw = raw.lowercased()
+        if raw.hasSuffix(".") { raw.removeLast() }
+        return raw.isEmpty ? nil : ParsedHost(name: raw, zone: zone, bracketed: bracketed)
+    }
+
+    /// Host name for CLASSIFICATION-ONLY callers (permission pre-warning, diagnostics): the
+    /// strict `parseHost`, but userinfo is stripped first so `http://user:pw@192.168.0.5` is
+    /// classified exactly as the shipped app did. Ask never uses this — it uses the strict
+    /// parse, which rejects userinfo.
+    static func hostOf(_ urlString: String) -> String? {
+        guard var c = URLComponents(string: urlString) else { return nil }
+        c.user = nil; c.password = nil
+        return parseHost(c)?.name
+    }
+
+    /// Numeric addresses `host` denotes the way the socket layer reads it
+    /// (`getaddrinfo` with AI_NUMERICHOST): dotted quads AND the legacy decimal /
+    /// octal / hex forms (`2130706433`, `0x7f.1`, `010.0.0.1`) are normalised to their
+    /// canonical address. nil when `host` is a name (needs resolving).
+    static func numericAddresses(_ host: String) -> [String]? {
+        var hints = addrinfo(ai_flags: AI_NUMERICHOST, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
+                             ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
+        var result: UnsafeMutablePointer<addrinfo>?
+        guard getaddrinfo(host, nil, &hints, &result) == 0 else { return nil }
+        defer { if let result { freeaddrinfo(result) } }
+        guard let out = addressStrings(result), !out.isEmpty else { return nil }
+        return out
+    }
+
+    /// What the system resolver returns when its answer could not be fully read and
+    /// classified. It is not an IP, so every classifier refuses it ("cannot verify").
+    static let unverifiableAnswer = "unverifiable-resolver-answer"
+
+    /// Most entries of a `getaddrinfo` chain that are read; a longer chain is not "mostly fine".
+    static let maxChainEntries = 64
+
+    /// Numeric strings for a `getaddrinfo` result chain, trusting NOTHING in it and failing
+    /// CLOSED: returns nil ("cannot verify") when ANY entry cannot be fully read — a nil
+    /// `ai_addr`, a family other than IPv4/IPv6, an `ai_addrlen` too short for its family, a
+    /// failed conversion — or when the chain is longer than `maxChainEntries` (or cyclic), so
+    /// an unvalidated remainder is never silently accepted. An empty or nil chain is `[]`
+    /// (callers refuse an empty result). The caller owns `freeaddrinfo`.
+    static func addressStrings(_ head: UnsafeMutablePointer<addrinfo>?) -> [String]? {
+        var out: [String] = []
+        var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+        var node = head
+        var seen = 0
+        while let n = node {
+            seen += 1
+            if seen > maxChainEntries { return nil }
+            guard let addr = n.pointee.ai_addr else { return nil }
+            let len = Int(n.pointee.ai_addrlen)
+            switch n.pointee.ai_family {
+            case AF_INET: guard len >= MemoryLayout<sockaddr_in>.size else { return nil }
+            case AF_INET6: guard len >= MemoryLayout<sockaddr_in6>.size else { return nil }
+            default: return nil
+            }
+            guard getnameinfo(addr, socklen_t(len), &buf, socklen_t(buf.count), nil, 0, NI_NUMERICHOST) == 0 else { return nil }
+            out.append(String(cString: buf))
+            node = n.pointee.ai_next
+        }
+        return out
+    }
+
+    /// Strict dotted-quad parse (`inet_pton`): "10.evil.example" and "10.1" are nil.
+    static func ipv4Bytes(_ s: String) -> [UInt8]? {
+        var addr = in_addr()
+        guard inet_pton(AF_INET, s, &addr) == 1 else { return nil }
+        return withUnsafeBytes(of: &addr) { Array($0) }
+    }
+
+    /// IPv6 literal (zone id stripped) as 16 bytes.
+    static func ipv6Bytes(_ s: String) -> [UInt8]? {
+        // A zone id is NOT stripped here: `parseHost` is the only place that accepts one.
+        let bare = s.split(separator: "%").first.map(String.init) ?? s
+        var addr = in6_addr()
+        guard inet_pton(AF_INET6, bare, &addr) == 1 else { return nil }
+        return withUnsafeBytes(of: &addr) { Array($0) }
+    }
+
+    /// The IPv4 bytes of an IPv4-mapped IPv6 address (`::ffff:a.b.c.d`), else nil.
+    private static func mappedV4(_ v6: [UInt8]) -> [UInt8]? {
+        guard v6[0..<10].allSatisfy({ $0 == 0 }), v6[10] == 0xff, v6[11] == 0xff else { return nil }
+        return Array(v6[12..<16])
+    }
+
+    /// True for a numeric loopback address (`127/8`, `::1`, `::ffff:127.x`).
+    public static func isLoopbackAddress(_ ip: String) -> Bool {
+        if let v4 = ipv4Bytes(ip) { return v4[0] == 127 }
+        guard let v6 = ipv6Bytes(ip) else { return false }
+        if v6 == [UInt8](repeating: 0, count: 15) + [1] { return true }
+        return mappedV4(v6)?[0] == 127
     }
 
     /// True if a numeric IP is in a private / link-local range that requires the
     /// Local Network permission. **Loopback (`127/8`, `::1`) returns false** — it
     /// needs no permission.
     public static func isPrivateAddress(_ ip: String) -> Bool {
-        // IPv4
-        let octets = ip.split(separator: ".")
-        if octets.count == 4 {
-            let nums = octets.compactMap { Int($0) }
-            if nums.count == 4, nums.allSatisfy({ (0...255).contains($0) }) {
-                switch (nums[0], nums[1]) {
-                case (10, _): return true
-                case (172, 16...31): return true
-                case (192, 168): return true
-                case (169, 254): return true          // link-local
-                default: return false                  // incl. 127.x loopback, public
-                }
+        func privateV4(_ o: [UInt8]) -> Bool {
+            switch (o[0], o[1]) {
+            case (10, _): return true
+            case (172, 16...31): return true
+            case (192, 168): return true
+            case (169, 254): return true          // link-local
+            default: return false                  // incl. 127.x loopback, public
             }
         }
-        // IPv6 (strip zone id, lowercase)
-        let v6 = ip.split(separator: "%").first.map(String.init)?.lowercased() ?? ip.lowercased()
-        if v6 == "::1" { return false }             // loopback
-        if v6.hasPrefix("fe80") { return true }     // link-local
-        if v6.hasPrefix("fc") || v6.hasPrefix("fd") { return true }  // ULA fc00::/7
+        if let v4 = ipv4Bytes(ip) { return privateV4(v4) }
+        guard let v6 = ipv6Bytes(ip) else { return false }
+        if let mapped = mappedV4(v6) { return privateV4(mapped) }
+        if v6[0] == 0xfe && (v6[1] & 0xc0) == 0x80 { return true }   // link-local fe80::/10
+        if (v6[0] & 0xfe) == 0xfc { return true }                      // ULA fc00::/7
         return false
     }
 
@@ -63,20 +190,11 @@ public enum NetworkScope {
         var hints = addrinfo(ai_flags: 0, ai_family: AF_UNSPEC, ai_socktype: SOCK_STREAM,
                              ai_protocol: 0, ai_addrlen: 0, ai_canonname: nil, ai_addr: nil, ai_next: nil)
         var result: UnsafeMutablePointer<addrinfo>?
-        guard getaddrinfo(host, nil, &hints, &result) == 0, let head = result else { return [] }
-        defer { freeaddrinfo(head) }
-        var ips: [String] = []
-        var buf = [CChar](repeating: 0, count: Int(NI_MAXHOST))
-        var node = Optional(head)
-        while let n = node {
-            if let addr = n.pointee.ai_addr,
-               getnameinfo(addr, n.pointee.ai_addrlen, &buf, socklen_t(buf.count),
-                           nil, 0, NI_NUMERICHOST) == 0 {
-                ips.append(String(cString: buf))
-            }
-            node = n.pointee.ai_next
-        }
-        return ips
+        guard getaddrinfo(host, nil, &hints, &result) == 0 else { return [] }
+        defer { if let result { freeaddrinfo(result) } }
+        // An answer that cannot be fully read is reported as an unverifiable marker (never a
+        // partial list): it is not an IP, so the Ask guard refuses the whole resolution.
+        return addressStrings(result) ?? [unverifiableAnswer]
     }
 
     /// True if the URL is local by name, or resolves to a private address. Short-
@@ -84,9 +202,12 @@ public enum NetworkScope {
     public static func isLocalOrResolvesLocal(_ urlString: String,
                                               resolver: HostResolver = systemResolver) -> Bool {
         if isLocalNetworkHost(urlString) { return true }
-        guard let host = URLComponents(string: urlString)?.host, !host.isEmpty,
-              host != "localhost", host != "127.0.0.1", host != "::1" else { return false }
-        return resolver(host).contains(where: isPrivateAddress)
+        guard let host = hostOf(urlString), !host.isEmpty, host != "localhost",
+              numericAddresses(host) == nil else { return false }
+        // EVERY address must be private: a name that also resolves to a public
+        // address can send the request off the LAN.
+        let ips = resolver(host)
+        return !ips.isEmpty && ips.allSatisfy(isPrivateAddress)
     }
 
     /// True if any configured server is on the local network. The WhisperX URL
@@ -104,11 +225,11 @@ public enum NetworkScope {
     /// unreachable one usually just means nothing is installed/running on this
     /// Mac — an expected state, not an app failure.
     public static func isLoopbackHost(_ urlString: String) -> Bool {
-        guard var host = URLComponents(string: urlString)?.host, !host.isEmpty else { return false }
-        // Depending on SDK, an IPv6 literal may keep its brackets ("[::1]").
-        host = host.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
-        if host == "localhost" || host == "::1" { return true }
-        return host.hasPrefix("127.")
+        guard let host = hostOf(urlString), !host.isEmpty else { return false }
+        if host == "localhost" { return true }
+        // Numeric forms only: `127.evil.example` is NOT loopback, `2130706433` is.
+        guard let nums = numericAddresses(host) else { return false }
+        return nums.allSatisfy(isLoopbackAddress)
     }
 
     /// How Test Connections should present an endpoint's result. Distinguishes

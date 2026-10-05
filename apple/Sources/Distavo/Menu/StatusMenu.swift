@@ -85,6 +85,7 @@ struct StatusMenu: View {
         Button("Rename Speakers…") { controller.showRenameSpeakers() }
         Button("Open Action Items…") { controller.showActionItems() }
         Button("Open Transcript…") { controller.showTranscriptViewer() }
+        Button("Ask Your Notes…") { controller.showAskNotes() }
         Button("Copy last transcript") { controller.copyLastTranscript() }
             .disabled(!controller.hasLastTranscript)
         Button(controller.hasLastNote && !controller.canExportLastTranscript

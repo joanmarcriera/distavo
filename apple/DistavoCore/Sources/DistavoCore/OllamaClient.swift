@@ -13,10 +13,11 @@ public struct OllamaClient {
     public init(session: URLSession = .shared) { self.session = session }
 
     /// GET {url}/api/tags — reachable iff HTTP 200 (errors swallowed → false).
-    public func reachable(_ url: String, timeout: TimeInterval = 4) async -> Bool {
+    public func reachable(_ url: String, timeout: TimeInterval = 4, headers: [String: String] = [:]) async -> Bool {
         guard let endpoint = URL(string: url.trimmedTrailingSlashes() + "/api/tags") else { return false }
         var request = URLRequest(url: endpoint)
         request.timeoutInterval = timeout
+        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
         do {
             let (_, response) = try await session.data(for: request)
             return (response as? HTTPURLResponse)?.statusCode == 200
@@ -28,7 +29,8 @@ public struct OllamaClient {
     /// POST {url}/api/generate — returns the trimmed `response` text or throws.
     public func generate(
         url: String, model: String, prompt: String,
-        options: SummariseOptions, timeout: TimeInterval = 3600
+        options: SummariseOptions, timeout: TimeInterval = 3600,
+        headers: [String: String] = [:]
     ) async throws -> String {
         guard let endpoint = URL(string: url.trimmedTrailingSlashes() + "/api/generate") else {
             throw OllamaError("invalid Ollama URL")
@@ -37,6 +39,7 @@ public struct OllamaClient {
         request.httpMethod = "POST"
         request.timeoutInterval = timeout
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }   // e.g. Host when the URL host was pinned to an IP (Ask)
         // "think": false — thinking models (gemma4) reason by default on Ollama, burn the
         // token budget and degenerate into empty/looping notes (Vikunja #2666). Notes need
         // the answer only, so always opt out.

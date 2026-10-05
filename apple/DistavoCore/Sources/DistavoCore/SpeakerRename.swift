@@ -58,13 +58,15 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     /// later rename of a merged name, moves all of them); a label that is not
     /// tracked yet is recorded as its own original. Computed against a snapshot,
     /// so a swap composes correctly.
-    func composing(_ applied: [String: String]) -> SpeakerNames {
+    func composing(_ applied: [String: String], presentLabels: Set<String> = []) -> SpeakerNames {
         var next = names
-        // Merging into a label we do not track yet (SPEAKER_01 -> SPEAKER_00):
-        // record it as its own original so a later rename of the merged name
+        // Merging into a label that exists in the files but is not tracked yet
+        // (SPEAKER_01 -> SPEAKER_00): record it as its own original so a later rename of the merged name
         // carries it along too. The loop below overwrites it if it is itself renamed.
         let currentNames = Set(names.values)
-        for (_, new) in applied where names[new] == nil && !currentNames.contains(new) { next[new] = new }
+        for (_, new) in applied where presentLabels.contains(new) && names[new] == nil && !currentNames.contains(new) {
+            next[new] = new
+        }
         for (old, new) in applied {
             let followers = names.filter { $0.value == old }.map(\.key)
             if followers.isEmpty { if names[old] == nil { next[old] = new } }
@@ -258,7 +260,8 @@ public enum SpeakerRename {
         // idempotent re-apply leaves no trace.
         if !jobs.isEmpty {
             let current = SpeakerNames.load(workDir: workDir, base: base) ?? SpeakerNames()
-            jobs.append(Job(url: namesPath, data: try current.composing(mapping).encoded(), isNote: false))
+            let present = Set(detectSpeakers(note: note, transcript: transcript, segments: segments).map(\.label))
+            jobs.append(Job(url: namesPath, data: try current.composing(mapping, presentLabels: present).encoded(), isNote: false))
         }
         if jobs.isEmpty { return SpeakerRenameResult(changedFiles: [], backup: nil) }
 

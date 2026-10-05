@@ -28,6 +28,7 @@ struct QueueDiskSnapshot {
     var failed: [(base: String, error: String)]
     var tooShort: [(base: String, reason: String)]
     var durations: [String: Double]
+    var unreadable: [String] = []
 }
 
 @MainActor
@@ -42,8 +43,10 @@ final class QueueModel: ObservableObject {
     private var publishScheduled = false
     private static let publishInterval = 0.25   // ~4 Hz
 
-    /// Recordings the user asked to retry; the scan loop takes these before the next file.
-    private(set) var retryURLs: [URL] = []
+    /// Retry queue + never-twice bookkeeping (DistavoCore, unit-tested).
+    let coordinator = QueueCoordinator()
+    /// Files whose duration could not be read: not probed again every refresh.
+    private var unreadableDurations: Set<String> = []
     /// Serialises drag-and-drop copies across drops.
     var copyChain: Task<Void, Never>?
     private var copyCounter = 0
@@ -82,15 +85,19 @@ final class QueueModel: ObservableObject {
         guard working.item(base)?.durationSeconds == nil else { return }
         let url = URL(fileURLWithPath: path)
         Task.detached(priority: .utility) { [weak self] in
-            guard let seconds = AudioConverter.durationSeconds(of: url) else { return }
-            await MainActor.run { self?.mutate { $0.setDuration(base: base, seconds: seconds) } }
+            let seconds = AudioConverter.durationSeconds(of: url)
+            await MainActor.run {
+                guard let seconds else { self?.unreadableDurations.insert(base); return }
+                self?.mutate { $0.setDuration(base: base, seconds: seconds) }
+            }
         }
     }
 
     func isCancelled(base: String) -> Bool { working.item(base)?.state == .cancelled }
     func item(_ base: String) -> QueueItem? { working.item(base) }
+    /// Bases whose duration is known or hopeless (unreadable): skip probing them.
     var knownDurationBases: Set<String> {
-        Set(working.items.filter { $0.durationSeconds != nil }.map(\.base))
+        Set(working.items.filter { $0.durationSeconds != nil }.map(\.base)).union(unreadableDurations)
     }
 
     func apply(_ snap: QueueDiskSnapshot, takenAt: Date) {
@@ -98,12 +105,10 @@ final class QueueModel: ObservableObject {
             $0.sync(pending: snap.pending, failed: snap.failed, tooShort: snap.tooShort, takenAt: takenAt)
             for (base, seconds) in snap.durations { $0.setDuration(base: base, seconds: seconds) }
         }
+        unreadableDurations.formUnion(snap.unreadable)
     }
 
-    // MARK: Retry queue / copy rows
-
-    func requestRetry(_ url: URL) { if !retryURLs.contains(url) { retryURLs.append(url) } }
-    func takeRetry() -> URL? { retryURLs.isEmpty ? nil : retryURLs.removeFirst() }
+    // MARK: Copy rows
 
     func beginCopy(displayName: String) -> String {
         copyCounter += 1
@@ -117,29 +122,18 @@ extension WatcherController {
 
     // MARK: Scan loop
 
-    /// The per-file loop of `scanOnce`: strictly sequential, re-checks the pause
-    /// flag before EVERY file (so Pause finishes the current file then holds),
-    /// skips files cancelled for this session, and runs any queued retry before
-    /// the next file in the list.
-    func runQueueLoop(_ pending: [URL], config cfg: Config) async {
+    /// The per-file loop of `scanOnce`, delegated to `QueueCoordinator`: strictly
+    /// sequential, pause decided per file by `PausePolicy`, files skipped for this
+    /// session not started, queued retries run before the next file, no file twice.
+    func runQueueLoop(_ pending: [URL], config cfg: Config, trigger: ScanTrigger) async {
         let recordingsDir = Config.resolvePath(cfg.recordingsDir)
         func baseOf(_ url: URL) -> String { DistavoState.baseFor(recordingsDir: recordingsDir, path: url) }
-        var handled = Set<URL>()   // never process one file twice in a single loop
-        await QueueScan.run(
-            paths: pending,
-            shouldContinue: { !self.isPaused },
-            shouldStart: { url in
-                !handled.contains(url) && !self.queueModel.retryURLs.contains(url)
-                    && !self.queueModel.isCancelled(base: baseOf(url))
-            },
-            priority: {
-                guard let url = self.queueModel.takeRetry() else { return nil }
-                handled.remove(url)
-                return url
-            },
+        await queueModel.coordinator.run(
+            paths: pending, trigger: trigger,
+            isPaused: { self.isPaused },
+            isCancelled: { self.queueModel.isCancelled(base: baseOf($0)) },
             begin: { url in
-                handled.insert(url)
-                self.status = "Processing \(url.lastPathComponent)…"
+                self.setStatus("Processing \(url.lastPathComponent)…")
                 self.log("Processing \(url.lastPathComponent)")
                 self.queueModel.begin(base: baseOf(url), path: url.path)
             },
@@ -170,13 +164,16 @@ extension WatcherController {
             let urls = DistavoState.iterPending(recordingsDir: recordings, state: store)
             var pending: [PendingFile] = []
             var durations: [String: Double] = [:]
+            var unreadable: [String] = []
             for url in urls {
                 let base = DistavoState.baseFor(recordingsDir: recordings, path: url)
                 pending.append(PendingFile(base: base, path: url.path))
-                if !known.contains(base), let d = AudioConverter.durationSeconds(of: url) { durations[base] = d }
+                if !known.contains(base) {
+                    if let d = AudioConverter.durationSeconds(of: url) { durations[base] = d } else { unreadable.append(base) }
+                }
             }
             return QueueDiskSnapshot(pending: pending, failed: store.failedBases(),
-                                     tooShort: store.tooShortBases(), durations: durations)
+                                     tooShort: store.tooShortBases(), durations: durations, unreadable: unreadable)
         }.value
         guard let snapshot else { return }
         queueModel.apply(snapshot, takenAt: takenAt)
@@ -189,8 +186,9 @@ extension WatcherController {
 
     // MARK: Pause
 
-    /// Same flag as the menu's "Pause watching": the timer stops starting scans and
-    /// `runQueueLoop` stops between files. Session-only (not persisted).
+    /// Same flag as the menu's "Pause watching": the timer stops starting scans and a
+    /// running batch stops between files. Pause holds AUTOMATIC work only: "Process
+    /// now", Retry and the automation entry points still run. Session-only.
     func toggleQueuePause() {
         togglePause()
         if !isPaused { Task { await scanOnce() } }
@@ -223,25 +221,19 @@ extension WatcherController {
             return
         }
         queueModel.mutate { _ = $0.markRetrying(base: base) }
-        queueModel.requestRetry(url)
+        queueModel.coordinator.requestRetry(url)
         log("Retrying \(url.lastPathComponent)")
         refreshFailedRecordings()
-        // A running scan takes the retry before its next file; paused holds it.
-        if !isScanning && !isPaused { Task { await runRetryBatch() } }
+        // User-initiated: runs even while paused. A running batch takes the retry before
+        // its next file; otherwise this one-file pass does (no folder rescan).
+        Task { await runRetryBatch() }
     }
 
     /// Process only the queued retries (no folder listing), under the scan lock.
     private func runRetryBatch() async {
-        guard !isScanning, !isPaused else { return }
-        isScanning = true
-        defer { isScanning = false }
-        processingActive = true
-        processingPhase = .loading
-        refreshActivity()
-        await runQueueLoop([], config: config)
-        processingActive = false
-        refreshFailedRecordings()
-        refreshActivity()
+        await runExclusivePass(onlyIf: { self.queueModel.coordinator.hasRetries }) {
+            await runQueueLoop([], config: config, trigger: .userInitiated)
+        }
         await refreshQueue()
     }
 
@@ -279,6 +271,7 @@ extension WatcherController {
               queueModel.item(base)?.state.isRunning != true else { return }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            queueModel.coordinator.discardRetry(url)   // a trashed file must never be handed to processOne
             if let store = store() { store.clearFailed(base); store.clearTooShort(base); store.clearDeferred(base) }
             queueModel.mutate { $0.remove(base: base) }
             log("Moved to the Bin from the queue: \(url.lastPathComponent)")

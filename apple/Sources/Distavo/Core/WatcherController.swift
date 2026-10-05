@@ -16,7 +16,7 @@ final class WatcherController: ObservableObject {
     /// `recordingSilent` = recording, but a silence suggestion is pending (#2665).
     enum IconState { case idle, recording, recordingSilent, loading, transcribing, done }
 
-    @Published var status = "Idle"   // internal setter: WatcherController+Queue updates it
+    @Published private(set) var status = "Idle"
     @Published private(set) var iconState: IconState = .idle
     @Published var isPaused = false
     @Published private(set) var allowLocalOllama: Bool
@@ -52,7 +52,7 @@ final class WatcherController: ObservableObject {
 
     private(set) var config: Config
     private(set) var deps: PipelineDeps   // read by WatcherController+Queue
-    let notifier = Notifier()
+    private let notifier = Notifier()
     private var recordingCancellable: AnyCancellable?
     private var silenceCancellable: AnyCancellable?
     /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
@@ -82,11 +82,11 @@ final class WatcherController: ObservableObject {
     private let needsOnboarding: Bool
     private let activityLog = ActivityLog()
 
-    var isScanning = false   // internal: the +Queue extension takes the same single-flight lock
-    var processingActive = false
+    private(set) var isScanning = false   // read by +Queue; written only here (see runExclusivePass)
+    private(set) var processingActive = false
     /// Which sub-phase the current scan is in (loading vs transcribing); only
     /// meaningful while `processingActive`.
-    var processingPhase: IconState = .loading
+    private(set) var processingPhase: IconState = .loading
     private var unseenDone = false
     private var deferredBases: Set<String> = []
     private var lastDone: (base: String, note: URL?, transcript: URL?)?
@@ -237,7 +237,7 @@ final class WatcherController: ObservableObject {
         reconcileSearchIndex()   // #2942, background
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
-            if !isPaused { await scanOnce() }
+            if !isPaused { await scanOnce(.automatic) }
             try? await Task.sleep(nanoseconds: UInt64(max(1, watchIntervalSeconds)) * 1_000_000_000)
         }
     }
@@ -407,8 +407,12 @@ final class WatcherController: ObservableObject {
 
     /// Process all pending recordings (self-serializing so overlapping timer
     /// ticks and "Process now" can't double-process).
-    func scanOnce() async {
+    /// `trigger`: only the timer is `.automatic`; every user-initiated entry point
+    /// (Process now, Shortcuts/URL, Finder Service, Retry failed...) runs even while
+    /// "Pause watching" is on - pause holds automatic work only (`PausePolicy`).
+    func scanOnce(_ trigger: ScanTrigger = .userInitiated) async {
         if isScanning { return }
+        guard PausePolicy.mayStart(trigger, paused: isPaused) else { return }
         isScanning = true
         defer { isScanning = false }
 
@@ -424,8 +428,30 @@ final class WatcherController: ObservableObject {
         processingActive = true
         processingPhase = .loading
         refreshActivity()
-        await runQueueLoop(pending, config: cfg)   // sequential, pause-aware (+Queue)
+        await runQueueLoop(pending, config: cfg, trigger: trigger)   // sequential, pause-aware (+Queue)
         processingActive = false
+        if isPaused { status = "Paused" }   // a pause switched on mid-pass must not leave "Last note: …"
+        refreshFailedRecordings()
+        refreshActivity()
+    }
+
+    /// Helpers for WatcherController+Queue (it cannot write the private(set) state).
+    func setStatus(_ text: String) { status = text }
+
+    /// One processing pass under the single-flight lock for the +Queue extension
+    /// (waits for a running scan, like `runVariant`). `onlyIf` is re-checked once
+    /// the lock is held, so a pass with nothing to do never flashes the icon.
+    func runExclusivePass(onlyIf: () -> Bool, _ body: () async -> Void) async {
+        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        isScanning = true
+        defer { isScanning = false }
+        guard onlyIf() else { return }
+        processingActive = true
+        processingPhase = .loading
+        refreshActivity()
+        await body()
+        processingActive = false
+        if isPaused { status = "Paused" }
         refreshFailedRecordings()
         refreshActivity()
     }

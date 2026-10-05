@@ -263,14 +263,45 @@ final class MeetingCaptureController: ObservableObject {
         let ask = config.askSpeakersOnStop && silenceMinutes == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
-        let outcome = recorder.stop(deferFinalize: ask)
+        let recStart = recorder.startedAt ?? startedAt ?? Date()
+        // Calendar lookup (#2946) happens AFTER the recorder has stopped, off the main
+        // thread with a timeout, so a slow calendar store can never delay Stop; the take
+        // stays a `.part` until it is done.
+        let wantsCalendar = CalendarRecordingStep.wantsLookup(config: config)
+        let outcome = recorder.stop(deferFinalize: ask || wantsCalendar)
         self.recorder = nil
         isRecording = false
         quickNotes.end()   // keeps the sidecar, closes the panel
         keyMoments.end()   // keeps the sidecar, releases the hotkey
 
         guard let outcome else { return }
-        log("Meeting recording saved: \(outcome.url.lastPathComponent) (\(elapsedLabel))")
+        guard wantsCalendar else {
+            finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
+                       ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
+            return
+        }
+        Task { @MainActor [weak self] in
+            let match = await CalendarRecordingStep.lookup(start: recStart, config: config)
+            self?.finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
+                             ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
+        }
+    }
+
+    /// Everything after the recorder stopped: the calendar step, the notifications and the
+    /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup.
+    @available(macOS 14.4, *)
+    private func finishStop(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, config: Config,
+                            silenceMinutes: Int?, ask: Bool, recStart: Date,
+                            calendarMatch: CalendarMatch?, heldForCalendar: Bool) {
+        // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
+        var savedURL = outcome.url
+        if let calendarMatch {
+            savedURL = CalendarRecordingStep.apply(
+                calendarMatch, recording: outcome.url, start: recStart, config: config,
+                recordingsDir: folderProvider(), log: log)
+        }
+        if heldForCalendar && !ask { recorder.finalizeDeferred(as: savedURL) }
+        log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")
         if !outcome.systemAudioHeard {
             notify("Recording saved — but no system audio was captured",
                    "If you denied the System Audio Recording permission, enable it under "
@@ -286,10 +317,10 @@ final class MeetingCaptureController: ObservableObject {
                    + "and your input device. The other participants were captured fine.")
         } else if let silenceMinutes {
             notify("Recording stopped after \(silenceMinutes) min of silence",
-                   "\(outcome.url.lastPathComponent) saved — Distavo will transcribe it shortly.")
+                   "\(savedURL.lastPathComponent) saved — Distavo will transcribe it shortly.")
         } else {
             notify("Meeting recording saved",
-                   "\(outcome.url.lastPathComponent) — Distavo will transcribe it shortly.")
+                   "\(savedURL.lastPathComponent) — Distavo will transcribe it shortly.")
         }
         if let silenceMinutes {
             log("Recording stopped automatically after \(silenceMinutes) min of silence")
@@ -303,11 +334,16 @@ final class MeetingCaptureController: ObservableObject {
             // holds `finalizeDeferred()` back until detection has finished
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
-            let detection = startLanguageDetection(partURL: outcome.url.appendingPathExtension("part"))
-            askSpeakers(for: outcome.url, config: config, detection: detection)
+            let detection = startLanguageDetection(partURL: savedURL.appendingPathExtension("part"))
+            askSpeakers(for: savedURL, config: config, detection: detection,
+                        prefillOthers: config.calendar.attendeesAsParticipants
+                            ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "")
+            if calendarMatch != nil {
+                CalendarRecordingStep.pruneAttendees(recording: savedURL, recordingsDir: folderProvider(), config: config)
+            }
             Task {
                 _ = await detection?.value
-                recorder.finalizeDeferred()
+                recorder.finalizeDeferred(as: savedURL)
             }
         }
     }
@@ -392,7 +428,8 @@ final class MeetingCaptureController: ObservableObject {
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
-    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?) {
+    private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
+                             prefillOthers: String = "") {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -401,7 +438,7 @@ final class MeetingCaptureController: ObservableObject {
         count.alignment = .right
         let myRole = NSTextField(string: "")
         myRole.placeholderString = "e.g. candidate, host, the one taking notes"
-        let others = NSTextField(string: "")
+        let others = NSTextField(string: prefillOthers)   // calendar attendees (#2946), editable
         others.placeholderString = "e.g. Edward, Cambridge University — interviewer"
         others.usesSingleLineMode = false
         others.lineBreakMode = .byWordWrapping

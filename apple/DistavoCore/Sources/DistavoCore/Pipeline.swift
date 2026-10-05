@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 public enum ProcessStatus: String, Equatable {
     case done
@@ -132,12 +133,15 @@ public struct NoteContext: Equatable, Sendable {
     public var template: SummaryTemplate?
     /// Notes typed during the recording (Vikunja #2949); nil = prompt byte-identical.
     public var scratchpad: ScratchpadNotes?
+    /// Calendar attendees the owner has not confirmed (#2946); empty = prompt byte-identical.
+    public var calendarAttendees: [String]
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
                 noteLanguage: String? = nil, customInstruction: String? = nil,
                 glossary: [String] = [], template: SummaryTemplate? = nil,
-                scratchpad: ScratchpadNotes? = nil) {
+                scratchpad: ScratchpadNotes? = nil, calendarAttendees: [String] = []) {
+        self.calendarAttendees = calendarAttendees
         self.scratchpad = scratchpad
         self.customInstruction = customInstruction
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
@@ -151,7 +155,7 @@ public struct NoteContext: Equatable, Sendable {
     public func prompt(transcript: String) -> String {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
-                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary,
+                     noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
                      template: template, scratchpad: scratchpad)
     }
 }
@@ -176,6 +180,14 @@ public struct PipelineDeps {
     /// Optional stage-boundary progress. Defaults to nil so tests and callers
     /// that don't care are unaffected (preserves the DI seam).
     public var onPhase: (@Sendable (ProcessingPhase) -> Void)?
+    /// Calendar events overlapping `[start, end]` (Vikunja #2946). nil (the
+    /// default) keeps the calendar feature inert and DistavoCore EventKit-free;
+    /// the app layer wires it to EventKit, returning [] when access is missing.
+    public var calendarLookup: ((_ start: Date, _ end: Date) async -> [CalendarCandidate])?
+    /// When a recording actually started, from trustworthy evidence only: the
+    /// built-in recorder's file name or the media's embedded creation date -
+    /// never the filesystem creation/modification date (Vikunja #2946).
+    public var recordingStart: (URL) async -> Date?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -184,8 +196,12 @@ public struct PipelineDeps {
         summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String,
         onPhase: (@Sendable (ProcessingPhase) -> Void)? = nil,
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
-        audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) }
+        audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
+        calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
+        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) }
     ) {
+        self.calendarLookup = calendarLookup
+        self.recordingStart = recordingStart
         self.convertToWav = convertToWav
         self.transcribe = transcribe
         self.ollamaReachable = ollamaReachable
@@ -367,10 +383,15 @@ public enum Pipeline {
         // (keyed by the recording, so a variant run gets it too): its speaker
         // count is authoritative for diarisation, and the participants text
         // goes into the prompt.
+        // Calendar event for this recording (#2946); nil when off / no match.
+        let calendarMatch = await CalendarLookup.resolve(
+            path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
+        // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calendarAttendees = CalendarLookup.promptAttendees(participants: participants, match: calendarMatch, config: config)
 
         do {
             // A re-run must never leave the previous run's timed transcript
@@ -439,7 +460,7 @@ public enum Pipeline {
                 config: config, workDir: workDir, base: base, dominantCode: dominantCode)
             let context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
-                participants: participants, meetingDate: meetingDate(for: path),
+                participants: participants, meetingDate: calendarMatch?.recordingStart ?? meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
                 customInstruction: NoteMeta.mergedInstruction(nil, notes: config.notes),
@@ -452,7 +473,8 @@ public enum Pipeline {
                     sidecarID: LanguageOverride.load(
                         workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
                     style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
-                scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949
+                scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
+                calendarAttendees: calendarAttendees)   // #2946
             let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
                 segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked
@@ -522,9 +544,9 @@ public enum Pipeline {
                 body: noteBody, footer: noteFooter, meta: noteMeta, config: config, context: context,
                 sourceName: path.lastPathComponent, timed: timedForNote, cleanTranscript: clean,
                 dominantCode: dominantCode,
-                existingNote: try? String(contentsOf: notePath, encoding: .utf8))
+                existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
-            rememberTitle(noteMeta, config: config, workDir: workDir, base: base)   // #2954
+            rememberTitle(noteMeta, config: config, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             var message = "note written"
             if config.compactRecordingsAfterNote, variant == nil,
@@ -597,25 +619,60 @@ public enum Pipeline {
         return "\(formatter.string(fromByteCount: Int64(sourceSize))) → \(formatter.string(fromByteCount: Int64(compactSize)))"
     }
 
-    private static let recorderNameFormatter: DateFormatter = {
+    /// Built per call (cheap) so the zone is the one in force NOW, not whatever
+    /// `.current` was the first time any code parsed a name; the time zone is
+    /// injectable for the same reason.
+    private static func recorderNameFormatter(_ timeZone: TimeZone) -> DateFormatter {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = .current
+        f.timeZone = timeZone
         f.dateFormat = "yyyy-MM-dd HH.mm.ss"
         return f
-    }()
+    }
 
     /// When the recording started: the built-in recorder's file name
     /// ("Meeting 2026-09-16 16.13.08.wav", local time) is authoritative and
     /// survives copies and syncs; otherwise the file's creation date, which
     /// a phone recording or a dropped export usually keeps; nil if neither.
-    static func meetingDate(for url: URL) -> Date? {
+    static func meetingDate(for url: URL, timeZone: TimeZone = .current) -> Date? {
         let stem = url.deletingPathExtension().lastPathComponent
-        if let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression),
-           let date = recorderNameFormatter.date(from: String(stem[range])) {
-            return date
-        }
+        if let date = recorderNameDate(stem, timeZone: timeZone) { return date }
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
+    }
+
+    /// The start time in a recorder-style name, exactly as before #2946 (any
+    /// position, with or without the "Meeting " prefix). A calendar-renamed file is
+    /// covered by its sidecar's `recordingStart`, which callers prefer.
+    static func recorderNameDate(_ stem: String, timeZone: TimeZone = .current) -> Date? {
+        guard let range = stem.range(of: #"\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}"#, options: .regularExpression)
+        else { return nil }
+        return recorderNameFormatter(timeZone).date(from: String(stem[range]))
+    }
+
+    /// The built-in recorder's own file name, exactly (`MeetingRecorder.fileName`:
+    /// "Meeting yyyy-MM-dd HH.mm.ss.wav"), anchored at both ends. Unlike
+    /// `recorderNameDate` (the permissive PROMPT rule, unchanged from before
+    /// #2946) this is the only name accepted as calendar-lookup evidence: other
+    /// names, a calendar-folded title or an imported file's name, are
+    /// attacker-influenceable.
+    static func exactRecorderNameDate(_ url: URL, timeZone: TimeZone = .current) -> Date? {
+        guard url.pathExtension.lowercased() == "wav" else { return nil }
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard stem.range(of: #"^Meeting \d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}$"#, options: .regularExpression) != nil
+        else { return nil }
+        return recorderNameDate(stem, timeZone: timeZone)
+    }
+
+    /// Recording start evidence for the calendar lookup of a file WITHOUT a
+    /// calendar sidecar: the recorder's exact file name, else the media's embedded
+    /// creation date (AVAsset common metadata). nil when neither exists -
+    /// filesystem dates and any other file name are NOT evidence.
+    public static func recordingStartEvidence(_ url: URL) async -> Date? {
+        if let d = exactRecorderNameDate(url) { return d }
+        let asset = AVURLAsset(url: url)
+        guard let item = try? await asset.load(.creationDate),
+              let date = try? await item.load(.dateValue) else { return nil }
+        return date
     }
 
     /// The router's detections from the transcribe result, formatted for the

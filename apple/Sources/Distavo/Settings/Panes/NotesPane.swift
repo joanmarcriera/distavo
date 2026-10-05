@@ -36,6 +36,7 @@ struct NotesPane: View {
 
         TemplatesSection(model: model)
         ActionItemsSection(model: model)
+        CalendarSection(model: model)   // #2946
 
         ObsidianSection(model: model)
 

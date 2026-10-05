@@ -192,7 +192,10 @@ extension Pipeline {
         //    which are not cached).
         let sourceBase = LanguageOverride.sourceBase(from: base)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
+        // Calendar match saved at processing time (#2946); regenerate never looks the calendar up.
+        let calendarMatch = config.calendar.enabled ? CalendarMatchStore.load(workDir: workDir, base: sourceBase) : nil
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let calendarAttendees = CalendarLookup.promptAttendees(participants: participants, match: calendarMatch, config: cfg)
         // Same resolution as processOne; the detected language comes from the
         // meta sidecar (absent for notes processed before #2947).
         let noteLanguage = resolveNoteLanguage(
@@ -204,7 +207,7 @@ extension Pipeline {
             userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
         let context = NoteContext(
             noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
-            meetingDate: sourcePath.flatMap { meetingDate(for: $0) },
+            meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             // The user's instruction, plus the title/tags request when #2954 asks for it.
             customInstruction: NoteMeta.mergedInstruction(options.customInstruction, notes: cfg.notes),
@@ -216,7 +219,8 @@ extension Pipeline {
                 regenerateTemplate(options: options, config: cfg, workDir: workDir,
                                    sourceBase: sourceBase, sourcePath: sourcePath),
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
-            scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase))   // #2949: keeps the highlights
+            scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
+            calendarAttendees: calendarAttendees)   // #2946
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.
@@ -267,7 +271,7 @@ extension Pipeline {
                 sourceName: sourcePath?.lastPathComponent,
                 timed: TranscriptSegments.load(workDir: workDir, base: base), cleanTranscript: transcript,
                 dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage,
-                existingNote: previousText)
+                existingNote: previousText, calendar: calendarMatch)
 
             // 5. Keep the old version, then write the new one.
             try FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)
@@ -281,7 +285,7 @@ extension Pipeline {
                 if let backup { try? FileManager.default.moveItem(at: backup, to: notePath) }
                 throw error
             }
-            rememberTitle(noteMeta, config: cfg, workDir: workDir, base: base)   // #2954
+            rememberTitle(noteMeta, config: cfg, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             let kept = backup.map { "; previous version kept as \($0.lastPathComponent)" } ?? ""
             return ProcessResult(status: .done, base: base, message: "note regenerated\(kept)",

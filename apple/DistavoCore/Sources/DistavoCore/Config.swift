@@ -340,6 +340,9 @@ public struct Config: Codable, Equatable {
     /// Key-moment markers and clips (Vikunja #2950). Hotkey off, 15 s / 30 s for
     /// any config predating it; see `RecordingOptions`.
     public var recording: RecordingOptions
+    /// Calendar-aware titling and attendees (Vikunja #2946). OFF for any config
+    /// predating it and for fresh installs; see `CalendarConfig`.
+    public var calendar: CalendarConfig
     /// Obsidian-friendly output (Vikunja #2954): frontmatter, auto title/tags,
     /// tracked terms, vault copy. Absent in older configs -> everything off.
     public var notes: NotesConfig
@@ -360,6 +363,7 @@ public struct Config: Codable, Equatable {
         case whenDone = "when_done"
         case meetingDetection = "meeting_detection"
         case recording
+        case calendar
         case notes
     }
 
@@ -382,6 +386,7 @@ public struct Config: Codable, Equatable {
                 whenDone: [WhenDoneAction] = [],
                 meetingDetection: MeetingDetectionConfig = .init(),
                 recording: RecordingOptions = .init(),
+                calendar: CalendarConfig = .init(),
                 notes: NotesConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
@@ -398,6 +403,7 @@ public struct Config: Codable, Equatable {
         self.whenDone = whenDone
         self.meetingDetection = meetingDetection
         self.recording = recording
+        self.calendar = calendar
         self.notes = notes
     }
 
@@ -441,6 +447,7 @@ public struct Config: Codable, Equatable {
         }
         meetingDetection = (try? c.decodeIfPresent(MeetingDetectionConfig.self, forKey: .meetingDetection)).flatMap { $0 } ?? d.meetingDetection
         recording = (try? c.decodeIfPresent(RecordingOptions.self, forKey: .recording)).flatMap { $0 } ?? d.recording
+        calendar = (try? c.decodeIfPresent(CalendarConfig.self, forKey: .calendar)).flatMap { $0 } ?? d.calendar
     }
 
     /// Valid range for the silence-minute settings.

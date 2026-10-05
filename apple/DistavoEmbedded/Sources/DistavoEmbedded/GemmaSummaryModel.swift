@@ -440,7 +440,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String? = nil,
-        glossary: [String] = [], template: SummaryTemplate? = nil,
+        glossary: [String] = [], calendarAttendees: [String] = [], template: SummaryTemplate? = nil,
         scratchpad: ScratchpadNotes? = nil,
         onProgress: (@Sendable (String) -> Void)? = nil,
         root: URL = EmbeddedModelStore.modelsDirectory,
@@ -453,7 +453,7 @@ public enum GemmaSummariser {
                 transcript: transcript, modelID: modelID, noteOwner: noteOwner,
                 userSpeaker: userSpeaker, participants: participants, style: style,
                 meetingDate: meetingDate, noteLanguage: noteLanguage,
-                customInstruction: customInstruction, glossary: glossary, template: template, scratchpad: scratchpad,
+                customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees, template: template, scratchpad: scratchpad,
                 onProgress: onProgress,
                 root: root, manager: manager)
         }
@@ -464,7 +464,7 @@ public enum GemmaSummariser {
         noteOwner: String, userSpeaker: String, participants: String?,
         style: Prompt.Style, meetingDate: Date?, noteLanguage: String?,
         customInstruction: String?,
-        glossary: [String], template: SummaryTemplate?, scratchpad: ScratchpadNotes?,
+        glossary: [String], calendarAttendees: [String], template: SummaryTemplate?, scratchpad: ScratchpadNotes?,
         onProgress: (@Sendable (String) -> Void)?,
         root: URL, manager: SummaryModelManager
     ) async throws -> String {
@@ -490,7 +490,7 @@ public enum GemmaSummariser {
                 noteLanguage: noteLanguage, style: style, noteOwner: noteOwner,
                 ownerSpeaker: userSpeaker, template: template,
                 withHighlights: scratchpad?.isEmpty == false),
-            customInstruction: customInstruction, glossary: glossary, template: template,
+            customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees, template: template,
             scratchpad: scratchpad)
         do {
             let raw = try await SummaryDriver.run(request, generator: generator, onProgress: report)
@@ -559,7 +559,7 @@ public enum GemmaPipelineRoute {
             participants: context.participants, style: context.promptStyle,
             meetingDate: context.meetingDate, noteLanguage: context.noteLanguage,
             customInstruction: context.customInstruction,
-            glossary: context.glossary, template: context.template,
+            glossary: context.glossary, calendarAttendees: context.calendarAttendees, template: context.template,
             scratchpad: context.scratchpad, root: root, manager: manager)
     }
 }

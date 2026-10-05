@@ -31,11 +31,16 @@ public enum NoteAssembly {
         /// The note currently on disk (regenerate / re-run): its unmanaged frontmatter
         /// keys are preserved, and its date/source fill what the caller does not know.
         public var existingNote: String?
+        /// Calendar attendee names (#2946): data for the frontmatter `attendees:` list, whether or
+        /// not the owner confirmed them (they never reach the prompt through this path).
+        public var calendarAttendees: [String]
 
         public init(body: String, footer: String = "", title: String? = nil, llmTags: [String] = [],
                     turns: [TrackedTerms.Turn] = [], meetingDate: Date? = nil, participants: String? = nil,
                     sourceName: String? = nil, durationSeconds: Double? = nil, templateID: String? = nil,
-                    languageCode: String? = nil, existingNote: String? = nil) {
+                    languageCode: String? = nil, existingNote: String? = nil,
+                    calendarAttendees: [String] = []) {
+            self.calendarAttendees = calendarAttendees
             self.body = body; self.footer = footer; self.title = title; self.llmTags = llmTags
             self.turns = turns; self.meetingDate = meetingDate; self.participants = participants
             self.sourceName = sourceName; self.durationSeconds = durationSeconds
@@ -71,7 +76,7 @@ public enum NoteAssembly {
             date: i.meetingDate.map { NoteFrontmatter.dateString($0, timeZone: timeZone) }
                 ?? previous.flatMap { NoteFrontmatter.value("date", in: $0) },
             title: i.title,
-            attendees: NoteFrontmatter.attendees(fromParticipants: i.participants),
+            attendees: mergeAttendees(NoteFrontmatter.attendees(fromParticipants: i.participants), i.calendarAttendees),
             tags: tags,
             source: i.sourceName ?? previous.flatMap { NoteFrontmatter.value("source", in: $0) },
             durationMinutes: i.durationSeconds.flatMap(minutes))
@@ -79,6 +84,14 @@ public enum NoteAssembly {
         // still carries a block of its own (it never should) is stripped, never doubled.
         let preserved = previous.flatMap { NoteFrontmatter.split($0).block }
         return NoteFrontmatter.render(fields, preserving: preserved) + NoteFrontmatter.strip(text)
+    }
+
+    /// `base` plus any calendar name not already present (case-insensitive); `base` unchanged when none.
+    static func mergeAttendees(_ base: [String], _ calendar: [String]) -> [String] {
+        var seen = Set(base.map { $0.lowercased() })
+        var out = base
+        for name in calendar where seen.insert(name.lowercased()).inserted { out.append(name) }
+        return out
     }
 
     /// Whole minutes, rounded, at least 1 for any audio; nil for no/invalid duration.

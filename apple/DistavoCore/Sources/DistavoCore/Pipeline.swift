@@ -372,6 +372,7 @@ public enum Pipeline {
             // A re-run must never leave the previous run's timed transcript
             // behind (#2943): export would pair it with the new note.
             try? FileManager.default.removeItem(at: TranscriptSegments.url(workDir: workDir, base: base))
+            TranscriptEditStore.removeOriginals(workDir: workDir, base: base)   // #2951: edits belonged to the old transcript
             let wavPath = workDir.appendingPathComponent("\(base).wav")
             deps.onPhase?(.converting)
 

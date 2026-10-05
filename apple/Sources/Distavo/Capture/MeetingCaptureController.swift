@@ -130,6 +130,15 @@ final class MeetingCaptureController: ObservableObject {
     /// "Quick Notes…" menu item: open the floating notes panel (recording only).
     func showQuickNotes() { quickNotes.showPanel() }
 
+    /// Settings changed: re-register (or release) the hotkey of a running recording.
+    func applyKeyMomentHotkeyConfig() {
+        guard isRecording else { return }
+        let cfg = configProvider().recording
+        if let problem = keyMoments.updateHotkey(cfg.bookmarkHotkeyEnabled ? cfg.bookmarkHotkey : nil) {
+            log(problem); notify("Key-moment shortcut unavailable", problem)
+        }
+    }
+
     /// "Mark Key Moment" (menu / Quick Notes button / hotkey): recording only.
     func markKeyMoment() { keyMoments.mark() }
 
@@ -187,7 +196,7 @@ final class MeetingCaptureController: ObservableObject {
         if let url = recorder.fileURL {   // Quick Notes are keyed on the recording's final base
             quickNotes.begin(workDir: Config.resolvePath(configProvider().workDir),
                              base: DistavoState.baseFor(recordingsDir: folderProvider(), path: url),
-                             startedAt: Date())
+                             startedAt: recorder.startedAt ?? Date())
             let cfg = configProvider()
             let recDir = folderProvider().standardizedFileURL.path
             let full = url.standardizedFileURL.path
@@ -195,7 +204,7 @@ final class MeetingCaptureController: ObservableObject {
             if let problem = keyMoments.begin(
                 workDir: Config.resolvePath(cfg.workDir),
                 base: DistavoState.baseFor(recordingsDir: folderProvider(), path: url), source: rel,
-                startedAt: startedAt ?? Date(),
+                startedAt: recorder.startedAt ?? Date(),
                 hotkey: cfg.recording.bookmarkHotkeyEnabled ? cfg.recording.bookmarkHotkey : nil) {
                 log(problem); notify("Key-moment shortcut unavailable", problem)
             }

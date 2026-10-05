@@ -11,33 +11,44 @@ import DistavoCore
 extension WatcherController {
 
     /// What the menu item can do right now.
-    enum KeyMomentExportState {
+    enum KeyMomentExportState: Sendable {
         case noMarkers
         case audioMissing(base: String)
         case ready(base: String, source: URL, marks: [RecordingBookmarks.Mark])
     }
 
-    /// The newest recording with markers and whether its audio is still there.
-    var keyMomentExportState: KeyMomentExportState {
+    /// Recompute `keyMomentExport` off the main thread (it lists the work folder,
+    /// decodes one sidecar and may walk the recordings tree) and publish the
+    /// result. Called at launch and from `refreshActivity()` - recording and scan
+    /// boundaries and every dropped marker - never per menu render.
+    func refreshKeyMomentExport() {
+        keyMomentRefresh?.cancel()
         let workDir = Config.resolvePath(config.workDir)
-        guard let base = RecordingBookmarks.basesWithMarkers(workDir: workDir).first,
-              let bookmarks = RecordingBookmarks.load(workDir: workDir, base: base) else { return .noMarkers }
-        guard let source = ClipExporter.locateSource(
-            base: base, source: bookmarks.source, recordingsDir: Config.resolvePath(config.recordingsDir)) else {
-            return .audioMissing(base: base)
+        let recordingsDir = Config.resolvePath(config.recordingsDir)
+        keyMomentRefresh = Task { [weak self] in
+            let state = await Task.detached(priority: .utility) { () -> KeyMomentExportState in
+                guard let base = RecordingBookmarks.basesWithMarkers(workDir: workDir, limit: 1).first,
+                      let bookmarks = RecordingBookmarks.load(workDir: workDir, base: base) else { return .noMarkers }
+                guard let source = ClipExporter.locateSource(
+                    base: base, source: bookmarks.source, recordingsDir: recordingsDir) else {
+                    return .audioMissing(base: base)
+                }
+                return .ready(base: base, source: source, marks: bookmarks.marks)
+            }.value
+            guard !Task.isCancelled else { return }
+            self?.keyMomentExport = state
         }
-        return .ready(base: base, source: source, marks: bookmarks.marks)
     }
 
     var canExportKeyMomentClips: Bool {
-        if case .ready = keyMomentExportState { return true }
+        if case .ready = keyMomentExport { return true }
         return false
     }
 
     /// The menu title, carrying the reason when the item is disabled (the
     /// precedent set by "Export transcript as… (no timestamps saved)").
     var keyMomentExportTitle: String {
-        switch keyMomentExportState {
+        switch keyMomentExport {
         case .noMarkers: return "Export Key Moment Clips… (no key moments yet)"
         case .audioMissing: return "Export Key Moment Clips… (recording audio not found)"
         case .ready(_, _, let marks): return "Export Key Moment Clips… (\(marks.count))"
@@ -45,9 +56,9 @@ extension WatcherController {
     }
 
     func exportKeyMomentClips() {
-        guard case .ready(let base, let source, let marks) = keyMomentExportState else {
-            notifier.notify(title: "No clips to export",
-                            body: "Press Mark Key Moment while recording, and keep the recording file, to export clips.")
+        guard case .ready(let base, let source, let marks) = keyMomentExport else {
+            postNotice(title: "No clips to export",
+                        body: "Press Mark Key Moment while recording, and keep the recording file, to export clips.")
             return
         }
         let panel = NSOpenPanel()
@@ -62,8 +73,8 @@ extension WatcherController {
         guard panel.runModal() == .OK, let folder = panel.url else { return }
 
         let lead = Double(config.recording.clipLeadSeconds), tail = Double(config.recording.clipTailSeconds)
-        notifier.notify(title: "Exporting clips…", body: "\(marks.count) clip\(marks.count == 1 ? "" : "s") from \(base).")
-        Task.detached(priority: .userInitiated) { [notifier] in
+        postNotice(title: "Exporting clips…", body: "\(marks.count) clip\(marks.count == 1 ? "" : "s") from \(base).")
+        Task.detached(priority: .userInitiated) { [weak self] in
             // The panel's grant is scoped to the chosen folder; hold it for the export.
             let scoped = folder.startAccessingSecurityScopedResource()
             defer { if scoped { folder.stopAccessingSecurityScopedResource() } }
@@ -73,12 +84,12 @@ extension WatcherController {
             let firstError = results.compactMap(\.error).first
             await MainActor.run {
                 if done == results.count {
-                    notifier.notify(title: "Clips exported",
-                                    body: "\(done) clip\(done == 1 ? "" : "s") saved to \(folder.lastPathComponent).")
+                    self?.postNotice(title: "Clips exported",
+                                     body: "\(done) clip\(done == 1 ? "" : "s") saved to \(folder.lastPathComponent).")
                     NSWorkspace.shared.activateFileViewerSelecting(results.compactMap(\.url))
                 } else {
-                    notifier.notify(title: done == 0 ? "Clip export failed" : "Some clips were not exported",
-                                    body: "\(done) of \(results.count) saved. \(firstError ?? "")")
+                    self?.postNotice(title: done == 0 ? "Clip export failed" : "Some clips were not exported",
+                                     body: "\(done) of \(results.count) saved. \(firstError ?? "")")
                 }
             }
         }

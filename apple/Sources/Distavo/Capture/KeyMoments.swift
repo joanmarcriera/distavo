@@ -43,8 +43,16 @@ final class KeyMomentsModel: ObservableObject {
         end()
         self.workDir = workDir; self.base = base; self.startedAt = startedAt
         marks = RecordingBookmarks(source: source); count = 0
+        return updateHotkey(spec)
+    }
+
+    /// (Re)register the hotkey for the running recording, or release it with nil.
+    /// Returns a message on failure; mirrors it to `hotkeyErrorKey` for Settings.
+    @discardableResult
+    func updateHotkey(_ spec: HotkeySpec?) -> String? {
+        hotkey.unregister()
         UserDefaults.standard.removeObject(forKey: Self.hotkeyErrorKey)
-        guard let spec else { return nil }
+        guard isActive, let spec else { return nil }
         if let failure = hotkey.register(spec, onPress: { [weak self] in self?.mark() }) {
             UserDefaults.standard.set(failure, forKey: Self.hotkeyErrorKey)
             return failure
@@ -58,6 +66,7 @@ final class KeyMomentsModel: ObservableObject {
     /// The recording stopped (kept): the sidecar stays, the hotkey is released.
     func end() {
         hotkey.unregister()
+        UserDefaults.standard.removeObject(forKey: Self.hotkeyErrorKey)
         workDir = nil; base = nil; startedAt = nil; marks = RecordingBookmarks(); count = 0
     }
 

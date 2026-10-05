@@ -25,7 +25,7 @@ struct KeyMomentsSection: View {
                     Button("Reset") { model.draft.recording.bookmarkHotkey = .default }
                         .disabled(model.draft.recording.bookmarkHotkey == .default)
                 }
-                SettingCaption("Click the box, then press the keys (include ⌃, ⌥ or ⌘). Applies to the next recording.")
+                SettingCaption("Click the box, then press the keys (include ⌃, ⌥ or ⌘). Applies right away, even during a recording.")
                 if !hotkeyError.isEmpty { SettingCaption("⚠︎ \(hotkeyError)") }
             }
             Stepper("Clip starts \(model.draft.recording.clipLeadSeconds) s before the marker",

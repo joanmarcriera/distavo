@@ -56,6 +56,10 @@ final class WatcherController: ObservableObject {
     private var recordingCancellable: AnyCancellable?
     private var silenceCancellable: AnyCancellable?
     private var keyMomentFlashCancellable: AnyCancellable?
+    /// What "Export Key Moment Clips…" can do, computed off the main thread and
+    /// cached (see WatcherController+KeyMoments) - the menu only reads this.
+    @Published var keyMomentExport: KeyMomentExportState = .noMarkers
+    var keyMomentRefresh: Task<Void, Never>?
     /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
     /// store handles updates).
     let updater: AppUpdater? = AppUpdaterFactory.make()
@@ -139,6 +143,7 @@ final class WatcherController: ObservableObject {
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
         keyMomentFlashCancellable = capture.keyMoments.$flash   // #2950: marker cue
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
+        refreshKeyMomentExport()   // #2950: initial state from disk
         wireEmbeddedProgress()
         start()
     }
@@ -287,6 +292,7 @@ final class WatcherController: ObservableObject {
         else if processingActive { iconState = processingPhase }
         else if unseenDone { iconState = .done }
         else { iconState = .idle }
+        refreshKeyMomentExport()   // a recording/scan boundary or a marker may change it (#2950)
     }
 
     // MARK: Scanning
@@ -1077,6 +1083,7 @@ final class WatcherController: ObservableObject {
         watchIntervalSeconds = newConfig.watchIntervalSeconds
         allowLocalOllama = newConfig.summarise.allowLocalFallback
         meetingDetection.configure()
+        capture.applyKeyMomentHotkeyConfig()   // #2950: live hotkey changes
         persist()
         if newConfig.summarise.allowLocalFallback && !wasAllowed { deferredBases.removeAll() }
         // New settings may fix a prior failure — clear failed markers and retry.

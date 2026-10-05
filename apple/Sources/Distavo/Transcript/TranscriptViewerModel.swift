@@ -51,6 +51,12 @@ final class TranscriptViewerModel: ObservableObject {
     @Published private(set) var message: String?
     /// True after a save in this session: the note no longer matches the transcript.
     @Published private(set) var noteIsStale = false
+    /// The files changed on disk while the window was open (offer a reload).
+    @Published private(set) var changedOnDisk = false
+    /// Cached per content load so a highlight tick never walks all lines.
+    private(set) var headerRanges: [NSRange] = []
+    private(set) var headerLineIndices: Set<Int> = []
+    private var loaded: TranscriptEditStore.Fingerprint?
 
     private var editedText = ""
     private var player: AVPlayer?
@@ -86,12 +92,15 @@ final class TranscriptViewerModel: ObservableObject {
         let clean = (try? String(contentsOf: cleanURL, encoding: .utf8)) ?? ""
         hasCleanTranscript = !clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         canRevert = TranscriptEditStore.isModified(workDir: workDir, base: base)
+        loaded = TranscriptEditStore.fingerprint(workDir: workDir, base: base)
+        changedOnDisk = false
         if let t = TranscriptSegments.load(workDir: workDir, base: base) {
             show(t)
         } else {
             transcript = nil; layout = nil
             plainText = clean.isEmpty ? "No transcript was saved for this note." : clean
             editedText = plainText; dirty = false
+            headerRanges = []; headerLineIndices = []
             contentID += 1
         }
     }
@@ -100,6 +109,8 @@ final class TranscriptViewerModel: ObservableObject {
         transcript = t
         let l = TranscriptLayout(t)
         layout = l; plainText = l.text; editedText = l.text
+        headerRanges = l.lines.compactMap { if case .header = $0.kind { return $0.range } else { return nil } }
+        headerLineIndices = l.headerLineIndices
         dirty = false; highlight = nil
         contentID += 1
     }
@@ -111,6 +122,8 @@ final class TranscriptViewerModel: ObservableObject {
         editedText = text
         let isDirty = text != (layout?.text ?? plainText)
         if isDirty != dirty { dirty = isDirty }
+        // Token ranges describe the pre-edit text: no highlight / seek until saved or discarded.
+        if isDirty { highlight = nil }
     }
 
     /// Throw away unsaved edits.
@@ -130,12 +143,17 @@ final class TranscriptViewerModel: ObservableObject {
         }
         let edited = TranscriptEditing.applyEdits(edits, to: t)
         do {
-            try TranscriptEditStore.save(edited, workDir: workDir, base: base)
+            try TranscriptEditStore.save(edited, workDir: workDir, base: base, expecting: loaded)
+        } catch let e as TranscriptEditStore.StoreError where e.changedOnDisk {
+            changedOnDisk = true
+            message = "Not saved: the transcript changed on disk (another action rewrote it) since this window loaded it. Your edits are still shown; reload to see the new transcript (this discards them)."
+            return false
         } catch {
             message = "Not saved — nothing was changed: \(error.localizedDescription)"
             return false
         }
         show(edited)
+        loaded = TranscriptEditStore.fingerprint(workDir: workDir, base: base)
         isEditing = false
         canRevert = TranscriptEditStore.isModified(workDir: workDir, base: base)
         hasCleanTranscript = true
@@ -147,7 +165,11 @@ final class TranscriptViewerModel: ObservableObject {
 
     func revertToOriginal() {
         do {
-            try TranscriptEditStore.revert(workDir: workDir, base: base)
+            try TranscriptEditStore.revert(workDir: workDir, base: base, expecting: loaded)
+        } catch let e as TranscriptEditStore.StoreError where e.changedOnDisk {
+            changedOnDisk = true
+            message = "Not reverted: the transcript changed on disk since this window loaded it. Reload to see it."
+            return
         } catch {
             message = "Not reverted — nothing was changed: \(error.localizedDescription)"
             return
@@ -159,6 +181,13 @@ final class TranscriptViewerModel: ObservableObject {
         didSave(base)
     }
 
+    /// Drop unsaved edits and re-read the files (after `changedOnDisk`).
+    func reloadFromDisk() {
+        dirty = false; isEditing = false
+        loadTranscript()
+        message = "Reloaded from disk."
+    }
+
     func resummariseNote() {
         guard !dirty, !busy else { return }
         busy = true
@@ -168,6 +197,8 @@ final class TranscriptViewerModel: ObservableObject {
             guard let self else { return }
             let outcome = await self.resummarise(b)
             self.busy = false
+            // The picker is locked while busy, but never apply a result to another note.
+            guard self.base == b else { return }
             if outcome.ok { self.noteIsStale = false }
             self.message = outcome.message
         }
@@ -223,20 +254,23 @@ final class TranscriptViewerModel: ObservableObject {
         guard seconds.isFinite else { return }
         let whole = Int(seconds)
         if whole != currentSeconds { currentSeconds = whole }   // 1 Hz for the label
-        guard !isEditing, let l = layout else { return }
+        guard !isEditing, !dirty, let l = layout else { return }
         let idx = l.tokenIndex(at: seconds)
         if idx != highlight { highlight = idx }
     }
 
     func togglePlay() {
         guard let p = player else { return }
-        if isPlaying { p.pause(); isPlaying = false }
+        if isPlaying { p.pause(); isPlaying = false; return }
+        // Play after the end restarts from the top (setting a rate at the end does nothing).
+        let end = p.currentItem?.duration.seconds ?? 0
+        if end.isFinite, end > 0, p.currentTime().seconds >= end - 0.05 { seek(to: 0, play: true) }
         else { p.rate = rate; isPlaying = true }
     }
 
     /// Click-to-seek: jump to the word at UTF-16 `index` and keep playing.
     func seek(characterIndex index: Int) {
-        guard let l = layout, let t = l.time(forCharacterIndex: index) else { return }
+        guard !dirty, let l = layout, let t = l.time(forCharacterIndex: index) else { return }
         seek(to: t, play: true)
     }
 
@@ -248,7 +282,7 @@ final class TranscriptViewerModel: ObservableObject {
     private func seek(to seconds: Double, play: Bool) {
         guard let p = player else { return }
         p.seek(to: CMTime(seconds: seconds, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
-        if !isEditing, let l = layout { highlight = l.tokenIndex(at: seconds) }
+        if !isEditing, !dirty, let l = layout { highlight = l.tokenIndex(at: seconds) }
         currentSeconds = Int(seconds)
         if play { p.rate = rate; isPlaying = true }
     }

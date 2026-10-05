@@ -40,7 +40,7 @@ struct TranscriptViewerView: View {
             }
             .labelsHidden()
             .frame(maxWidth: 300)
-            .disabled(model.dirty || model.notes.isEmpty)
+            .disabled(model.dirty || model.busy || model.notes.isEmpty)
             .help(model.dirty ? "Save or discard your edits first" : "Choose a note")
 
             Spacer()
@@ -50,6 +50,9 @@ struct TranscriptViewerView: View {
                 .disabled(!model.canEdit)
                 .help("Edit the text of each segment (timings are kept)")
             if model.dirty {
+                if model.changedOnDisk {
+                    Button("Reload from disk (discards edits)") { model.reloadFromDisk() }
+                }
                 Button("Discard") { model.discardChanges() }
                 Button("Save") { model.save() }
                     .keyboardShortcut("s", modifiers: .command)
@@ -86,8 +89,8 @@ struct TranscriptViewerView: View {
         return TranscriptTextView(
             contentID: model.contentID,
             text: model.plainText,
-            headerRanges: layout?.lines.compactMap { if case .header = $0.kind { return $0.range } else { return nil } } ?? [],
-            headerLineIndices: layout?.headerLineIndices ?? [],
+            headerRanges: model.headerRanges,
+            headerLineIndices: model.headerLineIndices,
             tokenRange: { layout?.tokens.indices.contains($0) == true ? layout?.tokens[$0].range : nil },
             highlight: model.highlight,
             isEditing: model.isEditing,

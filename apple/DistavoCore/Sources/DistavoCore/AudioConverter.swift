@@ -42,6 +42,94 @@ public enum AudioConverter {
                 + "(AVFoundation can't decode them). Convert to .m4a/.mp4/.wav first.")
         }
 
+        // File-to-file first: it never opens an audio device (see below). Anything
+        // AVAudioFile cannot open, or fails on, goes through the asset reader.
+        if (try? convertWithAudioFile(source: source, dest: dest)) == true { return }
+        try? FileManager.default.removeItem(at: dest)
+        try await convertWithAssetReader(source: source, dest: dest)
+    }
+
+    /// Decode with `AVAudioFile` + `AVAudioConverter`: pure file-to-file work.
+    ///
+    /// Why this exists (1.18): `AVAssetReader` with rate/channel conversion builds an
+    /// offline AudioQueue render pipeline, which binds to the default audio DEVICE
+    /// (`AudioDeviceCreateIOProcID`). On a Mac that never granted Distavo the
+    /// microphone, that made macOS ask for it the first time ANY file was
+    /// processed, and the conversion blocked until the prompt was answered. A user
+    /// who only drops files must never see a microphone prompt.
+    ///
+    /// The rate is converted at the source channel count and the channels are then
+    /// mixed here, so both sides of an in-app recording (left = microphone,
+    /// right = system audio) always reach the transcript.
+    ///
+    /// - Returns: false when `AVAudioFile` cannot open the source (a video
+    ///   container, an unknown codec); the caller then uses the asset reader.
+    static func convertWithAudioFile(source: URL, dest: URL) throws -> Bool {
+        guard let input = try? AVAudioFile(forReading: source) else { return false }
+        let inFormat = input.processingFormat
+        let channels = inFormat.channelCount
+        guard channels > 0, inFormat.sampleRate > 0, input.length > 0,
+              let midFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000,
+                                            channels: channels, interleaved: false),
+              let converter = AVAudioConverter(from: inFormat, to: midFormat) else { return false }
+        converter.sampleRateConverterQuality = AVAudioQuality.max.rawValue
+
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.createDirectory(
+            at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let outFormat = targetFormat
+        let output = try AVAudioFile(forWriting: dest, settings: outFormat.settings,
+                                     commonFormat: .pcmFormatInt16, interleaved: true)
+
+        let chunk: AVAudioFrameCount = 16384
+        guard let inBuffer = AVAudioPCMBuffer(pcmFormat: inFormat, frameCapacity: chunk),
+              let midBuffer = AVAudioPCMBuffer(pcmFormat: midFormat, frameCapacity: chunk),
+              let outBuffer = AVAudioPCMBuffer(pcmFormat: outFormat, frameCapacity: chunk) else { return false }
+
+        var readError: Error?
+        var finished = false
+        while !finished {
+            midBuffer.frameLength = 0
+            var convertError: NSError?
+            let status = converter.convert(to: midBuffer, error: &convertError) { _, inputStatus in
+                inBuffer.frameLength = 0
+                // Reading at the end of the file throws (eofErr) instead of returning 0 frames.
+                if input.framePosition < input.length {
+                    do { try input.read(into: inBuffer, frameCount: chunk) } catch { readError = error }
+                }
+                if readError != nil || inBuffer.frameLength == 0 {
+                    inputStatus.pointee = .endOfStream
+                    return nil
+                }
+                inputStatus.pointee = .haveData
+                return inBuffer
+            }
+            if let readError { throw readError }
+            if status == .error { throw convertError ?? AudioConverterError("audio conversion failed") }
+            if status == .endOfStream || status == .inputRanDry { finished = true }
+
+            let frames = Int(midBuffer.frameLength)
+            guard frames > 0, let source = midBuffer.floatChannelData,
+                  let target = outBuffer.int16ChannelData else { continue }
+            // Same gain as the asset-reader mixdown this replaces (measured: one side
+            // of a stereo file comes out 3 dB down, i.e. sum / sqrt(channels)), so
+            // levels reaching the transcriber are unchanged. Loud correlated stereo clips, as before.
+            let scale = 1 / Float(channels).squareRoot()
+            for i in 0..<frames {
+                var sum: Float = 0
+                for ch in 0..<Int(channels) { sum += source[ch][i] }
+                target[0][i] = Int16(max(-1, min(1, sum * scale)) * 32767)
+            }
+            outBuffer.frameLength = AVAudioFrameCount(frames)
+            try output.write(from: outBuffer)
+        }
+        return output.length > 0
+    }
+
+    /// The original path: `AVAssetReader` decodes and converts. Used for sources
+    /// `AVAudioFile` cannot open (video containers). It may touch the default
+    /// audio device (see `convertWithAudioFile`).
+    static func convertWithAssetReader(source: URL, dest: URL) async throws {
         let asset = AVURLAsset(url: source)
         let audioTracks = try await asset.loadTracks(withMediaType: .audio)
         guard let track = audioTracks.first else {

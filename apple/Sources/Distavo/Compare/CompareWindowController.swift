@@ -31,12 +31,6 @@ final class CompareWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
         openWindows.removeAll { $0 === window }
-        // Same simplification `SettingsWindowController` makes: step back to
-        // accessory once this controller's own windows are gone, regardless
-        // of any other window — harmless even if one is still open, since
-        // `.accessory` only affects the Dock/app-switcher, not existing windows.
-        if openWindows.isEmpty {
-            NSApp.setActivationPolicy(.accessory)
-        }
+        AppActivation.windowClosed(window)
     }
 }

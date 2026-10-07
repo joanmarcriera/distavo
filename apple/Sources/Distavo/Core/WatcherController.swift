@@ -22,11 +22,6 @@ final class WatcherController: ObservableObject {
     @Published private(set) var allowLocalOllama: Bool
     @Published private(set) var watchIntervalSeconds: Int
     @Published private(set) var hasLastNote = false
-    /// Separate from `hasLastNote`: the note survives in notesDir but its cleaned
-    /// transcript lives in the work dir, which the user may have cleared. Gating
-    /// both menu items on one flag would enable "Copy last transcript" with
-    /// nothing to copy.
-    @Published private(set) var hasLastTranscript = false
     @Published private(set) var lastError: String?
     @Published private(set) var recentActivity: [String] = []
     /// Recordings sitting on a `.failed` marker. Unlike `lastError` (which only
@@ -56,10 +51,6 @@ final class WatcherController: ObservableObject {
     private var recordingCancellable: AnyCancellable?
     private var silenceCancellable: AnyCancellable?
     private var keyMomentFlashCancellable: AnyCancellable?
-    /// What "Export Key Moment Clips…" can do, computed off the main thread and
-    /// cached (see WatcherController+KeyMoments) - the menu only reads this.
-    @Published var keyMomentExport: KeyMomentExportState = .noMarkers
-    var keyMomentRefresh: Task<Void, Never>?
     /// Direct-edition auto-updater (nil in App Store / Setapp builds, where the
     /// store handles updates).
     let updater: AppUpdater? = AppUpdaterFactory.make()
@@ -143,7 +134,6 @@ final class WatcherController: ObservableObject {
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
         keyMomentFlashCancellable = capture.keyMoments.$flash   // #2950: marker cue
             .sink { [weak self] _ in Task { @MainActor in self?.refreshActivity() } }
-        refreshKeyMomentExport()   // #2950: initial state from disk
         wireEmbeddedProgress()
         start()
     }
@@ -267,7 +257,6 @@ final class WatcherController: ObservableObject {
         let haveTranscript = FileManager.default.fileExists(atPath: transcript.path)
         lastDone = (base, note, haveTranscript ? transcript : nil)
         hasLastNote = true
-        hasLastTranscript = haveTranscript
     }
 
     /// A user notification (for the KeyMoments extension, which cannot see `notifier`).
@@ -292,7 +281,6 @@ final class WatcherController: ObservableObject {
         else if processingActive { iconState = processingPhase }
         else if unseenDone { iconState = .done }
         else { iconState = .idle }
-        refreshKeyMomentExport()   // a recording/scan boundary or a marker may change it (#2950)
     }
 
     // MARK: Scanning
@@ -518,7 +506,6 @@ final class WatcherController: ObservableObject {
             deferredBases.remove(result.base)
             lastDone = (result.base, result.notePath, result.transcriptPath)
             hasLastNote = result.notePath != nil
-            hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             lastError = nil
             if let detected = result.detectedLanguages {
@@ -586,36 +573,6 @@ final class WatcherController: ObservableObject {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         guard let variant = chooseVariant(for: url) else { return }
         Task { [weak self] in await self?.runVariant(variant, on: url) }
-    }
-
-    /// "Compare…" (Vikunja #2201): pick a recording, list every note it has
-    /// on disk (the automatic run plus any "Process a recording with…"
-    /// variants) via `RecordingVariants.list`, and open the two-pane
-    /// compare window. A recording with fewer than two runs has nothing to
-    /// compare yet — the notification points at "Process a recording with…"
-    /// instead of opening an unhelpfully empty window.
-    func compareRecordings() {
-        let panel = NSOpenPanel()
-        panel.title = "Compare…"
-        panel.message = "Choose a recording that has been processed more than once (e.g. with different models)."
-        panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.allowedContentTypes = supportedExtensions.compactMap { UTType(filenameExtension: String($0.dropFirst())) }
-        panel.directoryURL = Config.resolvePath(config.recordingsDir)
-        NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-
-        let recordingsDir = Config.resolvePath(config.recordingsDir)
-        let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
-        let variants = RecordingVariants.list(
-            base: base, notesDir: Config.resolvePath(config.notesDir), workDir: Config.resolvePath(config.workDir))
-        guard variants.count >= 2 else {
-            notifier.notify(title: "Nothing to compare yet",
-                            body: "\(url.lastPathComponent) has \(variants.isEmpty ? "no" : "only one") processed run. "
-                                + "Use “Process a recording with…” to add another model or language to compare.")
-            return
-        }
-        CompareWindowController.shared.show(recordingName: url.deletingPathExtension().lastPathComponent, variants: variants)
     }
 
     /// The model + language sheet. Built-in engine: every catalog model plus
@@ -761,39 +718,6 @@ final class WatcherController: ObservableObject {
         }
     }
 
-    /// True when the last note's timed transcript (`<base>.segments.json`,
-    /// Vikunja #2943) is on disk. Recordings processed before that feature
-    /// have none, so "Export Transcript As…" is disabled for them.
-    var canExportLastTranscript: Bool {
-        guard let base = lastDone?.base else { return false }
-        return TranscriptExporter.hasSegments(workDir: Config.resolvePath(config.workDir), base: base)
-    }
-
-    func exportLastTranscript() {
-        guard let base = lastDone?.base,
-              let transcript = TranscriptExporter.segments(workDir: Config.resolvePath(config.workDir), base: base) else {
-            notifier.notify(title: "No timestamps saved",
-                            body: "This recording was processed before Distavo saved timestamps. Process it again to export subtitles or a formatted transcript.")
-            return
-        }
-        TranscriptExporter.run(base: base, transcript: transcript) { [weak self] title, body in
-            self?.notifier.notify(title: title, body: body)
-        }
-    }
-
-    func copyLastTranscript() {
-        guard let transcript = lastDone?.transcript,
-              let text = try? String(contentsOf: transcript, encoding: .utf8) else {
-            notifier.notify(title: "Nothing to copy yet",
-                            body: "No transcript is available — process a recording first.")
-            return
-        }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-        notifier.notify(title: "Transcript copied", body: "\(lastDone?.base ?? "") is on the clipboard.")
-        acknowledgeNote()
-    }
-
     /// "When a recording finishes" (Vikunja #2199, extended to a checklist by
     /// #2205): runs every action in `config.whenDone` once processing
     /// succeeds — opening the note/transcript, and/or queueing a bigger-model
@@ -900,43 +824,25 @@ final class WatcherController: ObservableObject {
             + (r.malformed.isEmpty ? "" : ", \(r.malformed.count) line(s) not in checkbox format (kept as written)"))
     }
 
-    /// "Regenerate Note…" (Vikunja #2947): open the picker over the newest notes.
-    func showRegenerateNote() {
-        let notesDir = Config.resolvePath(config.notesDir)
-        let workDir = Config.resolvePath(config.workDir)
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(
-            at: notesDir, includingPropertiesForKeys: keys)) ?? []
-        let notes = urls
-            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
-            .compactMap { url -> (URL, Date)? in
-                guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
-                      let date = v.contentModificationDate else { return nil }
-                return (url, date)
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(15)
-            .map { url, _ -> RegenerableNote in
-                let base = url.deletingPathExtension().lastPathComponent
-                return RegenerableNote(
-                    base: base, title: base,
-                    hasTranscript: FileManager.default.fileExists(
-                        atPath: Pipeline.cachedTranscriptURL(workDir: workDir, base: base).path))
-            }
-        RegenerateWindowController.shared.show(notes: Array(notes), config: config) { [weak self] base, options in
-            Task { [weak self] in await self?.regenerateNote(base: base, options: options) }
-        }
-    }
-
     /// Re-summarise `base` from its saved transcript under the same single-flight
     /// lock as the scanner (so it never overlaps a scan or another variant run).
     /// Not routed through `handle`: a regenerate that cannot run must not look
     /// like a failed recording (no marker, no "failed" menu entry).
+    ///
+    /// The run is a row in the Processing Queue from the moment it is asked for
+    /// (1.18, manual check 2947.9): while it waits for the lock it shows as
+    /// waiting, and a second regenerate of the same note is refused until it ends.
     @discardableResult
-    func regenerateNote(base: String, options: RegenerateOptions) async -> ProcessResult {
+    func regenerateNote(base: String, options: RegenerateOptions, title: String? = nil) async -> ProcessResult {
+        guard queueModel.enqueueRegenerate(base: base, title: title ?? base) else {
+            return ProcessResult(status: .skipped, base: base,
+                                 message: "a regenerate of this note is already waiting or running")
+        }
+        if isScanning { log("Regenerate of \(base) is waiting for the current file to finish") }
         while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
         isScanning = true
         defer { isScanning = false }
+        queueModel.beginRegenerate(base: base)
         let cfg = config
         processingActive = true
         processingPhase = .transcribing
@@ -948,12 +854,12 @@ final class WatcherController: ObservableObject {
         let result = await Pipeline.regenerate(
             base: base, options: options, config: cfg, deps: deps, sourcePath: source)
         processingActive = false
+        queueModel.finishRegenerate(base: base, done: result.status == .done, message: result.message)
         switch result.status {
         case .done:
             status = "Last note: \(base)"
             lastDone = (base, result.notePath, result.transcriptPath)
             hasLastNote = result.notePath != nil
-            hasLastTranscript = result.transcriptPath != nil
             unseenDone = true
             log("Regenerated note: \(base) — \(result.message)")
             indexForSearch(base: base, note: result.notePath)   // #2942
@@ -967,38 +873,6 @@ final class WatcherController: ObservableObject {
         }
         refreshActivity()
         return result
-    }
-
-    /// "Rename Speakers…" (Vikunja #2944): pick a note, name its speakers.
-    func showRenameSpeakers() {
-        let notesDir = Config.resolvePath(config.notesDir)
-        let workDir = Config.resolvePath(config.workDir)
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: keys)) ?? []
-        let notes = urls
-            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
-            .compactMap { url -> (URL, Date)? in
-                guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
-                      let date = v.contentModificationDate else { return nil }
-                return (url, date)
-            }
-            .sorted { $0.1 > $1.1 }
-            .map { RenamableNote(base: $0.0.deletingPathExtension().lastPathComponent) }
-        let detect: (String) -> [DetectedSpeaker] = { base in
-            SpeakerRename.detectSpeakers(
-                note: try? String(contentsOf: notesDir.appendingPathComponent("\(base).md"), encoding: .utf8),
-                transcript: try? String(contentsOf: Pipeline.cachedTranscriptURL(workDir: workDir, base: base), encoding: .utf8),
-                segments: TranscriptSegments.load(workDir: workDir, base: base))
-        }
-        RenameSpeakersWindowController.shared.show(notes: Array(notes), detect: detect,
-                                                   resetMapping: { SpeakerRename.resetMapping(workDir: workDir, base: $0) },
-                                                   preview: { SpeakerRename.preview(mapping: $1, base: $0, notesDir: notesDir) },
-                                                   mergeCopies: { SpeakerRename.mergeCopies(workDir: workDir, base: $0) },
-                                                   onReset: { [weak self] base in
-            Task { [weak self] in await self?.resetSpeakers(base: base) }
-        }) { [weak self] base, mapping in
-            Task { [weak self] in await self?.renameSpeakers(base: base, mapping: mapping) }
-        }
     }
 
     /// "Reset to original labels": transcript, timestamps and mapping are reset exactly;
@@ -1057,7 +931,7 @@ final class WatcherController: ObservableObject {
     }
 
     /// Clear the green "new note" badge once the user has looked at the result.
-    private func acknowledgeNote() {
+    func acknowledgeNote() {
         unseenDone = false
         refreshActivity()
     }

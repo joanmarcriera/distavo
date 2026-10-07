@@ -2,8 +2,10 @@ import AppKit
 import SwiftUI
 import DistavoCore
 
-/// State behind the search window. All index calls run on a background task
-/// (the index serialises internally); results are applied on the main actor.
+/// Full-text search state (Vikunja #2942). Since 1.18 it has no window of its
+/// own: the Notes window's search field drives it when the scope is "Inside notes
+/// and transcripts". All index calls run on a background task (the index
+/// serialises internally); results are applied on the main actor.
 @MainActor
 final class SearchModel: ObservableObject {
     enum KindFilter: String, CaseIterable, Identifiable {
@@ -18,25 +20,28 @@ final class SearchModel: ObservableObject {
         }
     }
 
-    @Published var query = ""
     @Published var kindFilter: KindFilter = .both
     @Published var speaker: String?          // nil = anyone
-    @Published var selection: String?        // SearchHit.path
     @Published private(set) var hits: [SearchHit] = []
     @Published private(set) var speakers: [String] = []
     @Published private(set) var message = ""
     @Published private(set) var busy = false
+    /// False until the user builds the index (the opt-in), and again after deleting it.
+    @Published private(set) var enabled = WatcherController.searchGate.isEnabled
 
     let index: SearchIndex
     var notesDir = URL(fileURLWithPath: "/")
     var workDir = URL(fileURLWithPath: "/")
+    private var query = ""
     private var pending: Task<Void, Never>?
     private var refreshing: Task<Void, Never>?
 
     init(index: SearchIndex) { self.index = index }
 
     /// Debounced (150 ms) search; a newer keystroke cancels the older one.
-    func scheduleSearch() {
+    func scheduleSearch(_ text: String? = nil) {
+        if let text { query = text }
+        guard enabled else { hits = []; return }
         pending?.cancel()
         let (q, kind, spk) = (query, kindFilter.kind, speaker)
         pending = Task { [index] in
@@ -45,15 +50,22 @@ final class SearchModel: ObservableObject {
             let found = await SearchWork.run { index.search(q, speaker: spk, kind: kind, limit: 100) }
             if Task.isCancelled { return }
             hits = found
-            if !found.contains(where: { $0.path == selection }) { selection = found.first?.path }
             if q.trimmingCharacters(in: .whitespaces).isEmpty { message = "" }
-            else { message = found.isEmpty ? "No matches." : "\(found.count) result\(found.count == 1 ? "" : "s")" }
+            else { message = found.isEmpty ? "No matches." : "\(found.count) match\(found.count == 1 ? "" : "es")" }
         }
+    }
+
+    /// The opt-in: nothing is indexed until the user asks for full-text search.
+    func enable() {
+        WatcherController.searchGate.enable()
+        enabled = true
+        refresh()
     }
 
     /// Reconcile with the folders (new/edited/deleted files), then refresh the
     /// speaker list and the current results.
     func refresh(rebuild: Bool = false) {
+        guard enabled else { return }
         let (idx, notes, work) = (index, notesDir, workDir)
         busy = true
         message = "Indexing…"
@@ -68,48 +80,35 @@ final class SearchModel: ObservableObject {
             speakers = names
             if let s = speaker, !names.contains(s) { speaker = nil }
             busy = false
+            message = ""
             scheduleSearch()
         }
     }
 
     func deleteIndex() {
         // Disable first so any in-flight or queued work is inert, then remove the file.
-        // Nothing is indexed again until the user reopens "Search Notes…".
+        // Nothing is indexed again until the user builds the index again.
         WatcherController.searchGate.disable()
+        enabled = false
         pending?.cancel(); refreshing?.cancel()
         busy = false
-        hits = []; speakers = []; selection = nil
-        message = "Search index deleted. Nothing is indexed until you open Search Notes… again."
+        hits = []; speakers = []
+        message = "Search index deleted. Nothing is indexed until you build it again."
         let idx = index
         SearchWork.fire { idx.deleteAll() }
     }
 
-    /// Return / double-click: open the note (for a transcript hit, its note if
-    /// it exists, else the transcript file itself) in the default app.
-    func open(_ hit: SearchHit) {
-        var target = URL(fileURLWithPath: hit.path)
-        if hit.kind == .transcript {
-            let note = notesDir.appendingPathComponent("\(hit.base).md")
-            if FileManager.default.fileExists(atPath: note.path) { target = note }
-        }
-        guard FileManager.default.fileExists(atPath: target.path) else {
-            message = "That file no longer exists."
-            Task { [index, notesDir, workDir] in
-                _ = await SearchWork.run { index.remove(path: hit.path); return index.reconcile(notesDir: notesDir, workDir: workDir) }
-                scheduleSearch()
+    /// Snippet with the matched terms bold + tinted (AttributedString, not `Text +`).
+    static func highlighted(_ snippet: String) -> AttributedString {
+        var out = AttributedString()
+        for run in SearchIndex.snippetRuns(snippet.replacingOccurrences(of: "\n", with: " ")) {
+            var piece = AttributedString(run.text)
+            if run.match {
+                piece.font = .callout.bold()
+                piece.foregroundColor = .accentColor
             }
-            return
+            out.append(piece)
         }
-        NSWorkspace.shared.open(target)
-    }
-
-    func openSelected() {
-        if let hit = hits.first(where: { $0.path == selection }) ?? hits.first { open(hit) }
-    }
-
-    func moveSelection(_ delta: Int) {
-        guard !hits.isEmpty else { return }
-        let i = hits.firstIndex { $0.path == selection } ?? (delta > 0 ? -1 : hits.count)
-        selection = hits[min(max(i + delta, 0), hits.count - 1)].path
+        return out
     }
 }

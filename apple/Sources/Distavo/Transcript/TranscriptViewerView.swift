@@ -35,13 +35,20 @@ struct TranscriptViewerView: View {
 
     private var toolbar: some View {
         HStack(spacing: 10) {
-            Picker("Note", selection: Binding(get: { model.base }, set: { model.select($0) })) {
-                ForEach(model.notes) { Text($0.base).tag($0.base) }
+            // Opened for one note from the Notes window (1.18); the picker only
+            // appears when the caller offers several.
+            if model.notes.count > 1 {
+                Picker("Note", selection: Binding(get: { model.base }, set: { model.select($0) })) {
+                    ForEach(model.notes) { Text($0.base).tag($0.base) }
+                }
+                .labelsHidden()
+                .frame(maxWidth: 300)
+                .disabled(model.dirty || model.busy)
+                .help(model.dirty ? "Save or discard your edits first" : "Choose a note")
+            } else {
+                Text(model.base.replacingOccurrences(of: "_", with: " "))
+                    .font(.headline).lineLimit(1).truncationMode(.middle)
             }
-            .labelsHidden()
-            .frame(maxWidth: 300)
-            .disabled(model.dirty || model.busy || model.notes.isEmpty)
-            .help(model.dirty ? "Save or discard your edits first" : "Choose a note")
 
             Spacer()
 
@@ -179,6 +186,6 @@ final class TranscriptWindowController: NSObject, NSWindowDelegate {
         model?.shutdown()
         model = nil
         window?.contentViewController = nil
-        NSApp.setActivationPolicy(.accessory)
+        AppActivation.windowClosed(notification.object as? NSWindow)
     }
 }

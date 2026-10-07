@@ -200,6 +200,6 @@ final class ActionItemsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         window = nil
-        NSApp.setActivationPolicy(.accessory)
+        AppActivation.windowClosed(notification.object as? NSWindow)
     }
 }

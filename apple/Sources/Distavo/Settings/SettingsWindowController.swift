@@ -37,6 +37,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         // Back to a pure menu-bar app once settings are dismissed.
-        NSApp.setActivationPolicy(.accessory)
+        AppActivation.windowClosed(notification.object as? NSWindow)
     }
 }

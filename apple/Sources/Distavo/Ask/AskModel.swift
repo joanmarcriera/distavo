@@ -57,6 +57,13 @@ final class AskModel: ObservableObject {
         if !notes.contains(where: { $0.base == selectedBase }) { selectedBase = notes.first?.base ?? "" }
     }
 
+    /// Scope the chat to one note, or leave the scope alone for nil / an unknown note.
+    func scope(to base: String?) {
+        guard let base, notes.contains(where: { $0.base == base }) else { return }
+        searchAllNotes = false
+        selectedBase = base
+    }
+
     /// Earlier answered question/answer pairs, for follow-ups (trimmed to the
     /// model's budget in `AskNotes`).
     private var history: [AskTurn] {

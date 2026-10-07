@@ -1,8 +1,10 @@
 import AppKit
 import DistavoCore
 
-// "Export Key Moment Clips…" (Vikunja #2950): one m4a per marker of the most
-// recent recording that has markers, cut by AVFoundation (see `ClipExporter`).
+// "Export Key Moment Clips…" (Vikunja #2950): one m4a per marker of a recording,
+// cut by AVFoundation (see `ClipExporter`). Since 1.18 it is an action on the
+// note selected in the Notes window (it used to act on "the most recent
+// recording that has markers" from the menu).
 //
 // The destination is a FOLDER chosen in an NSOpenPanel, which grants write
 // access in the sandboxed App Store edition (user-selected read-write is already
@@ -10,57 +12,41 @@ import DistavoCore
 // security-scoped bookmark `SandboxFolders` already resolved at launch.
 extension WatcherController {
 
-    /// What the menu item can do right now.
+    /// What can be exported for one recording.
     enum KeyMomentExportState: Sendable {
         case noMarkers
-        case audioMissing(base: String)
-        case ready(base: String, source: URL, marks: [RecordingBookmarks.Mark])
+        case audioMissing
+        case ready(source: URL, marks: [RecordingBookmarks.Mark])
     }
 
-    /// Recompute `keyMomentExport` off the main thread (it lists the work folder,
-    /// decodes one sidecar and may walk the recordings tree) and publish the
-    /// result. Called at launch and from `refreshActivity()` - recording and scan
-    /// boundaries and every dropped marker - never per menu render.
-    func refreshKeyMomentExport() {
-        keyMomentRefresh?.cancel()
+    /// Export the clips of the recording behind `noteBase` (a variant note shares
+    /// its recording's markers). Looks the audio up off the main thread: the
+    /// recordings folder can be large.
+    func exportKeyMomentClips(base noteBase: String) {
+        let base = LanguageOverride.sourceBase(from: noteBase)
         let workDir = Config.resolvePath(config.workDir)
         let recordingsDir = Config.resolvePath(config.recordingsDir)
-        keyMomentRefresh = Task { [weak self] in
-            let state = await Task.detached(priority: .utility) { () -> KeyMomentExportState in
-                guard let base = RecordingBookmarks.basesWithMarkers(workDir: workDir, limit: 1).first,
-                      let bookmarks = RecordingBookmarks.load(workDir: workDir, base: base) else { return .noMarkers }
+        Task { [weak self] in
+            let state = await Task.detached(priority: .userInitiated) { () -> KeyMomentExportState in
+                guard let bookmarks = RecordingBookmarks.load(workDir: workDir, base: base),
+                      !bookmarks.marks.isEmpty else { return .noMarkers }
                 guard let source = ClipExporter.locateSource(
-                    base: base, source: bookmarks.source, recordingsDir: recordingsDir) else {
-                    return .audioMissing(base: base)
-                }
-                return .ready(base: base, source: source, marks: bookmarks.marks)
+                    base: base, source: bookmarks.source, recordingsDir: recordingsDir) else { return .audioMissing }
+                return .ready(source: source, marks: bookmarks.marks)
             }.value
-            guard !Task.isCancelled else { return }
-            self?.keyMomentExport = state
+            switch state {
+            case .noMarkers:
+                self?.postNotice(title: "No clips to export", body: "\(base) has no key moments marked.")
+            case .audioMissing:
+                self?.postNotice(title: "No clips to export",
+                                 body: "The recording for \(base) is no longer in the recordings folder.")
+            case .ready(let source, let marks):
+                self?.chooseFolderAndExportClips(base: base, source: source, marks: marks)
+            }
         }
     }
 
-    var canExportKeyMomentClips: Bool {
-        if case .ready = keyMomentExport { return true }
-        return false
-    }
-
-    /// The menu title, carrying the reason when the item is disabled (the
-    /// precedent set by "Export transcript as… (no timestamps saved)").
-    var keyMomentExportTitle: String {
-        switch keyMomentExport {
-        case .noMarkers: return "Export Key Moment Clips… (no key moments yet)"
-        case .audioMissing: return "Export Key Moment Clips… (recording audio not found)"
-        case .ready(_, _, let marks): return "Export Key Moment Clips… (\(marks.count))"
-        }
-    }
-
-    func exportKeyMomentClips() {
-        guard case .ready(let base, let source, let marks) = keyMomentExport else {
-            postNotice(title: "No clips to export",
-                        body: "Press Mark Key Moment while recording, and keep the recording file, to export clips.")
-            return
-        }
+    private func chooseFolderAndExportClips(base: String, source: URL, marks: [RecordingBookmarks.Mark]) {
         let panel = NSOpenPanel()
         panel.title = "Export Key Moment Clips"
         panel.message = "Choose a folder for \(marks.count) clip\(marks.count == 1 ? "" : "s") from \(base)."

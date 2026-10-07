@@ -38,7 +38,7 @@ final class QueueWindowController: NSObject, NSWindowDelegate {
         // Dropping the hosting view cancels its refresh task; the next show() rebuilds it.
         window?.contentViewController = nil
         window = nil
-        NSApp.setActivationPolicy(.accessory)
+        AppActivation.windowClosed(notification.object as? NSWindow)
     }
 }
 
@@ -147,7 +147,9 @@ private struct QueueRow: View {
     let controller: WatcherController
 
     private var isVariant: Bool { item.base.contains("@") }
-    private var canRetry: Bool { (item.state == .failed || item.state == .deferred) && !isVariant }
+    /// A "Regenerate" row (1.18): it is about a note, not a recording file.
+    private var regenerateTarget: String? { ProcessingQueue.regenerateTarget(item.base) }
+    private var canRetry: Bool { (item.state == .failed || item.state == .deferred) && !isVariant && regenerateTarget == nil }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -193,7 +195,7 @@ private struct QueueRow: View {
     @ViewBuilder private var inlineAction: some View {
         if canRetry {
             Button("Retry") { controller.retryQueueItem(item.base) }.controlSize(.small)
-        } else if item.state == .waiting {
+        } else if item.state == .waiting && regenerateTarget == nil {
             Button("Skip") { controller.cancelQueueItem(item.base) }.controlSize(.small)
                 .help("Skip for this session. The file stays in the folder and is offered again next launch.")
         } else if item.state == .cancelled {
@@ -202,6 +204,14 @@ private struct QueueRow: View {
     }
 
     @ViewBuilder private var menu: some View {
+        if let note = regenerateTarget {
+            Button("Show in Notes") { controller.showNotes(selecting: note) }
+        } else {
+            recordingMenu
+        }
+    }
+
+    @ViewBuilder private var recordingMenu: some View {
         if canRetry {
             Button("Retry") { controller.retryQueueItem(item.base) }
         }
@@ -219,6 +229,7 @@ private struct QueueRow: View {
             Divider()
             Button("Reveal in Finder") { controller.revealQueueItem(item.base) }
             Button("Open note") { controller.openQueueNote(item.base) }
+            if item.state == .done { Button("Show in Notes") { controller.showNotes(selecting: item.base) } }
         }
         if !isVariant && !item.state.isRunning && item.state != .copying {
             Divider()

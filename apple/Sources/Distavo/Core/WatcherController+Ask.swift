@@ -44,7 +44,7 @@ extension WatcherController {
             enableIndex: { [weak self] in await self?.buildSearchIndexForAsk() })
     }
 
-    /// The same opt-in the Search window performs: enable the gate, then build the index.
+    /// The same opt-in the Notes window's "Build the Search Index" button performs: enable the gate, then build the index.
     private func buildSearchIndexForAsk() async {
         Self.searchGate.enable()
         let notes = Config.resolvePath(config.notesDir), work = Config.resolvePath(config.workDir)

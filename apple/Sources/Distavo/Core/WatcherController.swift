@@ -835,11 +835,26 @@ final class WatcherController: ObservableObject {
     @discardableResult
     func regenerateNote(base: String, options: RegenerateOptions, title: String? = nil) async -> ProcessResult {
         guard queueModel.enqueueRegenerate(base: base, title: title ?? base) else {
-            return ProcessResult(status: .skipped, base: base,
-                                 message: "a regenerate of this note is already waiting or running")
+            // One already pending. A waiting one reads the transcript when it runs, so it
+            // covers this request; a running one may have read it before a later edit.
+            let running = queueModel.pendingRegenerate(base) == .running
+            return ProcessResult(status: .skipped, base: base, message: running
+                ? "this note is being regenerated right now; regenerate again when it finishes to include later changes"
+                : "a regenerate of this note is already waiting; it will use the transcript as saved when it runs")
         }
-        if isScanning { log("Regenerate of \(base) is waiting for the current file to finish") }
-        while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
+        if isScanning { log("Regenerate of \(base) is waiting until the recordings being processed are finished") }
+        // The scan holds the lock for its whole pass, which can be many files: the
+        // wait can be cancelled from the Processing Queue until the run starts.
+        while isScanning {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            if !queueModel.isRegenerateWaiting(base) {
+                log("Regenerate of \(base) cancelled before it started")
+                return ProcessResult(status: .skipped, base: base, message: "cancelled before it started")
+            }
+        }
+        guard queueModel.isRegenerateWaiting(base) else {
+            return ProcessResult(status: .skipped, base: base, message: "cancelled before it started")
+        }
         isScanning = true
         defer { isScanning = false }
         queueModel.beginRegenerate(base: base)

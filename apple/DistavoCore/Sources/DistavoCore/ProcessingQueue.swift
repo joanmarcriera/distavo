@@ -199,9 +199,26 @@ public struct ProcessingQueue: Equatable, Sendable {
             items.remove(at: i)
         }
         items.append(QueueItem(base: key, sourcePath: nil, displayName: "Regenerate: \(title)",
-                               state: .waiting, message: "Waiting for the current file to finish"))
+                               state: .waiting, message: "Waiting until the recordings being processed are finished"))
         normalizeOrder()
         return true
+    }
+
+    /// Give up a regenerate that has not started. False once it is running or over:
+    /// there is no safe point to stop a summary that is being written.
+    @discardableResult
+    public mutating func cancelRegenerate(base: String, now: Date) -> Bool {
+        guard let i = index(Self.regeneratePrefix + base), items[i].state == .waiting else { return false }
+        items[i].state = .skipped
+        items[i].finishedAt = now
+        items[i].message = "Cancelled before it started - the note was left as it is"
+        normalizeOrder()
+        return true
+    }
+
+    /// True while the regenerate of `base` is still waiting for its turn.
+    public func isRegenerateWaiting(_ base: String) -> Bool {
+        item(Self.regeneratePrefix + base)?.state == .waiting
     }
 
     /// The regenerate got the lock and is summarising.

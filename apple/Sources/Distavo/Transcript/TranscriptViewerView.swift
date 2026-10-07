@@ -130,12 +130,16 @@ struct TranscriptViewerView: View {
 }
 
 /// Hosts the viewer in one resizable window; asks before closing over unsaved
-/// edits. Same activation-policy pattern as the Search window.
+/// edits. Same activation-policy pattern as the Notes window.
 @MainActor
 final class TranscriptWindowController: NSObject, NSWindowDelegate {
     static let shared = TranscriptWindowController()
     private var window: NSWindow?
     private var model: TranscriptViewerModel?
+
+    /// The note with unsaved edits in the open window, if any: another note cannot
+    /// be opened until they are saved or discarded.
+    var unsavedBase: String? { model?.dirty == true ? model?.base : nil }
 
     func show(model newModel: TranscriptViewerModel) {
         if let old = model, old.dirty { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true); return }

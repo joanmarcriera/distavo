@@ -10,6 +10,12 @@ extension WatcherController {
 
     /// Open the viewer on one note (the selection in the Notes window).
     func showTranscriptViewer(base: String) {
+        // The window keeps a transcript with unsaved edits; say so rather than
+        // silently showing that one when another note was asked for.
+        if let unsaved = TranscriptWindowController.shared.unsavedBase, unsaved != base {
+            postNotice(title: "Transcript not opened",
+                       body: "Save or discard your edits to \(unsaved) first, then open \(base).")
+        }
         let workDir = Config.resolvePath(config.workDir)
         let recordingsDir = Config.resolvePath(config.recordingsDir)
         let notes = [TranscriptNote(base: base)]

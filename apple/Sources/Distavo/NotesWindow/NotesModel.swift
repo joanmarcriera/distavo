@@ -42,6 +42,8 @@ final class NotesModel: ObservableObject {
     private var workDir = URL(fileURLWithPath: "/")
     private var known: Set<String> = []
     private var pendingSelection: String?
+    /// Counts refreshes so a slow, older scan never overwrites a newer one.
+    private var generation = 0
 
     init(index: SearchIndex) { search = SearchModel(index: index) }
 
@@ -60,10 +62,12 @@ final class NotesModel: ObservableObject {
     /// Re-read the folders off the main thread and apply the result.
     func refresh() async {
         let (notes, work, cache) = (notesDir, workDir, cache)
+        generation += 1
+        let mine = generation
         let found = await Task.detached(priority: .userInitiated) {
             NotesLibrary.scan(notesDir: notes, workDir: work, cache: cache)
         }.value
-        guard notes == notesDir, work == workDir else { return }
+        guard mine == generation, notes == notesDir, work == workDir else { return }
         let bases = Set(found.map(\.base))
         if loaded { fresh.formUnion(bases.subtracting(known)) }
         fresh.formIntersection(bases)
@@ -71,7 +75,8 @@ final class NotesModel: ObservableObject {
         if found != entries { entries = found }
         let kept = Set(NotesLibrary.retainedSelection(Array(selection), in: found))
         if kept != selection { selection = kept }
-        if let wanted = pendingSelection, bases.contains(wanted) { selection = [wanted]; pendingSelection = nil }
+        if let wanted = pendingSelection, bases.contains(wanted) { selection = [wanted] }
+        pendingSelection = nil   // one chance: a note that is not there now must not grab the selection later
         // First load only: show the newest note. After that the selection is the user's.
         if !loaded, selection.isEmpty, let first = found.first { selection = [first.base] }
         fresh.subtract(selection)
@@ -98,7 +103,9 @@ final class NotesModel: ObservableObject {
         return out
     }
 
-    var selectedEntries: [NoteEntry] { entries.filter { selection.contains($0.base) } }
+    /// The selected notes that are in the list as shown: a note hidden by the search
+    /// field is never acted on, even if it was selected before the filter was typed.
+    var selectedEntries: [NoteEntry] { rows.map(\.entry).filter { selection.contains($0.base) } }
 
     func marks(_ entry: NoteEntry) -> [String] {
         (fresh.contains(entry.base) ? ["new"] : []) + NotesLibrary.marks(entry, busy: busy[entry.base])

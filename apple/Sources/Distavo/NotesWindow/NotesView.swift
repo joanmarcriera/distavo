@@ -191,7 +191,7 @@ struct NotesView: View {
                 Text(controller.status).lineLimit(1).truncationMode(.middle)
                 if !model.busy.isEmpty {
                     let waiting = model.busy.values.filter { $0 == .waiting }.count
-                    Text(waiting > 0 ? "\(waiting) regenerate\(waiting == 1 ? "" : "s") waiting for the current file"
+                    Text(waiting > 0 ? "\(waiting) regenerate\(waiting == 1 ? "" : "s") waiting for processing to finish"
                                      : "Regenerating a note")
                         .foregroundStyle(.orange)
                 }
@@ -307,7 +307,7 @@ private struct NoteDetailView: View {
                 }
                 if let busy {
                     Text(busy == .waiting
-                         ? "A regenerate of this note is waiting for the recording being processed. It is listed in the Processing Queue."
+                         ? "A regenerate of this note is waiting until the recordings being processed are finished. It is listed in the Processing Queue, where it can be cancelled."
                          : "This note is being regenerated. The current version is kept as a .prev- copy.")
                         .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 }

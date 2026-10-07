@@ -74,6 +74,20 @@ final class QueueRegenerateTests: XCTestCase {
         XCTAssertNil(ProcessingQueue.regenerateTarget("a"))
     }
 
+    func testWaitingRegenerateCanBeCancelledButARunningOneCannot() {
+        var q = ProcessingQueue()
+        q.enqueueRegenerate(base: "m1", title: "A")
+        XCTAssertTrue(q.isRegenerateWaiting("m1"))
+        XCTAssertTrue(q.cancelRegenerate(base: "m1", now: t0))
+        XCTAssertFalse(q.isRegenerateWaiting("m1"))
+        XCTAssertEqual(q.item(ProcessingQueue.regeneratePrefix + "m1")?.state, .skipped)
+        XCTAssertEqual(q.pendingRegenerates, [:])
+        XCTAssertTrue(q.enqueueRegenerate(base: "m1", title: "A"), "can be asked for again")
+        q.beginRegenerate(base: "m1", now: t0)
+        XCTAssertFalse(q.cancelRegenerate(base: "m1", now: t0))
+        XCTAssertEqual(q.pendingRegenerates, ["m1": .running])
+    }
+
     func testClearFinishedRemovesEndedRegenerates() {
         var q = ProcessingQueue()
         q.enqueueRegenerate(base: "m1", title: "A")

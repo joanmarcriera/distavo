@@ -10,7 +10,7 @@ enum AppActivation {
     /// Call from `windowWillClose`: menu-bar-only again once no other window is left.
     static func windowClosed(_ closing: NSWindow?) {
         let othersOpen = NSApp.windows.contains {
-            $0 !== closing && $0.isVisible && $0.styleMask.contains(.titled) && !($0 is NSPanel)
+            $0 !== closing && ($0.isVisible || $0.isMiniaturized) && $0.styleMask.contains(.titled) && !($0 is NSPanel)
         }
         if !othersOpen { NSApp.setActivationPolicy(.accessory) }
     }

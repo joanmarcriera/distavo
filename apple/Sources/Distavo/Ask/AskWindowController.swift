@@ -3,7 +3,7 @@ import SwiftUI
 import DistavoCore
 
 /// Hosts `AskView` in one reusable resizable window ("Ask Your Notes…", Vikunja
-/// #2948), same pattern as `SearchWindowController`: the app turns `.regular`
+/// #2948), same pattern as `NotesWindowController`: the app turns `.regular`
 /// while the window is open and back to `.accessory` on close.
 @MainActor
 final class AskWindowController: NSObject, NSWindowDelegate {

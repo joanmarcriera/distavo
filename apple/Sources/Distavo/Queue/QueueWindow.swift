@@ -195,6 +195,9 @@ private struct QueueRow: View {
     @ViewBuilder private var inlineAction: some View {
         if canRetry {
             Button("Retry") { controller.retryQueueItem(item.base) }.controlSize(.small)
+        } else if item.state == .waiting, let note = regenerateTarget {
+            Button("Cancel") { controller.queueModel.cancelRegenerate(base: note) }.controlSize(.small)
+                .help("Do not regenerate this note. The note is left as it is.")
         } else if item.state == .waiting && regenerateTarget == nil {
             Button("Skip") { controller.cancelQueueItem(item.base) }.controlSize(.small)
                 .help("Skip for this session. The file stays in the folder and is offered again next launch.")
@@ -205,6 +208,7 @@ private struct QueueRow: View {
 
     @ViewBuilder private var menu: some View {
         if let note = regenerateTarget {
+            if item.state == .waiting { Button("Cancel regenerate") { controller.queueModel.cancelRegenerate(base: note) } }
             Button("Show in Notes") { controller.showNotes(selecting: note) }
         } else {
             recordingMenu

@@ -152,6 +152,7 @@ private struct BiggerModelField: View {
         let url = model.draft.summarise.server.url
         loading = true
         Task {
+            defer { loading = false }
             do {
                 let found = try await OllamaClient().models(url)
                 guard url == model.draft.summarise.server.url else { return }
@@ -161,7 +162,6 @@ private struct BiggerModelField: View {
                 installed = []; listed = false
                 problem = "The server did not answer"
             }
-            loading = false
         }
     }
 }

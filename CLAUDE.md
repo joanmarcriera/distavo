@@ -155,7 +155,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
 - `reminders-exported.json` — ledger of reminders already sent (one per work dir, not per base; `RemindersLedger`).
 - In the **notes** folder: `<note>.prev-<yyyyMMdd-HHmmss>.md` backups (`NoteVersions`, from Regenerate and speaker rename); every scan/listing skips them via `NoteVersions.isBackupName`.
-- Search index (not per base): `search-index.sqlite`, created only after the first Search Notes… open (`search.indexEnabled`).
+- Search index (not per base): `search-index.sqlite`, created only after "Build the Search Index" is pressed in the Notes window (`search.indexEnabled`).
 
 **Anything that renames a base must move all of them.** `CalendarMatch.moveSidecars` does so by prefix (`<oldBase>.*`, enumerated, copy-then-commit-then-delete) — never add a fixed list.
 

@@ -31,6 +31,9 @@ Screenshots from a Debug build with synthetic notes: `docs/screenshots/1.18-note
 
 A disabled action stays visible with its reason printed under the button.
 
+- A note hidden by the search field is never acted on, even if it was selected before the filter was typed.
+- **Open Transcript…** while the transcript window holds unsaved edits to another note keeps that window and
+  posts a notification asking you to save or discard first.
 - **Several notes selected**: Export N Transcripts… writes one file per note into a folder you choose, in one
   format, named after the note (` 2`, ` 3`… when the name exists; nothing is overwritten). Notes without
   timestamps are skipped and counted in the reason line.
@@ -56,7 +59,9 @@ file date), so regenerating an old note does not move it to the top.
 A regenerate is a row in the Processing Queue from the moment it is asked for: **Waiting** while a recording is
 being processed, **Summarising** while it runs, then **Done**, or **Skipped** with the reason when it could not
 run (the note is untouched and no recording is marked failed). A second regenerate of the same note is refused
-until the first ends. The Queue stays a separate window because it lists recordings, including ones with no
+until the first ends. The scan holds the lock for its whole pass, so with a backlog the wait lasts until every
+pending recording is processed; a waiting regenerate has a **Cancel** button in the Queue (a running one cannot
+be stopped). The Queue stays a separate window because it lists recordings, including ones with no
 note yet, in processing order; its Done rows and regenerate rows offer **Show in Notes**.
 
 ## What did not change

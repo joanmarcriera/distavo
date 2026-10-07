@@ -53,10 +53,11 @@ public enum AudioConverter {
     ///
     /// Why this exists (1.18): `AVAssetReader` with rate/channel conversion builds an
     /// offline AudioQueue render pipeline, which binds to the default audio DEVICE
-    /// (`AudioDeviceCreateIOProcID`). On a Mac that never granted Distavo the
-    /// microphone, that made macOS ask for it the first time ANY file was
-    /// processed, and the conversion blocked until the prompt was answered. A user
-    /// who only drops files must never see a microphone prompt.
+    /// (`AudioDeviceCreateIOProcID`). In a clean macOS 26 VM that made macOS ask for
+    /// the microphone the first time ANY file was processed, and the conversion
+    /// blocked until the prompt was answered. The VM has one virtual device for
+    /// input and output, so a physical Mac may not prompt (not confirmed either
+    /// way); converting a file has no reason to open a device at all.
     ///
     /// The rate is converted at the source channel count and the channels are then
     /// mixed here, so both sides of an in-app recording (left = microphone,

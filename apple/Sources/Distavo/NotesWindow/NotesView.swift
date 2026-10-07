@@ -23,10 +23,10 @@ struct NotesView: View {
 
     var body: some View {
         HSplitView {
-            sidebar.frame(minWidth: 260, idealWidth: 320, maxWidth: 480)
-            detail.frame(minWidth: 420, maxWidth: .infinity, maxHeight: .infinity)
+            sidebar.frame(minWidth: 260, idealWidth: 300, maxWidth: 360)
+            detail.frame(minWidth: 520, maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 720, minHeight: 420)
+        .frame(minWidth: 800, minHeight: 440)
         .task {
             // Keep the list current while the window is open (2947.9).
             while !Task.isCancelled {
@@ -349,6 +349,7 @@ private struct NoteDetailView: View {
         return VStack(alignment: .leading, spacing: 1) {
             Button(action.label) { run(action) }
                 .disabled(!state.isAvailable)
+                .fixedSize()   // never truncate a command name
             if let why = state.reason {
                 Text(why).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
             }

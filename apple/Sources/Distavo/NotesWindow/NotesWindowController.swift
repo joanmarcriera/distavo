@@ -22,8 +22,8 @@ final class NotesWindowController: NSObject, NSWindowDelegate {
             w.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             w.isReleasedWhenClosed = false
             w.delegate = self
-            w.setContentSize(NSSize(width: 980, height: 620))
-            w.minSize = NSSize(width: 720, height: 420)
+            w.setContentSize(NSSize(width: 1040, height: 640))
+            w.minSize = NSSize(width: 800, height: 440)
             w.center()
             w.setFrameAutosaveName("DistavoNotesWindow")
             window = w

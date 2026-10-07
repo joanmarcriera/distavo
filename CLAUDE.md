@@ -90,6 +90,10 @@ of the original Python module (noted in its header).
 - **Meeting detection** — `MeetingDetector.swift`: offers to record when a listed call app captures the mic (fake-clock policy, like `SilenceMonitor`).
 - **Scratchpad, key moments** — `Scratchpad.swift` (typed Quick Notes -> `Prompt.build(scratchpad:)`), `RecordingBookmarks.swift`
   (markers -> deterministic `## Key moments`), `ClipExporter.swift` (AVFoundation m4a clips).
+- **Notes window (1.18)** — `NotesLibrary.swift`: one row per note (newest meeting first) with what is on disk for it and, per
+  `NoteAction`, whether it can run and the reason when it cannot; title filter, selection retention, `TranscriptBatchExport`
+  (several transcripts to a folder). `SettingsDefaults.swift` names what "Default from Settings" resolves to; `OllamaModels.swift`
+  lists installed models and compares sizes for the "Bigger model" field. Spec: `docs/notes-window.md`.
 - **Queue** — `ProcessingQueue.swift` (view over durable markers, ETAs, `QueueScan`, `QueueRetry`), `QueueCoordinator.swift` (`PausePolicy`, retries).
 - **Notes output** — `NotesConfig.swift` (`notes` config section), `NoteFrontmatter.swift`, `NoteMeta.swift` (LLM title/tags),
   `TrackedTerms.swift` (`## Tracked terms`), `VaultExport.swift` (second copy in e.g. an Obsidian vault), `NoteAssembly.swift`.
@@ -104,6 +108,11 @@ The **`DistavoEmbedded`** package (`apple/DistavoEmbedded/`) holds the built-in 
   See `NOTICES.md` for licenses.
 
 App target (`apple/Sources/Distavo/`):
+- **`NotesWindow/`** (1.18, `NotesModel`/`NotesView`/`NotesWindowController` + `Core/WatcherController+Notes.swift`) — menu **Notes…**:
+  the one place to browse notes and act on the SELECTED one. Regenerate and Rename Speakers are sheets on it (no note chooser of
+  their own); Transcript, Compare and Ask stay windows opened for the selection; search is its field (the Search window is gone).
+  **A new per-note command goes here as a `NoteAction`, not into the menu.** The folder is not called `Notes/` because
+  `.gitignore` ignores `notes/` and the file system is case-insensitive.
 - **`Menu/StatusMenu.swift`** + **`Core/WatcherController.swift`** — `MenuBarExtra` menu (one Button per item)
   wired to the GUI-agnostic controller (timers, locks, status, deferred-set tracking, marker cleanup).
   Timer scans on configured interval; scan is single-flight (non-blocking lock prevents double-process).
@@ -206,7 +215,15 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - **Automation can't touch files:** `distavo://` commands carry no path and never read/move/delete or change settings; start-recording
   by link always asks (Cancel default). Unknown URLs are ignored and logged.
 - **Opt-in by use:** the search index (`search.indexEnabled`, UserDefaults, not Config) and EventKit/Reminders permissions are requested
-  only when the user first uses the feature; nothing is indexed or prompted before that.
+  only when the user first uses the feature; nothing is indexed or prompted before that. Opening the Notes window is NOT the search
+  opt-in (everyone opens it): only the "Build the Search Index" button is.
+- **The Notes window never moves the selection.** A refresh (every 3 s, and when a regenerate ends) keeps the selected bases; a new
+  note is listed and marked, not selected; the list is ordered by meeting date so a regenerate does not reorder it. Sheets capture
+  the note when the button is pressed. This is what stopped regenerates going to the wrong note (manual check 2947.9).
+- **A regenerate is visible while it waits:** `regenerateNote` enqueues a `regenerate:<base>` row in `ProcessingQueue` before waiting
+  for `isScanning`, and refuses a second one for the same note. A regenerate that cannot run ends "skipped", never "failed".
+- **Windows share the activation policy:** close handlers call `AppActivation.windowClosed`, which returns to `.accessory` only when
+  no other titled window is open (Notes opens child windows).
 - **Tests must not mutate process-global time zone** (`setenv("TZ")`/`NSTimeZone` resets): a cached static `DateFormatter` froze the zone
   and made results depend on test order. Build formatters per call with an injectable `TimeZone`.
 
@@ -218,7 +235,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - Logs: `~/Library/Logs/Distavo/distavo.log`
 - Search index (a rebuildable FTS5 cache of note + transcript text, #2942, `docs/search.md`): `~/Library/Application Support/Distavo/search-index.sqlite`
 - UserDefaults (no Keychain items exist): `search.indexEnabled`, `settings.selectedPane`, the key-moment hotkey error, `summaryModelDownloadOptIn.*`, onboarding/preflight/local-network flags, last detected language, App Store folder bookmarks (`SandboxFolders`). Config-file keys are for behaviour; window state stays here.
-- Docs: `docs/automation.md`, `search.md`, `ask-local-only.md`, `transcript-sidecar.md` (sidecar format), `settings-redesign-checklist.md`, `voice-profiles-feasibility.md`, `manual-checks-1.17.md` (what headless tests can't prove: TCC, EventKit, hotkey, detection)
+- Docs: `docs/notes-window.md`, `automation.md`, `search.md`, `ask-local-only.md`, `transcript-sidecar.md` (sidecar format), `settings-redesign-checklist.md`, `voice-profiles-feasibility.md`, `manual-checks-1.17.md` (what headless tests can't prove: TCC, EventKit, hotkey, detection)
 - WhisperKit models: `~/Library/Application Support/Distavo/models`
 
 Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never commit user data.

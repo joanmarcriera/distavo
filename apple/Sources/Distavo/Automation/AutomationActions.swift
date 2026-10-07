@@ -162,6 +162,8 @@ extension WatcherController {
             Task { await self.scanOnce() }
         case .settings:
             showSettings()
+        case .notes:
+            showNotes()
         case .recordStop:
             capture.stopRecording()
         case .recordStart:

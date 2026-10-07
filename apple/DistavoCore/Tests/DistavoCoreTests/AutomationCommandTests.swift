@@ -8,6 +8,8 @@ final class AutomationCommandTests: XCTestCase {
         XCTAssertEqual(AutomationCommand.parse("distavo://open-latest-note"), .openLatestNote)
         XCTAssertEqual(AutomationCommand.parse("distavo://process-now"), .processNow)
         XCTAssertEqual(AutomationCommand.parse("distavo://settings"), .settings)
+        XCTAssertEqual(AutomationCommand.parse("distavo://notes"), .notes)
+        XCTAssertNil(AutomationCommand.parse("distavo://notes/Meeting_2026"), "a note cannot be named by link")
         XCTAssertEqual(AutomationCommand.parse("distavo://record/start"), .recordStart)
         XCTAssertEqual(AutomationCommand.parse("distavo://record/stop"), .recordStop)
         XCTAssertEqual(AutomationCommand.parse(URL(string: "DISTAVO://Record/Stop/")!), .recordStop)
@@ -15,7 +17,7 @@ final class AutomationCommandTests: XCTestCase {
 
     func testOnlyRecordStartNeedsConfirmation() {
         XCTAssertTrue(AutomationCommand.recordStart.requiresConfirmation)
-        for c in [AutomationCommand.openLatestNote, .processNow, .settings, .recordStop] {
+        for c in [AutomationCommand.openLatestNote, .processNow, .settings, .notes, .recordStop] {
             XCTAssertFalse(c.requiresConfirmation)
         }
     }

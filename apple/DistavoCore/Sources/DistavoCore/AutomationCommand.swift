@@ -15,6 +15,9 @@ public enum AutomationCommand: Equatable, Sendable {
     case processNow
     /// `distavo://settings` — open the Settings window.
     case settings
+    /// `distavo://notes` — open the Notes window (1.18). Opens a window only: it
+    /// carries no note name and selects, changes and exports nothing.
+    case notes
     /// `distavo://record/start` — start the built-in recorder (needs confirmation).
     case recordStart
     /// `distavo://record/stop` — stop the built-in recorder.
@@ -47,6 +50,7 @@ public enum AutomationCommand: Equatable, Sendable {
         case ("open-latest-note", ""): return .openLatestNote
         case ("process-now", ""): return .processNow
         case ("settings", ""): return .settings
+        case ("notes", ""): return .notes
         case ("record", "/start"): return .recordStart
         case ("record", "/stop"): return .recordStop
         default: return nil

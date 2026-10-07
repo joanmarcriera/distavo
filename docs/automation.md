@@ -18,7 +18,7 @@ Backup copies (`.prev-` files from Regenerate) are never returned as the latest 
 
 ## URL scheme
 
-`open distavo://<command>`. Commands: `open-latest-note`, `process-now`, `settings`, `record/start`, `record/stop`.
+`open distavo://<command>`. Commands: `open-latest-note`, `process-now`, `settings`, `notes` (opens the Notes window; it cannot name or select a note), `record/start`, `record/stop`.
 
 Any web page or app can open a URL, so the scheme is deliberately tiny: no command takes a path, reads, moves or
 deletes files, or changes settings. Starting a recording by link always asks first (Cancel is the default button,

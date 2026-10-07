@@ -2,31 +2,26 @@ import AppKit
 import DistavoCore
 
 // "Open Transcript…" (Vikunja #2951): wiring for the audio-synced transcript
-// viewer. Picks the newest notes, finds source audio lazily, re-indexes search
+// viewer, opened for the note selected in the Notes window (1.18; it used to
+// offer the newest 30 notes in a popup). Finds source audio lazily, re-indexes search
 // after a save and re-summarises through the existing `regenerateNote` path
 // (single-flight lock, previous note kept as `.prev-<stamp>.md`).
 extension WatcherController {
 
-    func showTranscriptViewer() {
-        let notesDir = Config.resolvePath(config.notesDir)
+    /// Open the viewer on one note (the selection in the Notes window).
+    func showTranscriptViewer(base: String) {
+        // The window keeps a transcript with unsaved edits; say so rather than
+        // silently showing that one when another note was asked for.
+        if let unsaved = TranscriptWindowController.shared.unsavedBase, unsaved != base {
+            postNotice(title: "Transcript not opened",
+                       body: "Save or discard your edits to \(unsaved) first, then open \(base).")
+        }
         let workDir = Config.resolvePath(config.workDir)
         let recordingsDir = Config.resolvePath(config.recordingsDir)
-
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .isRegularFileKey]
-        let urls = (try? FileManager.default.contentsOfDirectory(at: notesDir, includingPropertiesForKeys: keys)) ?? []
-        let notes = urls
-            .filter { $0.pathExtension.lowercased() == "md" && !NoteVersions.isBackupName($0.lastPathComponent) }
-            .compactMap { url -> (URL, Date)? in
-                guard let v = try? url.resourceValues(forKeys: Set(keys)), v.isRegularFile == true,
-                      let date = v.contentModificationDate else { return nil }
-                return (url, date)
-            }
-            .sorted { $0.1 > $1.1 }
-            .prefix(30)
-            .map { TranscriptNote(base: $0.0.deletingPathExtension().lastPathComponent) }
+        let notes = [TranscriptNote(base: base)]
 
         let model = TranscriptViewerModel(
-            workDir: workDir, notes: Array(notes), initial: nil,
+            workDir: workDir, notes: notes, initial: base,
             // A variant note's base is `<base>@<suffix>`; the recording is the plain base.
             findSource: { base in
                 Self.recordingURL(forBase: LanguageOverride.sourceBase(from: base), in: recordingsDir)

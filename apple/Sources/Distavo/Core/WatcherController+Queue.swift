@@ -108,6 +108,23 @@ final class QueueModel: ObservableObject {
         unreadableDurations.formUnion(snap.unreadable)
     }
 
+    // MARK: Regenerate rows (1.18)
+
+    /// False when a regenerate of that note is already waiting or running.
+    func enqueueRegenerate(base: String, title: String) -> Bool {
+        var accepted = false
+        mutate { accepted = $0.enqueueRegenerate(base: base, title: title) }
+        return accepted
+    }
+    func cancelRegenerate(base: String) { mutate { $0.cancelRegenerate(base: base, now: Date()) } }
+    func isRegenerateWaiting(_ base: String) -> Bool { working.isRegenerateWaiting(base) }
+    /// A regenerate of that note that has not finished, if any.
+    func pendingRegenerate(_ base: String) -> NoteBusy? { working.pendingRegenerates[base] }
+    func beginRegenerate(base: String) { mutate { $0.beginRegenerate(base: base, now: Date()) } }
+    func finishRegenerate(base: String, done: Bool, message: String) {
+        mutate { $0.finishRegenerate(base: base, done: done, message: message, now: Date()) }
+    }
+
     // MARK: Copy rows
 
     func beginCopy(displayName: String) -> String {

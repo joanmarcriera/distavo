@@ -3,7 +3,7 @@ import SwiftUI
 import DistavoCore
 
 /// Hosts `AskView` in one reusable resizable window ("Ask Your Notes…", Vikunja
-/// #2948), same pattern as `SearchWindowController`: the app turns `.regular`
+/// #2948), same pattern as `NotesWindowController`: the app turns `.regular`
 /// while the window is open and back to `.accessory` on close.
 @MainActor
 final class AskWindowController: NSObject, NSWindowDelegate {
@@ -12,10 +12,13 @@ final class AskWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private let model = AskModel()
 
-    func show(notes: [AskableNote],
+    /// `preselect` = a note's base: the window opens scoped to "This note" on it
+    /// ("Ask About This Note…" in the Notes window); nil keeps the current scope.
+    func show(notes: [AskableNote], preselect: String? = nil,
               ask: @escaping (String, AskScope, [AskTurn]) async -> AskOutcome,
               enableIndex: @escaping () async -> Void) {
         model.configure(notes: notes, ask: ask, enableIndex: enableIndex)
+        model.scope(to: preselect)
         if window == nil {
             let hosting = NSHostingController(rootView: AskView(model: model))
             hosting.sizingOptions = [.minSize]
@@ -37,6 +40,6 @@ final class AskWindowController: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         // The chat is memory-only: closing the window ends it.
         model.clear()
-        NSApp.setActivationPolicy(.accessory)
+        AppActivation.windowClosed(notification.object as? NSWindow)
     }
 }

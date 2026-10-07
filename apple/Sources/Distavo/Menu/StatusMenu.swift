@@ -79,24 +79,18 @@ struct StatusMenu: View {
         Button("Process now") { controller.processNow() }
         Button("Processing Queue…") { controller.showProcessingQueue() }
         Button("Process a recording with…") { controller.processRecordingWith() }
-        Button("Compare…") { controller.compareRecordings() }
-        Button("Regenerate Note…") { controller.showRegenerateNote() }
-        Button("Search Notes…") { controller.showSearchNotes() }
-        Button("Rename Speakers…") { controller.showRenameSpeakers() }
-        Button("Open Action Items…") { controller.showActionItems() }
-        Button("Open Transcript…") { controller.showTranscriptViewer() }
-        Button("Ask Your Notes…") { controller.showAskNotes() }
-        Button("Copy last transcript") { controller.copyLastTranscript() }
-            .disabled(!controller.hasLastTranscript)
-        Button(controller.hasLastNote && !controller.canExportLastTranscript
-               ? "Export transcript as… (no timestamps saved)" : "Export transcript as…") {
-            controller.exportLastTranscript()
-        }
-        .disabled(!controller.canExportLastTranscript)
-        Button(controller.keyMomentExportTitle) { controller.exportKeyMomentClips() }   // #2950
-            .disabled(!controller.canExportKeyMomentClips)
+
+        Divider()
+
+        // 1.18: everything that acts on an existing note (regenerate, export,
+        // transcript, rename speakers, compare, ask, search) lives in the Notes
+        // window, on the note selected there.
+        Button("Notes…") { controller.showNotes() }
         Button("Open last note") { controller.openLastNote() }
             .disabled(!controller.hasLastNote)
+        Button("Open Action Items…") { controller.showActionItems() }
+
+        Divider()
 
         Menu("Watch interval") {
             ForEach(WatcherController.intervalChoices, id: \.self) { secs in

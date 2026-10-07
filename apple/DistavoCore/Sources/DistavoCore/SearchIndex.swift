@@ -572,9 +572,10 @@ public final class SearchIndex: @unchecked Sendable {
 }
 
 /// Opt-in switch for the search index (Vikunja #2942): nothing is created,
-/// read or written until the user first opens "Search Notes…", which calls
-/// `enable()`. "Delete search index" calls `disable()`, so the index stays
-/// deleted until the user searches again. Stored in UserDefaults (not a Config
+/// read or written until the user presses "Build the Search Index" in the
+/// Notes window (1.18; before that, the first open of "Search Notes…"), which
+/// calls `enable()`. "Delete search index" calls `disable()`, so the index stays
+/// deleted until the user builds it again. Stored in UserDefaults (not a Config
 /// key); default false, so existing installs see no change.
 public struct SearchGate: @unchecked Sendable {
     public static let key = "search.indexEnabled"

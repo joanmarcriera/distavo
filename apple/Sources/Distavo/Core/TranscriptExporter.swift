@@ -57,6 +57,9 @@ enum TranscriptExporter {
         let handler = FormatChange(apply)
         popup.target = handler
         popup.action = #selector(FormatChange.changed)
+        // Start from the note's name: the panel's own default is "Untitled", which
+        // `apply` took for a name the user typed (seen in the 1.18 VM run).
+        panel.nameFieldStringValue = base
         apply()
 
         NSApp.activate(ignoringOtherApps: true)

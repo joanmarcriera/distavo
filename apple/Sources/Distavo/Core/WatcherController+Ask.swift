@@ -28,9 +28,15 @@ extension WatcherController {
             }
     }
 
-    func showAskNotes() {
+    /// `base` = scope the chat to that note ("Ask About This Note…"); nil = all notes.
+    func showAskNotes(base: String? = nil) {
+        var notes = askableNotes
+        // A note older than the newest 50 must still be offered when asked about by name.
+        if let base, !notes.contains(where: { $0.base == base }) {
+            notes.insert(AskableNote(base: base, title: base), at: 0)
+        }
         AskWindowController.shared.show(
-            notes: askableNotes,
+            notes: notes, preselect: base,
             ask: { [weak self] question, scope, history in
                 guard let self else { return .failed("Distavo is closing.") }
                 return await self.answer(question, scope: scope, history: history)
@@ -38,7 +44,7 @@ extension WatcherController {
             enableIndex: { [weak self] in await self?.buildSearchIndexForAsk() })
     }
 
-    /// The same opt-in the Search window performs: enable the gate, then build the index.
+    /// The same opt-in the Notes window's "Build the Search Index" button performs: enable the gate, then build the index.
     private func buildSearchIndexForAsk() async {
         Self.searchGate.enable()
         let notes = Config.resolvePath(config.notesDir), work = Config.resolvePath(config.workDir)

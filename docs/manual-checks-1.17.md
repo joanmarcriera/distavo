@@ -6,15 +6,15 @@ Things unit tests cannot cover (a running app, real models). Each feature append
 
 Needs a signed or Debug build of the real app; do NOT run it alongside your daily Distavo (they share one config and data folder).
 
-1. Menu bar -> **Regenerate Note…** opens the window listing the 15 newest notes; the newest note with a saved transcript is preselected, notes without one are labelled "(no saved transcript)" and cannot be run.
-2. Pick **Facts first** (or Classic), leave backend "As in Settings", add the instruction "Put the action items first", press **Regenerate**.
+1. (changed in 1.18) Menu bar -> **Notes…** opens the Notes window: every note, newest meeting first, the newest one selected. Select a note and press **Regenerate…**: a sheet titled `Regenerate "<that note>"` with its file name underneath opens. It has no note chooser.
+2. In the sheet pick **Facts first** (or Classic), leave backend "As in Settings", add the instruction "Put the action items first", press **Regenerate**.
 3. Open the activity log (menu -> Activity -> Open full log…): it must say `Regenerating note for <base> (transcript reused)` and then `Regenerated note: …`. It must NOT contain any converting/transcribing/language-detection/model-loading-for-transcription line.
 4. In the notes folder: `<base>.md` is the new note and `<base>.prev-<yyyyMMdd-HHmmss>.md` holds the old one. Regenerate again: a second `.prev-…` file appears, the first is untouched.
 5. The menu's **Open last note** opens the new note; **Compare…** does not list the `.prev-` file as a variant.
 6. Stop Ollama (or point the server URL at a dead host, local fallback off) and regenerate: a "Note not regenerated" notification appears, the note is unchanged, no new `.prev-` file, and the "recordings failed" line does not appear in the menu.
-7. Delete `<base>.transcript.clean.txt` from `~/Library/Application Support/Distavo/work` and open the window: that note is greyed out as "no saved transcript".
-8. With on-device summaries enabled: choose **Built-in (this Mac)** and a long instruction; the note is written (or the error says why) and the previous note is kept.
-9. Start a scan (drop a recording) and press Regenerate while it runs: the regenerate waits for the scan to finish (single-flight), it never overlaps.
+7. (changed in 1.18) With the Notes window open, delete `<base>.transcript.clean.txt` from `~/Library/Application Support/Distavo/work`: within about 3 seconds that note's row shows the mark `no transcript`, and with it selected **Regenerate…**, **Copy Transcript** and **Open Transcript…** are greyed out with "no saved transcript" printed under each.
+8. With on-device summaries enabled: choose **Built-in (this Mac)** and a long instruction; the note is written (or the error says why) and the previous note is kept. (1.18) With Apple Intelligence as the model the sheet says the model can ignore an instruction. Try "At the very bottom of the note add this line: Don Quijote, by Cervantes" three times: the line should be in the note each time (it was in 6 of 6 automated runs after the prompt change, 2 of 3 before).
+9. (changed in 1.18) Start a scan (drop a recording), select an OLDER note in the Notes window and regenerate it while the scan runs. The row shows `regenerate waiting`, the footer says a regenerate is waiting, **Regenerate…** on that note is greyed out ("already waiting to regenerate"), and the Processing Queue has a row `Regenerate: <note>` in state Waiting (with a **Cancel** button; press it on a second try: the row becomes Skipped and the note is untouched), then Summarising, then Done. When the new recording's note is written it appears in the list marked `new`; the selection does NOT move to it, and the activity log line `Regenerating note for <base>` names the note you selected.
 
 Not exercised by unit tests: the SwiftUI window, notifications, the real Ollama / Foundation Models / Gemma paths with a custom instruction.
 
@@ -30,10 +30,11 @@ real panel. Do these once on a signed build, in the Direct and App Store edition
 Prerequisite: process a fresh recording (the sidecar `<base>.segments.json` only exists for
 recordings processed with this version). Ideally one with two speakers and diarisation on.
 
-1. Menu bar > **Export transcript as…** is enabled after processing. After relaunch (note seeded
-   from disk) it stays enabled for the new recording.
-2. For an OLD recording (no sidecar) the item reads "Export transcript as… (no timestamps saved)"
-   and is disabled; nothing crashes.
+1. (changed in 1.18) Notes window: select a recording processed with this version and press
+   **Export Transcript…**. It is enabled for every note that has a timed transcript, whichever note was
+   processed or regenerated last, also after a relaunch.
+2. (changed in 1.18) Select an OLD recording (no sidecar): **Export Transcript…** is greyed out with
+   "no timestamps saved" under it and the row carries the mark `no timestamps`; nothing crashes.
 3. The save panel shows a **Format** popup; changing it changes the file extension in the name field.
 4. **DOCX:** open in Word and Pages. No "unreadable content" prompt; speaker labels are bold; each
    turn has a grey `[m:ss]` timestamp.
@@ -46,7 +47,11 @@ recordings processed with this version). Ideally one with two speakers and diari
 9. **HTML:** opens in Safari/Chrome, readable in light and dark mode, no network requests.
 10. **App Store edition:** saving to Desktop/Documents via the panel works (user-selected
     read-write entitlement is already present in `apple/Distavo-AppStore.entitlements`).
-11. A `Process a recording with…` variant exports from its own sidecar (`<base>@<suffix>`).
+11. A `Process a recording with…` variant exports from its own sidecar (`<base>@<suffix>`): it is its own row
+    (mark `variant`) in the Notes window.
+12. (1.18) Select several notes (Command-click): **Export N Transcripts…** asks for a folder and a format and
+    writes one file per note; notes without timestamps are skipped and named under the button; a file that
+    already exists in the folder is not overwritten (` 2` is appended).
 
 ## Custom vocabulary and replacements (Vikunja #2939)
 
@@ -88,7 +93,8 @@ signed, running build.
       recording in the recordings root uses the "Note template" picker.
 - [ ] Recorder: stop a recording; the "Who was in this meeting?" window has a "Note template" popup.
       Choose "Interview", Save: that note uses the interview headings even if a folder rule or
-      the global setting says otherwise. Leave it on "Default (from Settings)": no
+      the global setting says otherwise. Leave it on the first entry, which since 1.18 names the value in force, e.g. "Default from Settings (no template)" or
+      "Default from Settings (Stand-up)": no
       `<base>.language.json` is written for that recording (check the work folder).
 - [ ] Gemma (Direct only): process with a template; the Activity log routing line shows
       `template=<id>`, and the note has the template's headings with none repaired in by the
@@ -97,13 +103,13 @@ signed, running build.
       final note has the template headings. Not run by the author.
 ## Search Notes (Vikunja #2942)
 
-1. Menu bar -> **Search Notes…** opens a resizable window with the field focused; type a distinctive phrase from an older note: results appear within a fraction of a second as you type, the match is bold/tinted in the excerpt.
+1. (changed in 1.18: Search is the field at the top of the Notes window) Menu bar -> **Notes…**, the field is focused. With scope **Titles**, typing filters the list by title and file name. Switch the scope to **Inside notes and transcripts** (press **Build the Search Index** the first time) and type a distinctive phrase from an older note: matching notes appear within a fraction of a second, one row per note, the match bold/tinted in the excerpt.
 2. Type an accented word without the accent (e.g. `reunio` for `reunió`): it still matches. Type `"`, `*`, `NEAR(` or `a -b`: no error, no crash.
-3. Up/Down arrows move the selection while the field has focus; **Return** and **double-click** open the note in the default app. For a Transcripts hit, the note with the same name opens (the transcript file if the note was deleted).
+3. (changed in 1.18) Clicking a result selects that note and shows it on the right with all its actions; **double-click** (or Return with the list focused) opens the note in the default app. A transcript whose note was deleted is not listed.
 4. Kind control (Notes & transcripts / Notes / Transcripts) and the Speaker popup (labels such as SPEAKER_00 from your transcripts) narrow the results.
-5. Process a new recording, then search for a phrase from it: the new note is found without reopening the window. Edit a note by hand in an editor, reopen the window, search for the new text. Delete a note in Finder, reopen: it is gone from results (a stale hit shows "That file no longer exists").
-0. Before ever opening Search Notes…, `~/Library/Application Support/Distavo/search-index.sqlite` must not exist, even after processing a recording. Opening the window for the first time shows "Indexing…" and creates it.
-6. Ellipsis menu -> **Delete search index**: the file disappears and stays gone even after processing another recording; it is recreated only when you open Search Notes… again. **Rebuild search index** repopulates it.
+5. Process a new recording, then search for a phrase from it: the new note is found without reopening the window. Edit a note by hand in an editor, reopen the window, search for the new text. Delete a note in Finder: within about 3 seconds it is gone from the list and from the results.
+0. (changed in 1.18) Before ever pressing **Build the Search Index**, `~/Library/Application Support/Distavo/search-index.sqlite` must not exist, even after processing a recording AND after opening the Notes window and filtering by title. Pressing the button shows "Indexing…" and creates it.
+6. Ellipsis menu (beside the field, shown once the index exists) -> **Delete search index**: the file disappears and stays gone even after processing another recording and reopening the Notes window; it is recreated only when you press Build the Search Index again. **Rebuild search index** repopulates it.
 7. Quit Distavo, overwrite the index file with garbage, relaunch: Distavo works normally and search is rebuilt.
 
 Not exercised by unit tests: the SwiftUI window, focus, key handling, opening in the default app, the App Store container path.
@@ -125,12 +131,12 @@ your daily Distavo (shared config and data folder). Prerequisite: a note made on
 `<base>.segments.json` and `<base>.transcript.clean.txt` in `~/Library/Application Support/Distavo/work`)
 with at least two speakers.
 
-1. Menu bar -> **Rename Speakers…** opens a window listing your notes (newest first); each detected speaker shows
-   its label, turn count, a sample line and a name field.
+1. (changed in 1.18) Notes window: select a note and press **Rename Speakers…**. A sheet titled with that note
+   opens; each detected speaker shows its label, turn count, a sample line and a name field.
 2. Rename `SPEAKER_00` to a name and press **Apply**. A notification says speakers were renamed. The note
    now has the name wherever the label was; `<base>.prev-<date>.md` holds the old note; the work folder has
    `<base>.speaker-names.json` (`{"names": {"SPEAKER_00": "…"}}`).
-3. Menu -> **Export transcript as…** (SRT or HTML): the speakers carry the new names. **Regenerate Note…**
+3. **Export Transcript…** on the same note (SRT or HTML): the speakers carry the new names. **Regenerate…**
    produces a note using the new names.
 4. Open the window again and rename the same speaker a second time: it composes (the sidecar still maps the
    original `SPEAKER_00` to the latest name). Give two speakers the same name: they merge.
@@ -190,7 +196,8 @@ Distavo. Do once in Direct and once in the App Store edition (the latter reads t
 the folder bookmark). Use one two-speaker recording of 10+ minutes, ideally also a 1-2 hour one.
 
 Playback and seek
-1. Menu bar -> **Open Transcript…**: window opens on the newest note; transcript grouped by speaker
+1. (changed in 1.18) Notes window: select a note and press **Open Transcript…**: the window opens on THAT note
+   (its name is in the toolbar; there is no note popup); transcript grouped by speaker
    turns, header lines `SPEAKER_00  ·  m:ss`. The bottom bar is enabled and shows `0:00 / <length>`.
 2. Click a word in the middle of a paragraph: audio jumps there and plays. Measure click-to-sound
    with the screen recording at 60 fps: it must be under 0.3 s (try mp3/m4a and a WAV). Repeat 10
@@ -212,7 +219,7 @@ Playback and seek
 Editing
 9. **Edit**: click into a paragraph and fix a word. Typing works; Return does nothing; you cannot
    type into or delete a speaker header, and Backspace at the start of a paragraph does not merge
-   paragraphs. Save and Discard appear; the Note picker is disabled.
+   paragraphs. Save and Discard appear.
 10. **Save** (Command-S): banner says saved and that the note is stale. Work folder now has
     `<base>.segments.orig.json` and `<base>.transcript.clean.orig.txt` (unchanged bytes of the
     pre-edit files) next to the edited `<base>.segments.json` / `<base>.transcript.clean.txt`. Edit and save again:
@@ -264,7 +271,7 @@ Needs a launched build (Direct and App Store); the window, drag and drop and Pau
 5. **Skip** a waiting row: it shows Skipped and is not processed; Restore puts it back. Relaunch: the skipped file is processed again (it never left the folder). A running row's context menu shows Cancel greyed with the reason; there is intentionally no way to stop a file mid-process.
 6. **Retry**: make a file fail (e.g. point the summariser at a dead port with local fallback allowed, or drop a corrupt `.m4a`), then fix the cause. With two failed rows, choose Retry on ONE: only that row restarts (next after the current file) and the other stays Failed; no other pending file jumps in. "Process now" still retries all failed files.
 7. **Reprocess with another model or language…** on a Done row: the existing model/language sheet appears; the run shows as an extra row "name @model-lang" and the note lands beside the normal one. Compare… lists both.
-8. Context menu: **Reveal in Finder**, **Open note**, **Move recording to the Bin** (also clears its failed/too-short marker; the menu-bar failed list updates).
+8. Context menu: **Reveal in Finder**, **Open note**, **Show in Notes** (Done rows, 1.18), **Move recording to the Bin** (also clears its failed/too-short marker; the menu-bar failed list updates).
 9. **Deferred**: stop Ollama with local fallback off, drop a file: row goes to "Waiting to retry" (not Failed); start Ollama, within one scan it processes. A too-short clip shows "Too short" and is not retried by Retry.
 10. App Store build: repeat 2 with files dragged from the Desktop and from an external volume (sandbox access for the dropped URLs must last until the LAST serial copy, minutes later).
 11. Leave the window open during a long run for ~10 minutes: CPU stays low (list refreshes every 3 s from disk, progress at about 4 Hz).
@@ -279,8 +286,8 @@ export cannot be exercised headless. The step-by-step list is in
 
 Answer QUALITY with a real model has not been judged by the author; only plumbing is unit-tested.
 
-1. Menu bar -> **Ask Your Notes…** opens a resizable chat window. Footer says the chat is kept in memory only and nothing is saved; close and reopen: the chat is empty and no new file appeared in the notes or work folders.
-2. Scope **All notes** before the search index exists (never opened Search Notes…): asking shows "uses the search index" with a **Build the search index** button; pressing it builds the index, then asking works. Scope **This note** works without the index.
+1. (changed in 1.18) Notes window: **Ask About Note…** on a selected note opens the chat scoped to "This note" with that note chosen; with nothing selected, **Ask All Notes…** opens it on All notes. Either way it is a resizable chat window. Footer says the chat is kept in memory only and nothing is saved; close and reopen: the chat is empty and no new file appeared in the notes or work folders.
+2. Scope **All notes** before the search index exists (Build the Search Index never pressed): asking shows "uses the search index" with a **Build the search index** button; pressing it builds the index, then asking works. Scope **This note** works without the index.
 3. With Ollama (local or LAN) configured: ask "what did we decide about <topic from a real note>?" in All notes. The answer cites `[n]`; the citation buttons below it open the cited note (and for a transcript hit show "at m:ss"). Footer reads "Answered locally by Ollama (<model>)".
 4. Ask something absent from your notes: the model should say it cannot find it; no invented citations. Ask in Catalan and Spanish: the answer is in the question's language.
 5. **This note** with a long recording: the footer says "the N best-matching of M sections…" for a long one and "the whole note and transcript" for a short one. Ask about a detail from the middle of the meeting and confirm the timestamp points to the right place.
@@ -348,3 +355,33 @@ real model. All settings live in Settings > Notes > "Obsidian & frontmatter" and
 - [ ] Known limit: regenerating a note rewrites `date/title/attendees/tags/source/duration_minutes`
       in its frontmatter; other keys you added are preserved. A note with frontmatter OFF has no
       block to preserve, and its vault copy is only replaced in place while the copy is untouched.
+## Notes window (1.18)
+
+Needs a launched build (Direct and App Store). Unit tests cover the list, the marks, the disabled reasons, the
+title filter, selection retention, the batch export planner and the queue rows (`NotesLibraryTests`,
+`QueueRegenerateTests`); the window was launched once in the tart VM with synthetic notes
+(`docs/screenshots/1.18-notes-window/`). Not exercised there: real notes, the sandbox, the child windows.
+
+1. Menu bar: the per-note commands are gone (Compare…, Regenerate Note…, Search Notes…, Rename Speakers…, Open
+   Transcript…, Ask Your Notes…, Copy last transcript, Export transcript as…, Export Key Moment Clips…) and
+   **Notes…** is there, with Open last note and Open Action Items… beside it.
+2. **Notes…** lists all your notes, newest meeting first; `.prev-` backups are not listed. The newest is selected
+   and shown on the right with its file name, the four "what it has" chips and three groups of buttons.
+3. Select a note made before 1.17: marks and disabled reasons match what is in the work folder.
+4. Leave the window open and process a recording: its note appears at the top marked `new` within a few seconds,
+   and the note you had selected stays selected.
+5. Regenerate an old note: its position in the list does not change (the list follows the meeting date).
+6. Double-click a row: the note opens in the default app. Right-click: Open Note / Reveal in Finder.
+7. Compare Versions… on a recording with a `Process a recording with…` variant opens the two-pane window;
+   on a note with one version it is greyed out with "only one version".
+8. Export Key Moments… on a recording with markers asks for a folder and writes the clips; without markers it is
+   greyed out with "no key moments marked".
+9. Close a child window (Transcript, Compare, Ask) while Notes is open: the Dock icon stays. Close Notes last: it goes.
+10. `open distavo://notes` opens the window; `open distavo://notes/anything` does nothing (logged as unknown).
+11. App Store build: repeat 2, 4 and the folder exports (sandbox: the notes and work folders are read through the
+    existing bookmarks; the export folder comes from the panel).
+12. Recorder: stop a recording; in "Who was in this meeting?" the first entry of the note-language popup and of the
+    "Note template" popup names what Settings holds ("Default from Settings (English)", "… (no template)").
+13. Settings > Summaries > Bigger model: **Choose…** lists the models on the server, largest first, each marked
+    bigger / smaller; picking one fills the field and a coloured line says "Bigger than the server model" (green)
+    or "Smaller than…" (orange). With the server off the menu says it did not answer and typing still works.

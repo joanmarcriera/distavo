@@ -1,13 +1,12 @@
-• Settings has a new sidebar layout with a Notes pane, a filter field and shorter explanations. Every existing setting is still there. Everything new below is off until you turn it on.
-• Write notes in any language: English, the meeting's own language, or a language you choose. You can also set it per recording.
-• Teach Distavo your names and jargon with a vocabulary list and find-and-replace rules.
-• Summary templates for stand-ups, 1:1s, interviews, sales calls and lectures, plus your own; choose one per recordings subfolder or per recording.
-• Regenerate a note with another template, model or instruction, without transcribing again. The previous version is kept.
-• Optional Tasks and Decisions sections, a window listing open action items across your notes, and Send to Reminders.
-• Search across all notes and transcripts, and Ask Your Notes, answered by your local model only.
-• Open Transcript: play the recording, click a word to jump there, correct the text and re-summarise. Rename speakers across a note.
-• Export a transcript as SRT, WebVTT, JSON, HTML, Word or PDF.
-• While recording: Quick Notes that steer the summary, and key-moment markers with audio clip export.
-• Optional prompt to record when a call app starts using the microphone, and calendar-aware titles and attendees.
-• Shortcuts actions, a distavo:// link scheme and a Finder service; a Processing Queue window with drag and drop; Obsidian-friendly frontmatter, tags and vault copy.
-• Fixed: the local-network check could mistake some public server names for private ones.
+• New Notes window (menu bar > Notes…): all your notes, newest meeting first. Select one and every action is there for that note: open, reveal, transcript, ask, export, regenerate, rename speakers, compare.
+• An action that cannot run on a note is shown greyed out with the reason, for example "no saved transcript" or "no timestamps saved".
+• The list updates by itself while it is open, and the note you selected stays selected.
+• Search is now the field at the top of the Notes window: filter by title, or search inside notes and transcripts.
+• Select several notes to export all their transcripts to a folder at once.
+• Regenerate shows which note it will rewrite, and a regenerate waiting behind a recording appears in the Processing Queue, where it can be cancelled.
+• The menu-bar menu is shorter: nine separate commands moved into the Notes window.
+• After a recording, "Default from Settings" now says what the default is.
+• Settings > Summaries: pick the bigger model from the models on your server, with a note on whether it really is bigger.
+• Fixed: an extra instruction asking for an added line was sometimes left out of the note.
+• Fixed: exported transcripts were named "Untitled" instead of after the note.
+• Fixed: converting a recording could open an audio device and ask for the microphone.

@@ -344,12 +344,15 @@ public enum Prompt {
     /// for a nil / blank instruction. Trimmed and capped at
     /// `maxCustomInstructionChars`. Placed last because long-context models
     /// weigh the end of the prompt most; it cannot override the rules above it.
+    /// The wording gives a request for extra content somewhere to go ("after every
+    /// section"): without it "exactly these sections" contradicted such a request
+    /// and Apple's on-device model dropped it in about one run in three (2947.8).
     public static func customInstructionBlock(_ instruction: String?) -> String {
         let text = String((instruction ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             .prefix(maxCustomInstructionChars))
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return "" }
-        return "\nAdditional instruction from the user (apply it to the notes; it does not relax the rules above, and never invent facts):\n<<<\n\(text)\n>>>\n"
+        return "\nAdditional instruction from the user. Apply it to the notes. If it asks for something the sections above have no place for, add it as the last thing in the notes, after every section. It does not relax the other rules, and never invent facts about the meeting:\n<<<\n\(text)\n>>>\n"
     }
 
 }

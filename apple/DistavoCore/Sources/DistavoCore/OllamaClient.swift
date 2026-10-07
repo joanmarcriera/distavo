@@ -12,6 +12,11 @@ public struct OllamaClient {
     private let session: URLSession
     public init(session: URLSession = .shared) { self.session = session }
 
+    /// One request on this client's session (for extensions in other files).
+    func session(for request: URLRequest) async throws -> (Data, URLResponse) {
+        try await session.data(for: request)
+    }
+
     /// GET {url}/api/tags — reachable iff HTTP 200 (errors swallowed → false).
     public func reachable(_ url: String, timeout: TimeInterval = 4, headers: [String: String] = [:]) async -> Bool {
         guard let endpoint = URL(string: url.trimmedTrailingSlashes() + "/api/tags") else { return false }

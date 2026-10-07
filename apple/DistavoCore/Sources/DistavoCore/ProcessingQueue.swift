@@ -107,7 +107,7 @@ public struct ProcessingQueue: Equatable, Sendable {
         for var item in items {
             let touchedLater = [item.startedAt, item.finishedAt].contains { ($0 ?? .distantPast) > takenAt }
             if item.state.isRunning || item.state == .copying || touchedLater
-                || item.base.hasPrefix(Self.copyPrefix) {
+                || item.base.hasPrefix(Self.copyPrefix) || item.base.hasPrefix(Self.regeneratePrefix) {
                 keep.append(item); continue
             }
             switch item.state {
@@ -174,6 +174,69 @@ public struct ProcessingQueue: Equatable, Sendable {
         }
     }
 
+    // MARK: Regenerate rows (1.18, manual check 2947.9)
+    //
+    // A "Regenerate" asked for while a file is being processed waits for the scan
+    // lock. In 1.17 that wait was invisible. It is now a row of its own, keyed
+    // `regenerate:<base>` so it never collides with the recording's row and is
+    // never touched by the disk sync (it has no marker file).
+
+    public static let regeneratePrefix = "regenerate:"
+
+    public static func isRegenerate(_ base: String) -> Bool { base.hasPrefix(regeneratePrefix) }
+    /// The note a regenerate row is about.
+    public static func regenerateTarget(_ base: String) -> String? {
+        isRegenerate(base) ? String(base.dropFirst(regeneratePrefix.count)) : nil
+    }
+
+    /// A regenerate of `base` was asked for. False (and nothing changes) when one
+    /// is already waiting or running for that note.
+    @discardableResult
+    public mutating func enqueueRegenerate(base: String, title: String) -> Bool {
+        let key = Self.regeneratePrefix + base
+        if let i = index(key) {
+            if items[i].state == .waiting || items[i].state.isRunning { return false }
+            items.remove(at: i)
+        }
+        items.append(QueueItem(base: key, sourcePath: nil, displayName: "Regenerate: \(title)",
+                               state: .waiting, message: "Waiting for the current file to finish"))
+        normalizeOrder()
+        return true
+    }
+
+    /// The regenerate got the lock and is summarising.
+    public mutating func beginRegenerate(base: String, now: Date) {
+        guard let i = index(Self.regeneratePrefix + base) else { return }
+        items[i].state = .summarising
+        items[i].startedAt = now
+        items[i].stageStartedAt = now
+        items[i].message = "Writing the note from the saved transcript"
+        items[i].attempts += 1
+        normalizeOrder()
+    }
+
+    /// The regenerate ended. A regenerate that could not run is "skipped", never
+    /// "failed": the note is untouched and no recording failed.
+    public mutating func finishRegenerate(base: String, done: Bool, message: String, now: Date) {
+        guard let i = index(Self.regeneratePrefix + base) else { return }
+        items[i].state = done ? .done : .skipped
+        items[i].finishedAt = now
+        items[i].progress = nil
+        items[i].message = message
+        normalizeOrder()
+    }
+
+    /// Notes with a regenerate that has not finished.
+    public var pendingRegenerates: [String: NoteBusy] {
+        var out: [String: NoteBusy] = [:]
+        for item in items {
+            guard let target = Self.regenerateTarget(item.base) else { continue }
+            if item.state == .waiting { out[target] = .waiting }
+            else if item.state.isRunning { out[target] = .running }
+        }
+        return out
+    }
+
     // MARK: Live callbacks
 
     /// The scan is about to process `base`. Upserts, so a file that appeared
@@ -203,7 +266,8 @@ public struct ProcessingQueue: Equatable, Sendable {
 
     /// A pipeline stage boundary for the item that is running.
     public mutating func phase(_ phase: ProcessingPhase, now: Date) {
-        guard let i = items.firstIndex(where: { $0.state.isRunning }) else { return }
+        // A regenerate row is driven by begin/finishRegenerate, not by pipeline phases.
+        guard let i = items.firstIndex(where: { $0.state.isRunning && !Self.isRegenerate($0.base) }) else { return }
         recordSample(items[i], now: now)
         switch phase {
         case .converting: items[i].state = .converting
@@ -260,7 +324,7 @@ public struct ProcessingQueue: Equatable, Sendable {
     /// Only a waiting item can be cancelled: there is no safe cancellation point
     /// inside `Pipeline.processOne` (see the controller notes), so a running
     /// item cannot be.
-    public func canCancel(_ base: String) -> Bool { item(base)?.state == .waiting }
+    public func canCancel(_ base: String) -> Bool { item(base)?.state == .waiting && !Self.isRegenerate(base) }
 
     /// Skip a waiting item for this session. It stays pending on disk.
     @discardableResult
@@ -331,7 +395,8 @@ public struct ProcessingQueue: Equatable, Sendable {
 
     /// ETA for everything not yet finished, nil unless every such item has one.
     public func totalETA(now: Date) -> TimeInterval? {
-        let open = items.filter { $0.state == .waiting || $0.state.isRunning }
+        // Regenerate rows have no audio length, so no estimate: they are left out.
+        let open = items.filter { ($0.state == .waiting || $0.state.isRunning) && !Self.isRegenerate($0.base) }
         guard !open.isEmpty else { return nil }
         var sum = 0.0
         for item in open {

@@ -60,6 +60,8 @@ final class MeetingCaptureController: ObservableObject {
     private var timer: Timer?
     private var startedAt: Date?
     private var warnedSilentSystemAudio = false
+    /// Start-of-recording level check (Vikunja #3502); reset per recording.
+    private var startLevelCheck = StartLevelCheck()
     private static let preflightKey = "distavo.didExplainCapture"
     /// How long to wait before telling the user the meeting side is silent
     /// (Vikunja #2060). Long enough to join a call and hear someone speak.
@@ -211,6 +213,7 @@ final class MeetingCaptureController: ObservableObject {
         }
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
+        startLevelCheck = StartLevelCheck()
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
@@ -399,6 +402,12 @@ final class MeetingCaptureController: ObservableObject {
         let event = monitor.ingest(mic: levels.mic, system: levels.system,
                                    at: ProcessInfo.processInfo.systemUptime)
         silenceMonitor = monitor
+        if startLevelCheck.ingest(mic: levels.mic, system: levels.system) {
+            log("Warning: no sound at all in the first \(startLevelCheck.window) s of recording")
+            notify("Nothing is being recorded",
+                   "No sound from the microphone or the call in the first \(startLevelCheck.window) seconds. "
+                   + "Check the microphone (is it covered, muted or disconnected?) and the selected input.")
+        }
 
         switch event {
         case .autoStop(let silentFor):

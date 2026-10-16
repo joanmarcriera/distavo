@@ -1,9 +1,13 @@
-# LinkedIn follow-up post — the App Review 2.1(a) rejection, in depth
+# LinkedIn follow-up post: the App Review 2.1(a) rejection, in depth
 
-Drafted 2026-09-17, for Vikunja #1008 (the "second touch ~1 week later" follow-up
-listed in `linkedin-launch-post.md`). Facts below are sourced only from this repo:
-`docs/permissions-helper-verification.md`, `PROJECT_STATE.md`, and the commit
-history (`d57ac72`, `1eba716`, `e21d9c6`, `be08e2e`, `17a6010`).
+> **Draft - not posted; needs Marc's voice pass.** Refreshed 2026-10-16 for
+> Vikunja #1008 (first drafted 2026-09-17; it was meant for July, so the
+> "launch follow-up" framing is gone and it now reads as a lessons-learned post
+> written after several releases). Never post from a script; Marc posts it.
+
+Facts below are sourced only from this repo: `docs/permissions-helper-verification.md`,
+`PROJECT_STATE.md`, `DECISIONS.md`, and the commit history (`d57ac72`, `1eba716`,
+`e21d9c6`, `be08e2e`, `17a6010`).
 
 Story facts used:
 - Build 1.8.0 (build 9) was tested by an App Review reviewer whose Mac had no
@@ -25,26 +29,28 @@ Story facts used:
 - 1.9.1 build 11 was resubmitted and reported `Waiting for Review` in
   `PROJECT_STATE.md`; the app is confirmed live on the Mac App Store per
   `CLAUDE.md` ("Mac App Store (live)") and the current shipped version
-  (1.13.0) postdates that submission by several releases, so the resubmission
+  (1.18.0) postdates that submission by several releases, so the resubmission
   went through. No specific approval date is recorded in the repo, so none is
   claimed below.
 
 ---
 
-## Main version (1,295 characters)
+## Main version
 
-A follow-up to the Distavo App Store launch: the review rejection, in full.
+Months ago, App Review rejected an early Distavo build. It is the most useful bug report I have had.
 
-Distavo needs Ollama running locally or on a server to summarise a meeting. The reviewer's test Mac had neither. Settings showed two red dots next to "Server Ollama" and "Local Ollama" — and nothing else. No explanation of what was wrong or what to do about it. Apple rejected the build under guideline 2.1(a): from where they sat, the app looked broken.
+Distavo turns a meeting recording into a Markdown note. The summary step uses an Ollama server, and the reviewer's Mac had none. Settings showed two red dots next to "Server Ollama" and "Local Ollama", and nothing else. Apple rejected the build under guideline 2.1(a): from where they sat, the app looked broken.
 
-Fair. A red dot with no context is a UX bug, even though the underlying behaviour was correct — recording and transcription still work without Ollama.
+Fair. Recording and transcription worked fine without Ollama. The app just never said so. A red dot with no context is a UX bug.
 
-The fix had three parts:
-- The no-server state became guidance, not failure: the dots turn amber, with an inline note explaining Ollama isn't running, that recording/transcription still happen, and how to point Distavo at a server.
-- A "Check permissions…" sheet was added, so Local Network and microphone access are explained and fixable in one place instead of a dead end in System Settings.
-- The microphone pre-prompt's "Request Access" button became "Continue" — Apple's recommended wording — after that drew a second rejection.
+What I changed:
+- The no-server state became guidance, not failure: amber instead of red, with a line saying Ollama isn't running, that recording and transcription still work, and how to point Distavo at a server.
+- A "Check permissions..." sheet now explains Local Network and microphone access in one place, instead of sending people to a dead end in System Settings.
+- A second, smaller rejection came for a button that said "Request Access" in my own microphone pre-prompt. Apple wants neutral wording, so it now says "Continue".
 
-Resubmitted, and it went through. Distavo is free and open source, on the Mac App Store:
+What I took from it: App Review is a decent stand-in for a first-time user who has none of my setup. If a screen only makes sense on my machine, I have a bug.
+
+Distavo has been on the Mac App Store since. The source is MIT on GitHub, and everything runs on your own Mac.
 https://apps.apple.com/us/app/distavo/id6785437932
 
 #macOS #Swift #AppStore

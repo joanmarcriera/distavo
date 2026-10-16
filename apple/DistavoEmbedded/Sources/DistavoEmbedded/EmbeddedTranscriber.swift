@@ -302,6 +302,8 @@ public actor EmbeddedTranscriber {
                 return finish(EmbeddedResultMapper.whisperXDictionary(segments: results.flatMap(\.segments)))
             }
             await self.report("Identifying speakers…")
+            // Zero-length word timings would put one sentence on both sides of a speaker turn (#3583).
+            SpeakerAlignmentRepair.repair(results)
             let groups = try await Self.diarize(wavURL: wavURL, results: results, numSpeakers: config.numSpeakers)
             return finish(EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups))
         }

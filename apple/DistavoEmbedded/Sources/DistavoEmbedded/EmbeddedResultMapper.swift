@@ -67,6 +67,20 @@ public enum EmbeddedResultMapper {
                 out.append(entry)
             }
         }
-        return ["segments": out]
+        return ["segments": smoothSpeakers(out)]
+    }
+
+    /// Speaker turns smoothed (`SpeakerAlignmentRepair.smoothTurns`, Vikunja #3583): word-level
+    /// alignment flips and unlabelled segments are repaired; text and times are untouched.
+    static func smoothSpeakers(_ segments: [[String: Any]]) -> [[String: Any]] {
+        let turns = segments.map {
+            SpeakerAlignmentRepair.Turn(
+                speaker: $0["speaker"] as? String, text: ($0["text"] as? String) ?? "",
+                start: ($0["start"] as? Double) ?? 0, end: ($0["end"] as? Double) ?? 0)
+        }
+        let smoothed = SpeakerAlignmentRepair.smoothTurns(turns)
+        var out = segments
+        for i in out.indices { if let s = smoothed[i].speaker { out[i]["speaker"] = s } }
+        return out
     }
 }

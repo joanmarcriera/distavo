@@ -1,7 +1,7 @@
 # Distavo — Setapp Listing Draft
 
 Drafted from existing `apple/metadata/listing.json` (App Store copy), Setapp's
-tone conventions, and Distavo's actual feature set as of v1.8.0.
+tone conventions, and Distavo's actual feature set. Refreshed 2026-10-16 for 1.19 (see "What's New" below).
 Setapp listings are typically shorter and punchier than App Store descriptions.
 Adapt to the character limits shown in the vendor dashboard.
 
@@ -94,6 +94,10 @@ Summarisation requires an Ollama server you run yourself.
 - Automatic mode picks the right engine for you and downloads it once
 - Summarises to Markdown notes — decisions and action points
 - Folder watcher: drop a file, get a note
+- Notes window: browse every note, newest meeting first, and act on the selected one
+- Search inside notes and transcripts; ask questions of your notes (local only)
+- Action items: tick them off, send them to Reminders if you choose
+- Optional calendar match for the meeting title and attendees (read-only)
 - Ollama summarisation: local, LAN, or fallback — your choice
 - Activity log per recording
 - No cloud, no accounts, no telemetry
@@ -121,11 +125,34 @@ https://distavo.com/privacy/
 
 ---
 
-## What's New (first Setapp version)
+## What's New (first Setapp version, written for Distavo 1.19)
+
+> Status note: the 1.19 items below describe the work on `release/1.19`.
+> Before pasting, confirm each against the final
+> `apple/metadata/whats-new/en-GB.txt` and drop any that did not ship. The
+> 1.17 and 1.18 items are already in the shipped app.
 
 First release on Setapp. Distavo is a native macOS menu-bar app that turns your
-meeting recordings into structured Markdown notes — using on-device WhisperKit
+meeting recordings into structured Markdown notes, using on-device
 transcription and a local Ollama server you control. Nothing leaves your machine.
+
+New in this version:
+- Better Catalan and multilingual meetings: the right engine is picked per
+  recording, and meetings that switch language are handled better.
+- No invented facts in notes: the summary is checked against the transcript
+  before it is saved.
+- The number of speakers comes from the participants you type after a recording.
+- A summary template is chosen automatically for the kind of meeting, and the
+  note says why.
+- Speech that was dropped during transcription is recovered.
+
+Already in this app:
+- Notes window (menu bar > Notes...): every note, newest meeting first, with
+  open, transcript, ask, export, regenerate, rename speakers and compare.
+- Search inside notes and transcripts, and Ask your notes (local only).
+- Action items you can tick off or send to Reminders.
+- Optional calendar match for the meeting title (read-only, off until you allow it).
+- Transcript export to SRT, VTT, HTML, DOCX and PDF.
 
 ---
 

@@ -66,7 +66,7 @@ of the original Python module (noted in its header).
   path) and `factsFirst` (bake-off variant D: speakers with evidence, facts ledger, recording metadata; the
   Ollama default since 1.12 via `summarise.prompt_style`). `NoteContext` carries owner/speaker/participants/date/style.
 - **`TranscriptCleaner.swift`** — turns raw WhisperX output into speaker-grouped, timestamp-free transcript.
-  **`SummaryValidator.swift`** — post-summary sanity checks (repetition collapse / empty / overlong).
+  **`SummaryValidator.swift`** — post-summary sanity checks (repetition collapse / empty / overlong). **`LedgerVerifier.swift`** (#3581, run from `SummaryChecks.apply`, facts-first only) removes facts-ledger rows whose quote is not in the transcript (token window >= 0.85) and marks `[unverified]` rows whose proper-noun/number is not in their own quote; footer says how many.
 - **`SilenceMonitor.swift`** — pure silence policy for the built-in recorder (Vikunja #2665): fed one mic+system RMS sample per second by `MeetingCaptureController`, it emits suggest-stop / auto-stop events (both opt-in via `Config`; auto-stop only after some sound was heard; `keepRecording()` cancels the episode).
 - **`ActivityLog.swift`** — append-only activity log at `~/Library/Logs/Distavo/distavo.log`.
 - **`EmbeddedSupport.swift`** — dependency-free pieces: `EmbeddedModelCatalog`, `HardwareProbe`,

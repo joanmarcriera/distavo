@@ -28,7 +28,12 @@ public enum SummaryChecks {
     ///   - transcript: the clean transcript the model was given.
     ///   - context: the note context the prompt was built from.
     public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
-        SummaryCheckOutcome(text: summary, notes: context.summaryNotes)
+        // Facts-ledger rows the transcript does not support are dropped or flagged (#3581).
+        guard context.promptStyle == .factsFirst else {
+            return SummaryCheckOutcome(text: summary, notes: context.summaryNotes)
+        }
+        let ledger = LedgerVerifier.verify(summary, transcript: transcript)
+        return SummaryCheckOutcome(text: ledger.text, notes: context.summaryNotes + LedgerVerifier.notes(for: ledger))
     }
 }
 

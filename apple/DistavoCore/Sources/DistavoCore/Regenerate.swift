@@ -246,6 +246,7 @@ extension Pipeline {
         do {
             var noteMeta: NoteMeta.Extracted?   // the model's title/tags (#2954)
             var noteBody = "", footer = provenance
+            var languageRetried = false   // #3585
             func attempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
@@ -255,8 +256,12 @@ extension Pipeline {
                 }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 // Same post-summary checks as processOne (1.19).
-                let checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context)
                 cleaned = checked.text
+                if languageRetried, let requested = context.noteLanguage,
+                   let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {
+                    checked.notes.append(note)
+                }
                 footer = NoteFooterLines.footer(provenance: provenance, summaryNotes: checked.notes)
                 // Key moments (#2950): re-appended after the model, outside validation.
                 let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
@@ -265,6 +270,18 @@ extension Pipeline {
             }
             var (noteText, failures) = try await attempt()
             if isRetryableTruncation(failures) { (noteText, failures) = try await attempt() }
+            // One retry when the note came back in another language than requested (#3585).
+            if failures.isEmpty, let requested = context.noteLanguage,
+               NoteLanguageCheck.ignored(requested: requested, in: noteBody) {
+                let keep = (noteText, noteBody, footer, noteMeta, context.customInstruction)
+                languageRetried = true
+                context.customInstruction = [context.customInstruction, NoteLanguageCheck.retryInstruction(requested: requested)]
+                    .compactMap { $0 }.joined(separator: "\n")
+                let (retryText, retryFailures) = try await attempt()
+                context.customInstruction = keep.4
+                if retryFailures.isEmpty { (noteText, failures) = (retryText, retryFailures) }
+                else { (noteText, noteBody, footer, noteMeta) = (keep.0, keep.1, keep.2, keep.3) }
+            }
             if !failures.isEmpty {
                 // Keep the rejected text for inspection; the existing note and
                 // the recording's markers are NOT touched.

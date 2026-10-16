@@ -321,18 +321,23 @@ public enum Prompt {
         // nil, "en" and unrecognised codes leave the prompt byte-identical to
         // before this feature; any other catalog language replaces the
         // "Use British English." rule.
-        if let instruction = languageInstruction(for: noteLanguage) {
+        let languageLine = languageInstruction(for: noteLanguage)
+        if let instruction = languageLine {
             base = base.replacingOccurrences(of: "Use British English.", with: instruction)
         }
         // Regenerate-with-instruction (Vikunja #2947): empty/nil appends nothing,
         // so every existing caller's prompt stays byte-identical.
         let instructionBlock = customInstructionBlock(customInstruction)
-        return (base
+        // A non-English note (#3585): the one sentence inside the rules was ignored by an 8B model, so
+        // the instruction also opens the prompt and closes it after the transcript. English: untouched.
+        let opening = languageLine.map { $0 + "\n\n" } ?? ""
+        let closing = languageLine.map { "\nReminder: " + $0 + "\n" } ?? ""
+        return opening + (base
             .replacingOccurrences(of: "{note_owner}", with: noteOwner)
             .replacingOccurrences(of: "Known speaker label for the note owner: {user_speaker}.\n",
                                   with: "Known speaker label for the note owner: {user_speaker}.\n" + block)
             .replacingOccurrences(of: "{user_speaker}", with: userSpeaker)
-            .replacingOccurrences(of: "{transcript_text}", with: transcript)) + instructionBlock
+            .replacingOccurrences(of: "{transcript_text}", with: transcript)) + closing + instructionBlock
     }
 
     /// Longest custom instruction honoured, in characters (the rest is cut): it

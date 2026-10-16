@@ -490,6 +490,7 @@ public enum Pipeline {
             // footer, and validate.
             var noteMeta: NoteMeta.Extracted?       // the model's title/tags (#2954)
             var noteBody = "", noteFooter = ""
+            var languageRetried = false             // #3585: the one retry for a note in the wrong language
             func summariseAttempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(clean, target, config.summarise.options, context)
                 // A rare edge case (the ledger only existed in the discarded
@@ -507,8 +508,13 @@ public enum Pipeline {
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 // Post-summary checks shared with regenerate (1.19): may rewrite the text and add footer notes.
-                let checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context)
                 cleaned = checked.text
+                // A retry that still came back in the wrong language says so in the footer (#3585).
+                if languageRetried, let requested = context.noteLanguage,
+                   let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {
+                    checked.notes.append(note)
+                }
                 // Key moments (#2950) are appended after the model and excluded from validation.
                 // Note order (see `NoteAssembly`): frontmatter, body with Highlights, Key moments,
                 // Tracked terms, provenance footer. `noteBody` is the body INCLUDING Key moments.
@@ -529,6 +535,19 @@ public enum Pipeline {
             // keep failing immediately as before.
             if isRetryableTruncation(failures) {
                 (noteText, failures) = try await summariseAttempt()
+            }
+            // A Catalan/Spanish note that came back in another language gets one retry with the
+            // language stated again (#3585). The first note is kept if the retry is rejected.
+            if failures.isEmpty, let requested = context.noteLanguage,
+               NoteLanguageCheck.ignored(requested: requested, in: noteBody) {
+                let keep = (noteText, noteBody, noteFooter, noteMeta, context.customInstruction)
+                languageRetried = true
+                context.customInstruction = [context.customInstruction, NoteLanguageCheck.retryInstruction(requested: requested)]
+                    .compactMap { $0 }.joined(separator: "\n")
+                let (retryText, retryFailures) = try await summariseAttempt()
+                context.customInstruction = keep.4
+                if retryFailures.isEmpty { (noteText, failures) = (retryText, retryFailures) }
+                else { (noteText, noteBody, noteFooter, noteMeta) = (keep.0, keep.1, keep.2, keep.3) }
             }
             if !failures.isEmpty {
                 // Quarantine (Vikunja #2669): a summary that fails validation

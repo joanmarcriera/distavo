@@ -39,9 +39,9 @@ struct TranscriptionPane: View {
             if let detected = model.controller.lastDetectedLanguages {
                 SettingCaption("Last recording: detected \(detected).")
             }
-            Stepper("Number of speakers: \(model.draft.transcribe.numSpeakers)",
-                    value: $model.draft.transcribe.numSpeakers, in: 1...10)
-                .withHelp("Roughly how many people are speaking. Helps separate and label speakers.")
+            Stepper("Number of speakers: \(model.draft.transcribe.numSpeakers == 0 ? "Auto" : String(model.draft.transcribe.numSpeakers))",
+                    value: $model.draft.transcribe.numSpeakers, in: 0...10)
+                .withHelp("Roughly how many people are speaking. Auto lets Distavo estimate it. A wrong number merges or splits speakers, so set it only when you know.")
             Toggle("Diarize (separate speakers)", isOn: $model.draft.transcribe.diarize)
                 .withHelp("Label who said what (SPEAKER_00, SPEAKER_01…). Turn off for a single-speaker recording.")
         }

@@ -72,6 +72,8 @@ public struct TranscribeConfig: Codable, Equatable {
     public var embeddedModel: String
     public var language: String
     public var diarize: Bool
+    /// People speaking, for diarisation. 0 = automatic (the default since 1.19, Vikunja #3580):
+    /// the engine estimates the count. A config written before keeps the value it stored.
     public var numSpeakers: Int
     /// Which BSC catalog id automatic Catalan routing should prefer.
     /// See `effectivePreferredCatalanModel` for the validated accessor.
@@ -98,7 +100,7 @@ public struct TranscribeConfig: Codable, Equatable {
 
     public init(backend: String = "server", whisperxURL: String = "http://127.0.0.1:9000",
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
-                language: String = "en", diarize: Bool = true, numSpeakers: Int = 2,
+                language: String = "en", diarize: Bool = true, numSpeakers: Int = 0,
                 preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
                 vocabulary: [String] = [], replacements: [ReplacementRule] = []) {
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model

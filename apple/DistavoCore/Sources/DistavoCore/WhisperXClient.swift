@@ -44,8 +44,11 @@ public struct WhisperXClient {
             URLQueryItem(name: "model", value: config.model),
             URLQueryItem(name: "output_format", value: "json"),
             URLQueryItem(name: "diarize", value: config.diarize ? "true" : "false"),
-            URLQueryItem(name: "num_speakers", value: String(config.numSpeakers)),
         ]
+        // 0 = automatic (#3580): the server estimates the count; a stated count is sent as before.
+        if config.numSpeakers > 0 {
+            components?.queryItems?.append(URLQueryItem(name: "num_speakers", value: String(config.numSpeakers)))
+        }
         // Custom vocabulary (Vikunja #2939): the whisper-asr-webservice /asr
         // contract spells the prompt `initial_prompt`. Sent only for a non-empty
         // glossary, so the request is byte-identical otherwise.

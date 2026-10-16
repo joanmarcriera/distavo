@@ -433,8 +433,10 @@ final class MeetingCaptureController: ObservableObject {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
-        let count = NSTextField(string: String(config.transcribe.numSpeakers))
-        count.placeholderString = "2"
+        // Empty = automatic (#3580). A count set in Settings pre-fills; otherwise the field follows the
+        // number of people named below until the owner types in it.
+        let count = NSTextField(string: config.transcribe.numSpeakers > 0 ? String(config.transcribe.numSpeakers) : "")
+        count.placeholderString = "auto"
         count.alignment = .right
         let myRole = NSTextField(string: "")
         myRole.placeholderString = "e.g. candidate, host, the one taking notes"
@@ -497,6 +499,25 @@ final class MeetingCaptureController: ObservableObject {
         let templateTarget = LanguagePickerActionTarget { userChangedTemplate = true }
         templatePopup.target = templateTarget
         templatePopup.action = #selector(LanguagePickerActionTarget.picked)
+        // Count follows the participants text (#3580) and warns when the two disagree.
+        let countWarning = NSTextField(labelWithString: "")
+        countWarning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        countWarning.textColor = .systemOrange
+        var userEditedCount = false
+        let countObserver = NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification, object: count, queue: .main) { _ in userEditedCount = true }
+        let refreshCount: () -> Void = {
+            let listed = "Other participants: " + others.stringValue
+            if !userEditedCount { count.stringValue = SpeakerHints.suggestedCount(listed).map(String.init) ?? count.stringValue }
+            countWarning.stringValue = SpeakerHints.mismatchWarning(
+                count: Int(count.stringValue.trimmingCharacters(in: .whitespaces)), participants: listed) ?? ""
+        }
+        let othersObserver = NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification, object: others, queue: .main) { _ in refreshCount() }
+        let countCheckObserver = NotificationCenter.default.addObserver(
+            forName: NSControl.textDidChangeNotification, object: count, queue: .main) { _ in refreshCount() }
+        defer { [countObserver, othersObserver, countCheckObserver].forEach(NotificationCenter.default.removeObserver) }
+        refreshCount()
         let languageStatus = NSTextField(labelWithString: detection == nil ? "" : "Detecting…")
         languageStatus.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         languageStatus.textColor = .secondaryLabelColor
@@ -513,6 +534,7 @@ final class MeetingCaptureController: ObservableObject {
         }
         var rows = [
             row("People who spoke:", count, width: 60),
+            row("", countWarning, width: 300),
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
         ]
@@ -528,7 +550,7 @@ final class MeetingCaptureController: ObservableObject {
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 165 : 215)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 190 : 240)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,

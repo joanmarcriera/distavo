@@ -181,7 +181,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(counts.all.count, 1)
         XCTAssertNotNil(seen.value)
-        XCTAssertEqual(cfg.transcribe.numSpeakers, 2, "the config itself is untouched")
+        XCTAssertEqual(cfg.transcribe.numSpeakers, 0, "the config itself is untouched (still the automatic default)")
     }
 
     func testNoSpeakerHintsMeansNilParticipants() async throws {

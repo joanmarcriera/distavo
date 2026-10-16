@@ -25,6 +25,7 @@ final class WhisperXClientTests: XCTestCase {
         }
 
         var cfg = TranscribeConfig()
+        cfg.numSpeakers = 2
         cfg.whisperxURL = "http://host:9000/"
         let result = try await WhisperXClient(session: session).transcribe(wavURL: tmpWav, config: cfg)
         let segments = TranscriptCleaner.segments(from: result)

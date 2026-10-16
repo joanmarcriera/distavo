@@ -303,7 +303,7 @@ public actor EmbeddedTranscriber {
         catch { throw pipelineError(error, model: "speaker identification") }
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
         return try await speakerKit.diarize(
-            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers))
+            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers > 0 ? numSpeakers : nil))   // 0 = auto (#3580)
     }
 
     /// SpeakerKit diarisation of a WhisperKit result (shared with the detector-free path).

@@ -76,7 +76,7 @@ of the original Python module (noted in its header).
 - **Settings panes** — `SettingsPanes.swift`: which panes exist per edition, sidebar search, remembered selection.
 - **Note language** — `NoteLanguage.swift` (`summarise.note_language`: `en` | `auto` | a Whisper code; unknown = `en`).
 - **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript.
-- **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; `ActionItemsPrompt.swift`
+- **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; the default prompt carries NO domain examples (#3578: an 8B model copies them into the ledger) — UK contracting/HPC rules live only in the opt-in `uk_contracting` template (`ledgerRules`/`notesRules`); `ActionItemsPrompt.swift`
   expresses `summarise.action_items` as a template; `ActionItems.swift` lists/ticks `- [ ]` across notes;
   `RemindersExport.swift` decides what to send (EventKit sink lives in the app target).
 - **Regenerate** — `Regenerate.swift` (`Pipeline.regenerate`, `NoteVersions`): re-runs only the summarise step on the cached clean transcript.

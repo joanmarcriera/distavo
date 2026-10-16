@@ -53,6 +53,12 @@ public struct SummaryTemplate: Equatable, Sendable, Identifiable {
     /// Set by `ActionItemsPrompt` on every layout with the strict Tasks section: the two
     /// classic rules that contradict the Tasks format are reworded (`reconcileRules`).
     var strictTasks = false
+    /// Extra facts-ledger rules and extra note rules a domain template brings with it
+    /// (facts-first only; one rule per line, each starting "- "). The default prompt carries
+    /// no domain examples (Vikunja #3578): an 8B model copies any example it is shown into
+    /// the ledger. Empty for every template except the opt-in "UK contracting" one.
+    var ledgerRules = ""
+    var notesRules = ""
 
     public init(id: String, name: String, summary: String = "", guidance: String = "",
                 sections: [Section]) {
@@ -195,6 +201,20 @@ public struct SummaryTemplate: Equatable, Sendable, Identifiable {
                 with: "every ledger fact that belongs in one of the sections below is stated there, with who said it.")
         }
 
+        if facts {
+            // Anchors are lines of `Prompt.factsFirstTemplate`; a missing anchor leaves the text as is
+            // (the opt-in template test then fails loudly).
+            if !ledgerRules.isEmpty {
+                text = text.replacingOccurrences(
+                    of: "\n- An organisation that is named once",
+                    with: "\n" + ledgerRules + "\n- An organisation that is named once")
+            }
+            if !notesRules.isEmpty {
+                text = text.replacingOccurrences(
+                    of: "\n- Use British English.",
+                    with: "\n" + notesRules + "\n- Use British English.")
+            }
+        }
         guard let s = text.range(of: startMarker),
               let e = text.range(of: "Transcript:\n\n{transcript_text}", range: s.upperBound..<text.endIndex)
         else { return base }
@@ -337,7 +357,68 @@ public enum SummaryTemplateCatalog {
 
         ## References and further reading mentioned
         """),
-    ]
+    ] + [ukContracting]
+
+    /// Id of the opt-in UK contracting template (the rules the default prompt used to carry, #3578).
+    public static let ukContractingID = "uk_contracting"
+
+    /// The facts-first stock layout plus UK contracting / HPC rules (day rates, IR35 status,
+    /// ASR confusions seen on one call). Never a default: the user picks it per recording,
+    /// per folder or in Settings.
+    static let ukContracting: SummaryTemplate = {
+        var t = bundled(ukContractingID, "UK contracting call",
+                        "Recruiter or client call about a UK contract: rates, IR35, structure, timeline.", """
+        This is a call about a UK contracting opportunity.
+
+        ## Executive summary
+
+        ## Context
+
+        ## Key people and organisations
+
+        ## Opportunity or purpose
+
+        ## Technical scope
+
+        ## Role expectations
+
+        ## Commercial and compensation discussion
+
+        ## Timeline
+
+        ## Decisions made
+
+        ## Action items
+        Use this table:
+
+        | Action | Owner | Deadline | Evidence | Confidence |
+        |---|---|---|---|---|
+
+        ## Highest-ROI follow-up
+        Rank the 3-5 follow-up moves most likely to convert the meeting into value for the note owner.
+
+        | Priority | Next move | Why it matters | Timebox | Evidence | Confidence |
+        |---|---|---|---|---|---|
+
+        ## 30-minute post-meeting plan
+
+        ## Open questions for next call
+
+        ## Risks and concerns
+
+        ## Possible transcription corrections
+
+        ## Suggested follow-up email
+        """)
+        t.ledgerRules = """
+        - UK contracting numbers: "8.50 per day", "850 a day" or "eight fifty" is a day rate of £850 per day; "I-35", "IR-35" or "1935" is IR35 - but only when the transcript is clearly about contracting. IR35 is binary: when the transcript qualifies it ("outside IR35", "inside IR35"), the ledger fact and every section that mentions it repeat that qualifier verbatim - never reduce it to the bare word "IR35".
+        - Known transcription confusions, corrected only when the context makes them obvious: HTC -> HPC; slum, slums, slurp -> Slurm; HDX -> HGX; D300, B300 -> GB300 when NVIDIA is discussed; Luster -> Lustre.
+        """
+        t.notesRules = """
+        - If the transcript states a required contracting structure (the note owner must work through their own limited company, an umbrella company or PAYE) and does not say it is already in place, the action items include setting it up, owned by the note owner, with the transcript's own timing cue as the deadline.
+        """
+        return t
+    }()
 
     /// The user's template, parsed from `summarise.custom_template`; nil when empty
     /// or without a single "## " heading.

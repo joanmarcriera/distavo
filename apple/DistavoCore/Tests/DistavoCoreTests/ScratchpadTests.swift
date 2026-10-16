@@ -83,14 +83,15 @@ final class ScratchpadTests: XCTestCase {
         SHA256.hash(data: Data(s.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// (facts_first prompt pins re-captured for #3578, which removed the domain examples.)
     /// SHA-256 of the FULL prompt / end-of-turn block with NO scratchpad, captured
     /// from the code before #2949 changed anything (same approach as NoteLanguageTests).
     /// A fixed template keeps the pins independent of the bundled templates.
     private static let pins: [String: (prompt: String, eot: String)] = [
         "classic none": ("c455f0b8555e58febaea877cec7935527e35e3164bd6bd00dfefba69d6eedbf1", "2e65114e1bfd98821021862c9b566a817f7aabe6267de98e42ab6a0f42f8595c"),
         "classic tpl": ("102bb200c402abe7c29a251144f5e5b5f811eb0751617f609b5cdb8a45b2cda6", "0fe1a2279b115f3822a795a3c8d224cebc22673b972da9a8f554a7b1a1b3bef8"),
-        "facts_first none": ("f0eb9a7c38c72e377562185c20bed787f865fde1c514989bb32cbd2fcd416dfe", "5508371d616b170a1be48125e3a0ae74ded70377ab2ca4c82e044a241df49c26"),
-        "facts_first tpl": ("51cb6b8e090e8906652d60dc14c3e21c920b524cb938a162593d798562ab9b34", "154986aaa921ea09361317f700834f32afadd0f29c365854a4432dbcd3ecb0ac"),
+        "facts_first none": ("8b0e0c51ed120ce559457ecd0744c2b2430ec102f64e51a8bf6fbd69c3156338", "5508371d616b170a1be48125e3a0ae74ded70377ab2ca4c82e044a241df49c26"),
+        "facts_first tpl": ("52cc7f4da752bce6477f47f9c532b80217e98b106a2bdb6971a99a346b741640", "154986aaa921ea09361317f700834f32afadd0f29c365854a4432dbcd3ecb0ac"),
     ]
 
     private let pinTemplate = SummaryTemplate.parse(

@@ -33,9 +33,9 @@ final class NoteLanguageTests: XCTestCase {
         "classic nil": "25b94a060da78417fb15156ed53f7b7f6e9e784bf81a6054fef5483508a20bde",
         "classic ca": "0e937d748ac6c886d4bee23cf421ecb18a6a4ce32d56a5df80d630294f47f4f8",
         "classic es": "f46bb695a16c57eea36d818375652e4335bea1e7ea9588fe1e02e7ed15204d9b",
-        "facts_first nil": "9e354f9b08a7fd5d67e533eecc51cd1bbb7595860ce2e4eff98d584292ffca8f",
-        "facts_first ca": "f55bc1469f451b94e953a45a3e09f56b2b225457abdc6a052f7c4e090a5a8f83",
-        "facts_first es": "695cc244dc7d0803c7ee0d11f7ebb0295b59037b613a57c6bb79a75047d51116",
+        "facts_first nil": "6ef3a5fafebcd6de5097f7878d78680a98599a7f56d7655b2d4674127217a146",
+        "facts_first ca": "e5ac29316235de36d81da97b7659ae88776b1133cb3847fe048baa98fc77eef9",
+        "facts_first es": "5b985800b4e4f0e918ca441b2283cf5ad26e138d2b0854533248227704e2a277",
     ]
     private let goldEOT: [String: String] = [
         "classic nil": "2e65114e1bfd98821021862c9b566a817f7aabe6267de98e42ab6a0f42f8595c",

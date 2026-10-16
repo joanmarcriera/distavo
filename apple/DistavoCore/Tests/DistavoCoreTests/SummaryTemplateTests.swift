@@ -36,9 +36,10 @@ final class SummaryTemplateTests: XCTestCase {
 
     func testEveryBundledTemplateChangesTheRequestedHeadings() {
         XCTAssertEqual(SummaryTemplateCatalog.bundledTemplates.map(\.id),
-                       ["standup", "one_on_one", "interview", "sales_call", "lecture"])
+                       ["standup", "one_on_one", "interview", "sales_call", "lecture", "uk_contracting"])
         for style in [Prompt.Style.classic, .factsFirst] {
-            for t in SummaryTemplateCatalog.bundledTemplates {
+            // uk_contracting keeps the stock layout on purpose (see its own test).
+            for t in SummaryTemplateCatalog.bundledTemplates where t.id != SummaryTemplateCatalog.ukContractingID {
                 let p = prompt(t, style: style)
                 XCTAssertTrue(p.contains("TRANSCRIPT-BODY"), t.id)
                 XCTAssertFalse(p.contains("{"), "\(t.id): unreplaced placeholder")
@@ -99,13 +100,15 @@ final class SummaryTemplateTests: XCTestCase {
         XCTAssertNil(SummaryTemplateCatalog.template(id: "custom", config: config()))
         XCTAssertNil(SummaryTemplateCatalog.template(
             id: "custom", config: config { $0.summarise.customTemplate = "just some prose, no headings" }))
-        XCTAssertEqual(SummaryTemplateCatalog.all(config: config()).count, 5)
-        XCTAssertEqual(SummaryTemplateCatalog.all(config: config { $0.summarise.customTemplate = "## A" }).count, 6)
+        XCTAssertEqual(SummaryTemplateCatalog.all(config: config()).count, 6)
+        XCTAssertEqual(SummaryTemplateCatalog.all(config: config { $0.summarise.customTemplate = "## A" }).count, 7)
     }
 
     func testOutlineRoundTripsEveryBundledTemplate() {
         for t in SummaryTemplateCatalog.bundledTemplates {
-            let again = SummaryTemplate.parse(id: t.id, name: t.name, summary: t.summary, outline: t.outline)
+            var again = SummaryTemplate.parse(id: t.id, name: t.name, summary: t.summary, outline: t.outline)
+            // The outline format carries sections only; domain rules (#3578) are not part of it.
+            again?.ledgerRules = t.ledgerRules; again?.notesRules = t.notesRules
             XCTAssertEqual(again, t, t.id)
         }
     }

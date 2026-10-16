@@ -26,7 +26,7 @@ public enum Prompt {
     Meeting metadata (from the recording, authoritative):
     - Recording started: {meeting_datetime}
     - Note owner: {note_owner}. Speech-to-text may spell the owner's name differently (for example "Mark" for "Marc"); treat such variants as the owner.
-    Use the recording date to resolve relative dates: "the 16th" said on 9 September means 16 September; "next month" means October. Write resolved dates as "16 September (interpreted from 'the 16th')". Never add a month or year that neither the transcript nor this metadata supports.
+    Use the recording date to resolve relative dates: "the <day>" said in a given month means that day of that month; "next month" means the month after the recording date. Write resolved dates as "<day> <month> (interpreted from '<spoken words>')". Never add a month or year that neither the transcript nor this metadata supports.
 
     You are analysing a cleaned meeting transcript and writing professional meeting notes for the note owner.
 
@@ -42,8 +42,9 @@ public enum Prompt {
     List every number, money amount, rate, percentage, date, day, duration, deadline, company, product, technology, person and place that is spoken, one per line, as:
     - fact | who said it (label or name) | short verbatim excerpt | interpretation
     Rules for the ledger:
-    - Speech-to-text writes spoken numbers oddly. In a UK contracting context "8.50 per day", "850 a day" or "eight fifty" is a day rate of £850 per day. "I-35", "IR-35", "1935", "our 35" in a contracting context is IR35. Give the interpretation and mark it "(interpreted)". IR35 is binary and the status word matters as much as the term: when the transcript qualifies it ("outside IR35", "inside IR35"), the ledger fact and every section that mentions it repeat that qualifier verbatim — never reduce it to the bare word "IR35".
-    - Known transcription confusions to correct when the context makes them obvious: HTC -> HPC; slum, slums, slurp -> Slurm; HDX -> HGX; D300, B300 -> GB300 when NVIDIA is discussed; "Yen client", "end client" -> the end client (a role, not a company name); brochure -> Roche when Roche was named; Ember EBI, EMBL comedy, M-Bally VI, MBA, MBALI -> EMBL-EBI when EMBL-EBI was named; Luster -> Lustre; Buell, Bule -> Bull.
+    - Only list a fact if you can copy its words from the transcript. Use no outside examples: nothing in these instructions is a fact about this meeting.
+    - Speech-to-text writes spoken numbers oddly (digits dropped, run together or misheard). When the transcript makes the intended number clear, give the interpretation and mark it "(interpreted)". Never interpret a number, date or name that the transcript does not contain. When the transcript qualifies a term ("outside", "inside", "approximately"), the ledger fact and every section that mentions it repeat that qualifier verbatim.
+    - Correct a transcription confusion only when the glossary above lists the term or the transcript itself makes the intended spelling obvious; otherwise keep the transcript's spelling and say it may be a transcription error. A role such as "end client" is a role, not a company name.
     - An organisation that is named once, spelled oddly and never spelled out is a possible transcription error, not a new entity. Say so instead of listing it as an organisation.
     - Never drop a fact because it is unclear; keep it and mark it "unclear".
 
@@ -56,7 +57,6 @@ public enum Prompt {
     Important rules:
     - Do not invent facts. Preserve uncertainty. If something is unclear, write "unclear".
     - Extract action items only where there is evidence in the transcript. For each action, name the owner as a person or "note owner", not a speaker label, when Step 1 identified them.
-    - If the transcript states a required contracting structure (the note owner must work through their own limited company, an umbrella company or PAYE) and the transcript does not say it is already in place, the action items include setting it up, owned by the note owner, with the transcript's own timing cue as the deadline.
     - Use British English. Be concise; no repeated wording; no long transcript quotes.
     - The "Highest-ROI follow-up" and "30-minute post-meeting plan" sections advise the note owner only.
     - The suggested email is written BY the note owner TO the other party. Do not invent the other party's name; if their name was not spoken, open with "Hi," and mention no name.

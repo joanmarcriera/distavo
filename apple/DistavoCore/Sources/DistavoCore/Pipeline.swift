@@ -442,6 +442,9 @@ public enum Pipeline {
             }
             // Which of the user's global terms were really heard (Settings shows "last used", #3584).
             VocabularyUsage.record(terms: config.transcribe.vocabulary, transcript: clean, workDir: workDir)
+            // A different language or different people than last time: offer to clear unheard terms (#3584).
+            VocabularyClearOffer.observe(language: dominantCode, participants: participants,
+                                         terms: config.transcribe.vocabulary, transcript: clean, workDir: workDir)
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.

@@ -29,6 +29,7 @@ struct VocabularySection: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             }
             SettingCaption("One per line, for example Slurm or EMBL-EBI.")
+            clearOfferRow
             lastUsedRows
 
             ForEach(ReplacementPacks.all, id: \.id) { pack in
@@ -56,6 +57,26 @@ struct VocabularySection: View {
                 model.draft.transcribe.replacements.append(ReplacementRule(from: "", to: ""))
             } label: { Label("Add replacement", systemImage: "plus.circle") }
                 .buttonStyle(.borderless)
+        }
+    }
+
+    /// The pipeline queued this when a meeting had a different language or different people than the
+    /// one before and some glossary terms were not heard in it (Vikunja #3584). Nothing is removed
+    /// until the user clicks; "Keep" just dismisses it.
+    @ViewBuilder private var clearOfferRow: some View {
+        let workDir = Config.resolvePath(model.draft.workDir)
+        if let offer = VocabularyClearOffer.pending(workDir: workDir, currentTerms: model.draft.transcribe.vocabulary) {
+            let why = offer.reason == .language ? "language" : "participants"
+            SettingCaption("The last meeting had a different \(why). \(offer.terms.count) term\(offer.terms.count == 1 ? "" : "s") from your list were not heard in it: " + offer.terms.joined(separator: ", "))
+            HStack {
+                Button("Clear \(offer.terms.count) term\(offer.terms.count == 1 ? "" : "s")") {
+                    model.draft.transcribe.vocabulary = VocabularyClearOffer.applying(offer, to: model.draft.transcribe.vocabulary)
+                    VocabularyClearOffer.dismiss(workDir: workDir)
+                }
+                Button("Keep") { VocabularyClearOffer.dismiss(workDir: workDir) }
+            }
+            .buttonStyle(.borderless)
+            .help("Clearing applies when you press Save.")
         }
     }
 

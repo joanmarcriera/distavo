@@ -86,6 +86,31 @@ public struct SpeakerHints: Codable, Equatable {
         return people.isEmpty ? nil : people.count + 1
     }
 
+    /// Lowercased first names (first word of each listed person) in a participants text, or [] when none.
+    /// Same item splitting and role-word filter as `suggestedCount`; used to tell whether two meetings
+    /// had different people (Vikunja #3584). Falls back to the whole text when there is no
+    /// "Other participants:" marker.
+    public static func listedNames(_ participants: String?) -> Set<String> {
+        guard let text = participants, !text.isEmpty else { return [] }
+        let body = text.range(of: "Other participants:", options: .caseInsensitive).map { text[$0.upperBound...] } ?? text[...]
+        var items: [String] = []
+        var depth = 0
+        var current = ""
+        for ch in body {
+            if ch == "(" { depth += 1 } else if ch == ")" { depth = max(0, depth - 1) }
+            if depth == 0 && (ch == "," || ch == ";" || ch == "\n") { items.append(current); current = "" }
+            else { current.append(ch) }
+        }
+        items.append(current)
+        var names = Set<String>()
+        for item in items {
+            guard let first = item.split(whereSeparator: { $0.isWhitespace || $0 == "(" }).first,
+                  first.first?.isUppercase == true, !roleWords.contains(first.lowercased()) else { continue }
+            names.insert(first.lowercased())
+        }
+        return names
+    }
+
     /// "4 people listed but 2 speakers set", or nil when they agree, no count is set (auto), or the
     /// text lists nobody. Shown inline in the recorder's question and logged.
     public static func mismatchWarning(count: Int?, participants: String?) -> String? {

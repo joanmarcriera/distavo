@@ -32,7 +32,19 @@ extension WatcherController {
                 let result = await self.regenerateNote(base: base, options: RegenerateOptions())
                 return (result.status == .done,
                         result.status == .done ? "Note rewritten from the edited transcript. \(result.message)" : "Note not changed: \(result.message)")
-            })
+            },
+            knownRules: { [weak self] in self?.config.transcribe.replacements ?? [] },
+            learn: { [weak self] rules in self?.learnCorrections(rules) })
         TranscriptWindowController.shared.show(model: model)
+    }
+
+    /// "Learn from this transcript" (#3584): append the rules (not already present) and the name-like
+    /// terms they write to the saved config.
+    func learnCorrections(_ rules: [ReplacementRule]) {
+        var c = config
+        let fresh = CorrectionLearner.newRules(rules, existing: c.transcribe.replacements)
+        c.transcribe.replacements += fresh
+        c.transcribe.vocabulary += CorrectionLearner.vocabularyTerms(for: fresh, existing: c.transcribe.vocabulary)
+        applyConfig(c)
     }
 }

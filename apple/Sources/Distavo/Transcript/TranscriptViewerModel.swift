@@ -25,6 +25,10 @@ final class TranscriptViewerModel: ObservableObject {
     private let didSave: (String) -> Void
     /// Re-summarises the note from the saved transcript; returns a one-line outcome.
     private let resummarise: (String) async -> (ok: Bool, message: String)
+    /// The replacement rules already in Settings (so a correction is not offered twice).
+    private let knownRules: () -> [ReplacementRule]
+    /// Adds rules (and any name-like terms) to Settings; "Learn from this transcript" (#3584).
+    private let learn: ([ReplacementRule]) -> Void
 
     // MARK: Published state
     @Published private(set) var base: String = ""
@@ -51,6 +55,8 @@ final class TranscriptViewerModel: ObservableObject {
     @Published private(set) var message: String?
     /// True after a save in this session: the note no longer matches the transcript.
     @Published private(set) var noteIsStale = false
+    /// Corrections made in the last save that could become replacement rules; empty = nothing to offer.
+    @Published private(set) var learnable: [ReplacementRule] = []
     /// The files changed on disk while the window was open (offer a reload).
     @Published private(set) var changedOnDisk = false
     /// Cached per content load so a highlight tick never walks all lines.
@@ -70,9 +76,12 @@ final class TranscriptViewerModel: ObservableObject {
     init(workDir: URL, notes: [TranscriptNote], initial: String?,
          findSource: @escaping @Sendable (String) -> URL?,
          didSave: @escaping (String) -> Void,
-         resummarise: @escaping (String) async -> (ok: Bool, message: String)) {
+         resummarise: @escaping (String) async -> (ok: Bool, message: String),
+         knownRules: @escaping () -> [ReplacementRule] = { [] },
+         learn: @escaping ([ReplacementRule]) -> Void = { _ in }) {
         self.workDir = workDir; self.notes = notes
         self.findSource = findSource; self.didSave = didSave; self.resummarise = resummarise
+        self.knownRules = knownRules; self.learn = learn
         if let first = initial ?? notes.first?.base { select(first) }
     }
 
@@ -82,7 +91,7 @@ final class TranscriptViewerModel: ObservableObject {
         guard !dirty else { return }
         teardownPlayer()
         base = newBase
-        message = nil; noteIsStale = false; isEditing = false
+        message = nil; noteIsStale = false; isEditing = false; learnable = []
         loadTranscript()
         loadPlayer()
     }
@@ -152,6 +161,9 @@ final class TranscriptViewerModel: ObservableObject {
             message = "Not saved — nothing was changed: \(error.localizedDescription)"
             return false
         }
+        learnable = CorrectionLearner.newRules(
+            CorrectionLearner.suggestions(original: t.segments.map(\.text), edited: edited.segments.map(\.text)),
+            existing: knownRules())
         show(edited)
         loaded = TranscriptEditStore.fingerprint(workDir: workDir, base: base)
         isEditing = false
@@ -161,6 +173,15 @@ final class TranscriptViewerModel: ObservableObject {
         message = "Saved. The note still reflects the old transcript — re-summarise to rewrite it."
         didSave(base)
         return true
+    }
+
+    /// Add the corrections from the last save to Settings as replacements (and names as vocabulary).
+    func learnCorrections() {
+        let rules = learnable
+        guard !rules.isEmpty else { return }
+        learn(rules)
+        learnable = []
+        message = "Learned \(rules.count) correction\(rules.count == 1 ? "" : "s"): future transcripts use them. Re-summarise to apply them to this note."
     }
 
     func revertToOriginal() {

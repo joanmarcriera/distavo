@@ -29,6 +29,7 @@ struct VocabularySection: View {
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
             }
             SettingCaption("One per line, for example Slurm or EMBL-EBI.")
+            lastUsedRows
 
             ForEach(ReplacementPacks.all, id: \.id) { pack in
                 Toggle("\(pack.name) replacements", isOn: packBinding(pack.id))
@@ -56,6 +57,32 @@ struct VocabularySection: View {
             } label: { Label("Add replacement", systemImage: "plus.circle") }
                 .buttonStyle(.borderless)
         }
+    }
+
+    /// Per-term "last heard" (Vikunja #3584) with a one-click clean-up of stale terms, so an old
+    /// glossary does not keep steering new meetings.
+    @ViewBuilder private var lastUsedRows: some View {
+        let terms = Vocabulary.normalisedTerms(model.draft.transcribe.vocabulary)
+        if !terms.isEmpty {
+            let usage = VocabularyUsage.load(workDir: Config.resolvePath(model.draft.workDir))
+            let stale = VocabularyUsage.stale(terms, usage: usage, olderThanDays: 90, includeNever: true)
+            SettingCaption("Last heard: " + terms.map { "\($0) \(Self.ago(usage[$0.lowercased()]))" }.joined(separator: " · "))
+            if !stale.isEmpty {
+                Button("Remove \(stale.count) term\(stale.count == 1 ? "" : "s") not heard in 90 days") {
+                    let drop = Set(stale.map { $0.lowercased() })
+                    model.draft.transcribe.vocabulary = Vocabulary.normalisedTerms(model.draft.transcribe.vocabulary)
+                        .filter { !drop.contains($0.lowercased()) }
+                }
+                .buttonStyle(.borderless)
+                .help("Removes: " + stale.joined(separator: ", ") + ". Applies when you press Save.")
+            }
+        }
+    }
+
+    private static func ago(_ date: Date?) -> String {
+        guard let date else { return "never" }
+        let days = Int(Date().timeIntervalSince(date) / 86_400)
+        return days <= 0 ? "today" : "\(days) d ago"
     }
 
     private func packBinding(_ id: String) -> Binding<Bool> {

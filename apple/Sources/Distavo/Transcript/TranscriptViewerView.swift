@@ -67,6 +67,11 @@ struct TranscriptViewerView: View {
             }
             Button("Revert to original transcript…") { confirmRevert = true }
                 .disabled(!model.canRevert || model.dirty)
+            if !model.learnable.isEmpty {
+                Button("Learn \(model.learnable.count) correction\(model.learnable.count == 1 ? "" : "s")") { model.learnCorrections() }
+                    .help("Add to Settings > Vocabulary so future transcripts spell these right: "
+                          + model.learnable.prefix(6).map { "\($0.from) → \($0.to)" }.joined(separator: ", "))
+            }
             Button(model.busy ? "Re-summarising…" : "Re-summarise") { model.resummariseNote() }
                 .disabled(model.dirty || model.busy || !model.hasCleanTranscript)
                 .help(model.dirty ? "Save your edits first" : "Rewrite the note from this transcript (the old note is kept as .prev)")

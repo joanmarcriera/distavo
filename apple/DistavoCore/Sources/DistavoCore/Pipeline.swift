@@ -440,6 +440,8 @@ public enum Pipeline {
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")
             }
+            // Which of the user's global terms were really heard (Settings shows "last used", #3584).
+            VocabularyUsage.record(terms: config.transcribe.vocabulary, transcript: clean, workDir: workDir)
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.

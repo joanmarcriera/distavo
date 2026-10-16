@@ -4,6 +4,46 @@ Audit date: 2026-07-10. Based on repo state at main (v1.8.0 / build 9),
 official Setapp docs (docs.setapp.com 2026), and code review of the full
 `apple/` source tree.
 
+## 2026-10-16 status
+
+Re-verified on `release/1.19` (marketing 1.18.0, build 21; nothing Setapp-specific
+changed since). Nothing new is possible until MacPaw opens the vendor account.
+
+**Where we are with MacPaw:** Single App Distribution (USD 29 one-off), not
+Membership (`DECISIONS.md` 2026-09-16). KYC form submitted 2026-09-17. No
+dashboard access, so no SDK and no app public key yet. The Setapp Framework
+stays unlinked on purpose (`DECISIONS.md` 2026-06-29). Next step is the chase
+email and click list in `FIRST_UPLOAD_CLICKS.md`.
+
+**Release-readiness evidence** (unsigned Release build,
+`xcodebuild -scheme Distavo-Setapp -configuration Release CODE_SIGNING_ALLOWED=NO`,
+result `** BUILD SUCCEEDED **`):
+
+| Check | Result |
+|---|---|
+| `CFBundleIdentifier` | `uk.co.riera.distavo-setapp` |
+| `NSUpdateSecurityPolicy` (`plutil -p`) | present: team `MEHY5QF425` may run `com.setapp.DesktopClient.SetappAgent` |
+| `LSUIElement` | `true` (menu-bar app) |
+| `LSMinimumSystemVersion` | `14.0` |
+| `lipo -info` | universal: `x86_64 arm64` |
+| `Contents/Frameworks` | only `libswiftCompatibilitySpan.dylib`; no `Sparkle.framework`, no `otool -L` link to Sparkle |
+| `grep -aqF "Support Distavo"` on the binary | no match (donate link absent) |
+| `grep -aqF DONATE_ENABLED` on the binary | no match |
+
+`apple/scripts/build-and-notarize.sh setapp` selects `-scheme Distavo-Setapp`,
+configuration `Release` (by scheme, not `-xcconfig`), and runs `verify_edition`
+before export: it fails the build unless the bundle id is
+`uk.co.riera.distavo-setapp`, `Sparkle.framework` is absent and `DONATE_ENABLED`
+is not in the binary. Notarisation itself was not run (needs Marc's notary
+profile).
+
+**Still true:** the first upload must go through the Setapp Web UI, and the
+framework integration (`FRAMEWORK_INTEGRATION.md`) is a few lines once the SDK
+arrives. One thing to confirm with MacPaw on the first call: whether Single App
+Distribution needs the Setapp Framework at all, or only the licence/purchase
+flow in their dashboard. The framework notes were written for Membership; do not
+apply them blindly.
+
 ---
 
 ## Summary verdict
@@ -33,15 +73,10 @@ payouts.
 **Gate:** Nothing past this point is achievable without a vendor account.
 `developer.setapp.com` dashboard access is the completion criterion.
 
-**Revenue model decision required here:** Marc must choose between:
-- **Setapp Membership** (~70% revenue share, usage-pool, suitable for
-  broad-appeal daily-use tools). Best bet for Distavo given its niche use case
-  and recurring-income goal.
-- **Single-App Distribution** (85% revenue share, per-purchase, EEA + US only).
-  Better per-unit economics but requires more marketing effort to drive downloads.
-
-Recommendation: Start with **Setapp Membership** to get listed and gain traction;
-switch to Single-App Distribution later if per-purchase metrics justify it.
+**Revenue model: decided.** Single App Distribution, USD 29 one-off, not
+Membership (`DECISIONS.md` 2026-09-16; MacPaw declined Membership on 2026-09-07).
+Per-purchase, EEA + US only, ~85% revenue share per `docs/setapp-submission.md`.
+KYC was submitted 2026-09-17; the gate is now MacPaw opening the dashboard.
 
 ---
 

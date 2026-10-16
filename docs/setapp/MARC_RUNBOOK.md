@@ -4,6 +4,8 @@ Step-by-step actions only Marc can take, in order. Each step has a clear
 completion criterion. The technical work that can be automated is noted and
 already done — this covers only the human-gated parts.
 
+See also `FIRST_UPLOAD_CLICKS.md` for the short click-by-click version.
+
 Estimated total Marc-time: **3–4 hours spread over 1–2 weeks** (mostly waiting for
 MacPaw's review).
 
@@ -12,6 +14,10 @@ MacPaw's review).
 ## Phase 1: Vendor account (Day 1, ~30 min)
 
 ### Step 1.1 — Apply for vendor status
+
+**Status 2026-10-16:** done. Talks with MacPaw BD started in July, KYC form submitted
+2026-09-17. Waiting for them to open the dashboard; use the chase email in
+`FIRST_UPLOAD_CLICKS.md`. The text below is the original plan, kept for reference.
 
 Go to: https://setapp.com/developers
 
@@ -27,17 +33,18 @@ Alternatively, email: developers@setapp.com
 **Completion criterion:** MacPaw responds with dashboard access to
 `https://developer.setapp.com`. Allow 2–5 business days.
 
-### Step 1.2 — Choose revenue model
+### Step 1.2 — Revenue model (already decided)
 
-Once approved, in the dashboard you'll be asked to select:
+**Single App Distribution, USD 29 one-off** (`DECISIONS.md` 2026-09-16). MacPaw
+declined Membership on 2026-09-07 because Setapp already has apps covering this
+use case, and offered Single App Distribution instead.
+- Per-purchase sales, EEA + US only, ~85% revenue share
+- Same price as the Mac App Store edition; no revenue-share negotiation
+- No usage-pool, so no usage-event reporting is needed for revenue (still ask
+  MacPaw whether the Framework is required at all for this model)
 
-**Recommendation: Setapp Membership** (the standard bundle subscription model).
-- ~70% revenue share (usage-pool — paid for how much subscribers use Distavo)
-- Gets Distavo into the full Setapp catalogue — maximum discovery
-- +20% bonus on any Setapp subscribers you referred
-- Switch to Single-App later if you want per-purchase predictability
-
-**Record the decision in `DECISIONS.md`** (keep the pattern already there).
+If the dashboard offers a Membership option, do not pick it. If MacPaw changes
+the terms, record that in `DECISIONS.md`.
 
 ---
 
@@ -64,10 +71,11 @@ In `developer.setapp.com`:
 
 ### Step 2.3 — Apply the framework integration
 
-Follow `docs/setapp/FRAMEWORK_INTEGRATION.md` exactly:
+Follow `docs/setapp/FRAMEWORK_INTEGRATION.md` (written for Membership; check
+with MacPaw first which parts apply to Single App Distribution):
 - Update `apple/configs/Setapp.xcconfig` with the linker flags
 - Add 3 lines to `apple/Sources/Distavo/DistavoApp.swift`
-- Add 1–2 usage event calls (important for revenue pool weighting)
+- Usage event calls are for Membership revenue weighting; skip them under Single App Distribution unless MacPaw says otherwise
 - Update `apple/project.yml` to bundle the public key, then `xcodegen generate`
 
 Time: ~45 minutes if following the plan. The code is straightforward.
@@ -178,7 +186,7 @@ This is ~15 minutes of form-filling during account creation.
 ## Quick reference: completion checklist
 
 - [ ] Vendor account created + approved (`developer.setapp.com` access)
-- [ ] Revenue model chosen (Membership recommended) and noted in `DECISIONS.md`
+- [x] Revenue model chosen: Single App Distribution, USD 29 (`DECISIONS.md` 2026-09-16)
 - [ ] App public key downloaded → `apple/vendor/setapp/SetappPublicKey.pem`
 - [ ] SDK downloaded → `apple/vendor/setapp/libSetapp.a` or `Setapp.xcframework/`
 - [ ] `FRAMEWORK_INTEGRATION.md` steps applied and committed

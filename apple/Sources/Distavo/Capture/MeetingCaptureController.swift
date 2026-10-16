@@ -487,7 +487,8 @@ final class MeetingCaptureController: ObservableObject {
         // Per-recording summary template (Vikunja #2940). Index 0 = no override (the
         // folder rule / Settings value applies). Only a click saves anything.
         var templateChoices: [(title: String, value: String?)] =
-            [(SettingsDefaults.templateLabel(config), nil), ("No template", SummaryTemplateCatalog.noneID)]
+            [(SettingsDefaults.templateLabel(config), nil), ("Auto (from the participants)", SummaryTemplateCatalog.autoID),
+             ("No template", SummaryTemplateCatalog.noneID)]
             + SummaryTemplateCatalog.bundledTemplates.map { ($0.name, Optional($0.id)) }
         if SummaryTemplateCatalog.customTemplate(config: config) != nil {
             templateChoices.append(("Custom", SummaryTemplateCatalog.customID))

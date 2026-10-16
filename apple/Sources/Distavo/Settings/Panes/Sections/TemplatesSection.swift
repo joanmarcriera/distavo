@@ -26,6 +26,7 @@ struct TemplatesSection: View {
         Section("Templates") {
             Picker("Note template", selection: $model.draft.summarise.template) {
                 Text("None (standard notes)").tag("")
+                Text("Auto (from the participants)").tag(SummaryTemplateCatalog.autoID)
                 ForEach(bundled) { Text($0.name).tag($0.id) }
                 Text("Custom").tag(SummaryTemplateCatalog.customID)
                 // A stored id nothing offers (hand-edited config): keep it visible; it behaves as None.
@@ -34,7 +35,7 @@ struct TemplatesSection: View {
                         .tag(model.draft.summarise.template)
                 }
             }
-            .withHelp("A template changes which sections the note has, to suit the kind of meeting: Stand-up (updates, plans, blockers), 1:1, Interview, Sales call or Lecture — or your own. The rest of the prompt (note owner, speakers, language, facts ledger) is unchanged, and section headings stay in English whatever language the note is written in. Choose ‘None’ for the standard 16-section note. You can pick a different template for one recording in the “Who was in this meeting?” window after you stop recording, and per folder below. Works with Ollama, the downloaded Gemma model and Apple Intelligence.")
+            .withHelp("A template changes which sections the note has, to suit the kind of meeting: Stand-up (updates, plans, blockers), 1:1, Interview, Sales call or Lecture — or your own. The rest of the prompt (note owner, speakers, language, facts ledger) is unchanged, and section headings stay in English whatever language the note is written in. Choose ‘Auto’ to let Distavo pick from who was in the meeting (consultancy, interview, stand-up…) and say so in the note footer, or ‘None’ for the standard 16-section note. You can pick a different template for one recording in the “Who was in this meeting?” window after you stop recording, and per folder below. Works with Ollama, the downloaded Gemma model and Apple Intelligence.")
             SettingCaption("Which sections the note has. None keeps the standard note.")
 
             DisclosureGroup("Custom template") {
@@ -65,6 +66,7 @@ struct TemplatesSection: View {
                     HStack {
                         TextField("Folder, e.g. Sales", text: $row.folder)
                         Picker("", selection: $row.template) {
+                            Text("Auto (from the participants)").tag(SummaryTemplateCatalog.autoID)
                             ForEach(bundled) { Text($0.name).tag($0.id) }
                             Text("Custom").tag(SummaryTemplateCatalog.customID)
                             Text("None (standard notes)").tag(SummaryTemplateCatalog.noneID)
@@ -95,7 +97,7 @@ struct TemplatesSection: View {
     }
 
     private var knownIDs: Set<String> {
-        Set([""] + bundled.map(\.id) + [SummaryTemplateCatalog.customID])
+        Set([""] + bundled.map(\.id) + [SummaryTemplateCatalog.customID, SummaryTemplateCatalog.autoID])
     }
 
     private var knownFolderIDs: Set<String> {

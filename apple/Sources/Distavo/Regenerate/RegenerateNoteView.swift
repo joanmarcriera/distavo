@@ -78,6 +78,7 @@ struct RegenerateNoteView: View {
                     Picker("Template", selection: $templateID) {
                         Text("As in Settings").tag(String?.none)
                         Text("None (standard notes)").tag(String?.some(SummaryTemplateCatalog.noneID))
+                        Text("Auto (from the participants)").tag(String?.some(SummaryTemplateCatalog.autoID))
                         ForEach(SummaryTemplateCatalog.bundledTemplates) { t in
                             Text(t.name).tag(String?.some(t.id))
                         }

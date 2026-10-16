@@ -357,6 +357,29 @@ public enum SummaryTemplateCatalog {
 
         ## References and further reading mentioned
         """),
+        bundled("consultancy", "Consultancy / client meeting", "Context, findings, recommendations, decisions, actions, risks.", """
+        This is a consultancy or client meeting: an adviser or consultant talking with a client or prospective client (discovery, review or advice). Separate what the client said from what the consultant said or recommended. Never write candidate, interview or hiring sections, and do not invent figures, names or commitments.
+
+        ## Context
+        Who the client is, who attended and why the meeting took place, as stated.
+
+        ## Findings
+        What was learned about the client's situation, needs, constraints and current state, one bullet each.
+
+        ## Recommendations
+        What the consultant advised or proposed, with the reason given.
+
+        ## Decisions
+        Only what was explicitly decided. Write "none stated" if nothing was.
+
+        ## Actions
+        Use this table:
+
+        | Action | Owner | Deadline | Evidence | Confidence |
+        |---|---|---|---|---|
+
+        ## Risks and open questions
+        """),
     ] + [ukContracting]
 
     /// Id of the opt-in UK contracting template (the rules the default prompt used to carry, #3578).
@@ -420,6 +443,9 @@ public enum SummaryTemplateCatalog {
         return t
     }()
 
+    /// Id that means "pick from the participants and the start of the transcript" (Vikunja #3582).
+    public static let autoID = "auto"
+
     /// The user's template, parsed from `summarise.custom_template`; nil when empty
     /// or without a single "## " heading.
     public static func customTemplate(config: Config) -> SummaryTemplate? {
@@ -474,8 +500,20 @@ public enum SummaryTemplateCatalog {
 
     /// The template for a recording: sidecar id, else folder map, else global.
     /// The first level that names an id wins; if that id is "none" or unknown the
-    /// result is nil (a recording is never failed over a template).
-    public static func resolve(config: Config, folder: String = "", sidecarID: String? = nil) -> SummaryTemplate? {
+    /// result is nil (a recording is never failed over a template). "auto" picks from
+    /// `participants` and the start of `transcript` (`TemplateAutoPick`); with nothing to go
+    /// on it is nil too.
+    public static func resolve(config: Config, folder: String = "", sidecarID: String? = nil,
+                               participants: String? = nil, transcript: String = "") -> SummaryTemplate? {
+        resolveWithReason(config: config, folder: folder, sidecarID: sidecarID,
+                          participants: participants, transcript: transcript).template
+    }
+
+    /// `resolve`, plus the footer sentence for an automatic choice ("Template: Interview (auto,
+    /// matched recruiter)"); `note` is nil when the template was named, not picked.
+    public static func resolveWithReason(config: Config, folder: String = "", sidecarID: String? = nil,
+                                         participants: String? = nil, transcript: String = "")
+        -> (template: SummaryTemplate?, note: String?) {
         func named(_ s: String?) -> String? {
             let t = s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return t.isEmpty ? nil : t
@@ -483,7 +521,69 @@ public enum SummaryTemplateCatalog {
         let chosen = named(sidecarID)
             ?? named(folderTemplateID(folder: folder, map: config.summarise.folderTemplates))
             ?? named(config.summarise.template)
-        guard let id = chosen else { return nil }
-        return template(id: id, config: config)
+        guard let id = chosen else { return (nil, nil) }
+        if id.lowercased() == autoID {
+            guard let pick = TemplateAutoPick.pick(participants: participants, transcript: transcript),
+                  let t = template(id: pick.id, config: config) else { return (nil, nil) }
+            return (t, "Template: \(t.name) (auto, matched \(pick.reason))")
+        }
+        return (template(id: id, config: config), nil)
+    }
+}
+
+/// Picks a bundled template from what the owner said about the meeting (Vikunja #3582): a stale
+/// global "interview" used to turn a consultancy discovery call into "Candidate and role". A small
+/// keyword scorer over the participants text (weight 3 for a word that names the meeting type,
+/// 2 for a role word) and the first characters of the transcript (weight 1 per hit, at most 3).
+/// A tie or a score below 2 picks nothing, so an unclear meeting keeps the standard note.
+public enum TemplateAutoPick {
+    public struct Pick: Equatable, Sendable { public let id: String; public let reason: String }
+
+    /// The part of the transcript that is looked at (about the first two minutes).
+    public static let transcriptPrefix = 2000
+
+    private static let rules: [(id: String, strong: [String], weak: [String])] = [
+        ("interview",
+         ["recruiter", "recruitment", "headhunter", "head-hunter", "head hunter", "candidate", "interviewer",
+          "interview", "hiring manager", "entrevista", "reclutador", "reclutadora", "candidat", "candidato",
+          "cazatalentos"],
+         ["hiring", "selecció", "selección", "cv"]),
+        ("consultancy",
+         ["consultant", "consultor", "consultora", "consultancy", "consultoria", "consultoría", "fractional",
+          "advisor", "adviser", "assessor", "asesor", "discovery"],
+         ["ceo", "cto", "cio", "cfo", "client", "cliente", "founder", "director"]),
+        ("standup", ["stand-up", "standup", "stand up", "scrum", "daily sync"], ["sprint", "blocker"]),
+        ("one_on_one", ["1:1", "one-to-one", "one to one", "one on one"], ["mentor", "mentee"]),
+        ("sales_call", ["sales call", "demo", "prospect"], ["pricing", "quote", "proposal"]),
+        ("lecture", ["lecture", "seminar", "webinar", "classe", "conferència", "conferencia"], ["professor", "speaker"]),
+    ]
+
+    private static func contains(_ text: String, _ word: String) -> Bool {
+        // Whole-word match (so "cv" does not match "cvs-like" and "ceo" not "oceon").
+        text.range(of: "(?<![\\p{L}\\p{N}])" + NSRegularExpression.escapedPattern(for: word) + "(?![\\p{L}\\p{N}])",
+                   options: [.regularExpression, .caseInsensitive]) != nil
+    }
+
+    public static func pick(participants: String?, transcript: String) -> Pick? {
+        let who = participants ?? ""
+        let start = String(transcript.prefix(transcriptPrefix))
+        var best: (score: Int, id: String, hits: [String])?
+        var tied = false
+        for rule in rules {
+            var score = 0
+            var hits: [String] = []
+            for w in rule.strong where contains(who, w) { score += 3; hits.append(w) }
+            for w in rule.weak where contains(who, w) { score += 2; hits.append(w) }
+            var transcriptScore = 0
+            for w in rule.strong + rule.weak where contains(start, w) { transcriptScore += 1 }
+            score += min(transcriptScore, 3)
+            guard score > 0 else { continue }
+            if let b = best {
+                if score > b.score { best = (score, rule.id, hits); tied = false }
+                else if score == b.score { tied = true }
+            } else { best = (score, rule.id, hits) }
+        }
+        guard let b = best, b.score >= 2, !tied else { return nil }
+        return Pick(id: b.id, reason: b.hits.isEmpty ? "words in the transcript" : b.hits.prefix(3).joined(separator: ", "))
     }
 }

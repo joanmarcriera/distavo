@@ -27,6 +27,9 @@ public enum SettingsDefaults {
     /// `folder` is the recording's subfolder of the recordings folder ("" = the root).
     public static func templateLabel(_ config: Config, folder: String = "") -> String {
         let fromFolder = SummaryTemplateCatalog.folderTemplateID(folder: folder, map: config.summarise.folderTemplates)
+        let effective = (fromFolder ?? config.summarise.template).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        // Auto is decided per recording, from the participants, so it has no name yet (#3582).
+        if effective == SummaryTemplateCatalog.autoID { return "Default from Settings (Auto, from the participants)" }
         guard let template = SummaryTemplateCatalog.resolve(config: config, folder: folder) else {
             return "Default from Settings (no template)"
         }

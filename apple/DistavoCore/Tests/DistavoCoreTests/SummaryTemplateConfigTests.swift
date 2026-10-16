@@ -39,9 +39,10 @@ final class SummaryTemplateConfigTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Config.self, from: data).summarise.folderTemplates, ["Sales": "sales_call"])
     }
 
-    func testFreshInstallRecommendationLeavesTemplatesOff() {
+    /// Fresh installs pick the template per recording (#3582: "auto"); no folder rules, no named template.
+    func testFreshInstallRecommendationUsesAutoTemplateAndNoFolderRules() {
         let s = Config.recommendedForThisMac().summarise
-        XCTAssertEqual(s.template, "")
+        XCTAssertEqual(s.template, "auto")
         XCTAssertEqual(s.folderTemplates, [:])
     }
 }

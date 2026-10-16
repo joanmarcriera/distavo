@@ -36,7 +36,7 @@ final class SummaryTemplateTests: XCTestCase {
 
     func testEveryBundledTemplateChangesTheRequestedHeadings() {
         XCTAssertEqual(SummaryTemplateCatalog.bundledTemplates.map(\.id),
-                       ["standup", "one_on_one", "interview", "sales_call", "lecture", "uk_contracting"])
+                       ["standup", "one_on_one", "interview", "sales_call", "lecture", "consultancy", "uk_contracting"])
         for style in [Prompt.Style.classic, .factsFirst] {
             // uk_contracting keeps the stock layout on purpose (see its own test).
             for t in SummaryTemplateCatalog.bundledTemplates where t.id != SummaryTemplateCatalog.ukContractingID {
@@ -100,8 +100,8 @@ final class SummaryTemplateTests: XCTestCase {
         XCTAssertNil(SummaryTemplateCatalog.template(id: "custom", config: config()))
         XCTAssertNil(SummaryTemplateCatalog.template(
             id: "custom", config: config { $0.summarise.customTemplate = "just some prose, no headings" }))
-        XCTAssertEqual(SummaryTemplateCatalog.all(config: config()).count, 6)
-        XCTAssertEqual(SummaryTemplateCatalog.all(config: config { $0.summarise.customTemplate = "## A" }).count, 7)
+        XCTAssertEqual(SummaryTemplateCatalog.all(config: config()).count, 7)
+        XCTAssertEqual(SummaryTemplateCatalog.all(config: config { $0.summarise.customTemplate = "## A" }).count, 8)
     }
 
     func testOutlineRoundTripsEveryBundledTemplate() {

@@ -461,7 +461,15 @@ public enum Pipeline {
             // owner) "auto" falls back to that fixed spoken language.
             let noteLanguage = resolveNoteLanguage(
                 config: config, workDir: workDir, base: base, dominantCode: dominantCode)
-            let context = NoteContext(
+            // Summary template (#2940): recording sidecar > recordings subfolder > Settings; "auto" (#3582)
+            // picks from the participants and the start of the transcript.
+            let resolvedTemplate = SummaryTemplateCatalog.resolveWithReason(
+                config: config,
+                folder: SummaryTemplateCatalog.folder(of: path, in: recordingsDir),
+                sidecarID: LanguageOverride.load(
+                    workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template,
+                participants: participants, transcript: clean)
+            var context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
                 participants: participants, meetingDate: calendarMatch?.recordingStart ?? meetingDate(for: path),
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
@@ -470,14 +478,11 @@ public enum Pipeline {
                 glossary: transcribeConfig.vocabulary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.
-                template: ActionItemsPrompt.effectiveTemplate(SummaryTemplateCatalog.resolve(
-                    config: config,
-                    folder: SummaryTemplateCatalog.folder(of: path, in: recordingsDir),
-                    sidecarID: LanguageOverride.load(
-                        workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template),
+                template: ActionItemsPrompt.effectiveTemplate(resolvedTemplate.template,
                     style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
+            if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
             let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
                 segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked

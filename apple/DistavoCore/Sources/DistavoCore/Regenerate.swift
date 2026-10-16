@@ -118,17 +118,22 @@ extension Pipeline {
     /// (recording sidecar > recordings subfolder > Settings), so regenerating
     /// without a template choice keeps the note's shape.
     static func regenerateTemplate(
-        options: RegenerateOptions, config: Config, workDir: URL, sourceBase: String, sourcePath: URL?
-    ) -> SummaryTemplate? {
+        options: RegenerateOptions, config: Config, workDir: URL, sourceBase: String, sourcePath: URL?,
+        participants: String? = nil, transcript: String = ""
+    ) -> (template: SummaryTemplate?, note: String?) {
         let chosen = options.templateID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if chosen.lowercased() == SummaryTemplateCatalog.noneID { return nil }
-        if !chosen.isEmpty, let t = SummaryTemplateCatalog.template(id: chosen, config: config) { return t }
+        if chosen.lowercased() == SummaryTemplateCatalog.noneID { return (nil, nil) }
+        if !chosen.isEmpty, chosen.lowercased() != SummaryTemplateCatalog.autoID,
+           let t = SummaryTemplateCatalog.template(id: chosen, config: config) { return (t, nil) }
         let folder = sourcePath.map {
             SummaryTemplateCatalog.folder(of: $0, in: Config.resolvePath(config.recordingsDir))
         } ?? ""
-        return SummaryTemplateCatalog.resolve(
+        // An explicit "auto" picks from the content whatever the settings say.
+        return SummaryTemplateCatalog.resolveWithReason(
             config: config, folder: folder,
-            sidecarID: LanguageOverride.load(workDir: workDir, base: sourceBase)?.template)
+            sidecarID: chosen.lowercased() == SummaryTemplateCatalog.autoID
+                ? chosen : LanguageOverride.load(workDir: workDir, base: sourceBase)?.template,
+            participants: participants, transcript: transcript)
     }
 
     /// Regenerate the note for `base` from its cached transcript.
@@ -205,7 +210,10 @@ extension Pipeline {
         // new names, so the owner's label and the participants hint follow them.
         let renamed = SpeakerNames.regenerateContext(
             userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
-        let context = NoteContext(
+        let resolvedTemplate = regenerateTemplate(
+            options: options, config: cfg, workDir: workDir, sourceBase: sourceBase, sourcePath: sourcePath,
+            participants: renamed.participants, transcript: transcript)
+        var context = NoteContext(
             noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
@@ -216,11 +224,11 @@ extension Pipeline {
             // are deliberately not re-applied here (Vikunja #2939).
             glossary: cfg.transcribe.vocabulary,
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
-                regenerateTemplate(options: options, config: cfg, workDir: workDir,
-                                   sourceBase: sourceBase, sourcePath: sourcePath),
+                resolvedTemplate.template,
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
             scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
             calendarAttendees: calendarAttendees)   // #2946
+        if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

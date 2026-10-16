@@ -501,6 +501,9 @@ public struct Config: Codable, Equatable {
         cfg.summarise.promptStyle = .factsFirst
         // Fresh installs follow the meeting's language for the note prose too (#2147).
         cfg.summarise.noteLanguage = "auto"
+        // Fresh installs pick the note template per recording from the participants (#3582), so a
+        // stale global template never decides the shape of an unrelated meeting.
+        cfg.summarise.template = SummaryTemplateCatalog.autoID
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

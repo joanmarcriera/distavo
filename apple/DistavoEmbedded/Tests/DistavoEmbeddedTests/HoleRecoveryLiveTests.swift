@@ -5,7 +5,7 @@ import WhisperKit
 import DistavoCore
 
 /// Live check of the second pass over dropped speech (Vikunja #3579): cut clips out of a real recording,
-/// pretend the first pass returned NOTHING for them, and see what `EmbeddedTranscriber.recoverHoles`
+/// pretend the first pass returned NOTHING for them, and see what `HoleRecovery.recover`
 /// gets back from the real model. Clips that hold speech must come back with words; a clip of silence
 /// must come back empty.
 ///
@@ -52,8 +52,9 @@ final class HoleRecoveryLiveTests: XCTestCase {
             }
 
             let started = Date()
-            let out = await EmbeddedTranscriber.recoverHoles(
-                whisper: whisper, audioPath: url.path, results: [], options: options, report: { _ in })
+            let clipAudio = try AudioProcessor.loadAudioAsFloatArray(fromPath: url.path)
+            let out = await HoleRecovery.recover(
+                whisper: whisper, audio: clipAudio, results: [], options: options, report: { _ in })
             let segs = out.results.flatMap(\.segments)
             let words = segs.map { $0.text.split(whereSeparator: \.isWhitespace).count }.reduce(0, +)
             print(String(format: "METRIC clip=%.0f-%.0f segments=%d words=%d notes=%@ seconds=%.0f",

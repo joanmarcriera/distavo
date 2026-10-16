@@ -96,7 +96,7 @@ of the original Python module (noted in its header).
   lists installed models and compares sizes for the "Bigger model" field. Spec: `docs/notes-window.md`.
 - **Drive of 2026-10-16 (1.19 branch)** — `NoteLanguageCheck.swift` (ca/es note-language check + one retry, #3585), `TemplateAutoPick` in
   `SummaryTemplates.swift` (`auto` template id: pick from participants + transcript start, #3582), `ReplacementPacks.swift` (opt-in `ca_it`
-  pack via `transcribe.replacement_packs`, #3584; per-meeting `SpeakerHints.terms`), `SpeechHoles.swift` (+ `EmbeddedTranscriber.recoverHoles`:
+  pack via `transcribe.replacement_packs`, #3584; per-meeting `SpeakerHints.terms`), `SpeechCoverage.swift` (+ `HoleRecovery` in DistavoEmbedded:
   second decode of audible stretches the first pass dropped, #3579), `SpeakerAlignmentRepair.swift` in DistavoEmbedded (zero-length word timings and
   speaker flips, #3583), `TrailingSilence.swift` (cuts a silent tail after `StereoBalancer`, #2677). `transcribe.num_speakers` 0 = auto (default).
 - **Queue** — `ProcessingQueue.swift` (view over durable markers, ETAs, `QueueScan`, `QueueRetry`), `QueueCoordinator.swift` (`PausePolicy`, retries).

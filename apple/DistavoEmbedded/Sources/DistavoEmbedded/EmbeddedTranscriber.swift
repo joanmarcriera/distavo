@@ -260,13 +260,20 @@ public actor EmbeddedTranscriber {
                         transcribed = try await whisper.transcribe(audioPath: wavURL.path, decodeOptions: options)
                     }
                 }
-                // Audible stretches the first pass dropped are decoded again without the quality
-                // gates that discarded them (Vikunja #3579).
-                let recovery = await Self.recoverHoles(
-                    whisper: whisper, audioPath: wavURL.path, results: transcribed, options: options,
-                    report: { await self.report($0) })
-                transcribed = recovery.results
-                recoveryNotes = recovery.footerNotes
+                // Dropped speech (#3579): the vocabulary prompt can make a VAD chunk decode to
+                // about one word. `HoleRecovery` re-decodes those stretches without the prompt
+                // (plain and gain-normalised). Best effort: any failure keeps the first pass.
+                let progress = await self.progressHandler
+                do {
+                    let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
+                    let outcome = await HoleRecovery.recover(
+                        whisper: whisper, audio: audio, results: transcribed, options: options,
+                        report: { progress?($0) })
+                    transcribed = outcome.results
+                    recoveryNotes = outcome.footerNotes
+                } catch {
+                    await self.report("Could not check for dropped speech (\(type(of: error))) — keeping the transcript as is.")
+                }
                 results = transcribed
                 // `whisper` goes out of scope here: the 1–4 GB model is released
                 // before SpeakerKit loads (spec §6 peak-memory rule).
@@ -307,68 +314,6 @@ public actor EmbeddedTranscriber {
             let groups = try await Self.diarize(wavURL: wavURL, results: results, numSpeakers: config.numSpeakers)
             return finish(EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups))
         }
-    }
-
-    /// Second pass over the holes (`SpeechHoles`) of a first-pass result: each is decoded again with
-    /// no chunker and none of the silence / log-probability gates, its segments are shifted to the
-    /// recording's timeline and merged in order. Segments that loop or are very unlikely are dropped
-    /// (`SpeechHoles.acceptsRecovered`). Never throws: a failed re-decode just leaves the hole, and the
-    /// first-pass transcript is returned untouched.
-    static func recoverHoles(
-        whisper: WhisperKit, audioPath: String, results: [TranscriptionResult], options: DecodingOptions,
-        report: @Sendable (String) async -> Void
-    ) async -> (results: [TranscriptionResult], footerNotes: [String]) {
-        guard let audio = try? AudioProcessor.loadAudioAsFloatArray(fromPath: audioPath) else { return (results, []) }
-        let sr = Double(WhisperKit.sampleRate)
-        let spans = results.flatMap(\.segments).map { (start: Double($0.start), end: Double($0.end)) }
-        let holes = SpeechHoles.find(rms: SpeechHoles.windowRMS(samples: audio, sampleRate: sr), segments: spans)
-        guard !holes.isEmpty else { return (results, []) }
-        await report("Re-reading \(holes.count) stretch\(holes.count == 1 ? "" : "es") of speech the first pass skipped…")
-
-        var second = options
-        second.chunkingStrategy = nil
-        second.noSpeechThreshold = nil
-        second.logProbThreshold = nil
-        second.firstTokenLogProbThreshold = nil
-
-        var recovered: [TranscriptionSegment] = []
-        for hole in holes {
-            let lo = max(0, hole.start - 1), hi = min(Double(audio.count) / sr, hole.end + 1)
-            let slice = Array(audio[Int(lo * sr)..<min(audio.count, Int(hi * sr))])
-            guard let decoded = try? await whisper.transcribe(audioArray: slice, decodeOptions: second) else { continue }
-            for var seg in decoded.flatMap(\.segments) {
-                guard SpeechHoles.acceptsRecovered(text: seg.text, avgLogprob: Double(seg.avgLogprob),
-                                                   compressionRatio: Double(seg.compressionRatio)) else { continue }
-                let shift = Float(lo)
-                seg.start += shift; seg.end += shift
-                seg.words = seg.words?.map { var w = $0; w.start += shift; w.end += shift; return w }
-                // Keep only what lies in the hole itself (the padding overlaps the neighbours).
-                guard Double(seg.end) > hole.start, Double(seg.start) < hole.end else { continue }
-                recovered.append(seg)
-            }
-        }
-        let merged = (results.flatMap(\.segments) + recovered).sorted { $0.start < $1.start }
-        let remaining = SpeechHoles.uncoveredSeconds(
-            of: holes, segments: merged.map { (start: Double($0.start), end: Double($0.end)) })
-        let recoveredSeconds = recovered.reduce(0.0) { $0 + Double($1.end - $1.start) }
-        if recoveredSeconds > 0 { await report("Recovered \(Int(recoveredSeconds.rounded())) s of speech the first pass skipped.") }
-        // Footer sentences (`NoteProvenance` appends them): what was recovered, what stayed unread.
-        var notes: [String] = []
-        if recoveredSeconds >= 1 { notes.append("Recovered \(Int(recoveredSeconds.rounded())) s of speech the first pass missed.") }
-        if remaining >= 1 { notes.append("About \(Int(remaining.rounded())) s of audible audio could not be transcribed.") }
-        guard !recovered.isEmpty else { return (results, notes) }
-
-        var out = results
-        if let first = out.first {
-            // All segments live in the first result; any others are emptied so nothing is counted twice.
-            first.segments = merged
-            first.text = merged.map(\.text).joined()
-            for other in out.dropFirst() { other.segments = []; other.text = "" }
-        } else {
-            out = [TranscriptionResult(text: merged.map(\.text).joined(), segments: merged, language: "",
-                                       timings: TranscriptionTimings())]
-        }
-        return (out, notes)
     }
 
     /// Loads SpeakerKit and runs diarisation — the shared setup for both

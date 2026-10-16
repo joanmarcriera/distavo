@@ -211,8 +211,10 @@ enum HoleRecovery {
         guard !holes.isEmpty else { return outcome }
         outcome.holeCount = holes.count
 
-        let windows = holes.flatMap { windows(for: $0, duration: duration) }
-        let total = windows.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
+        // Named apart from `windows(for:duration:)`: Xcode 26's compiler rejects a local
+        // that shadows the static it calls in its own initialiser (CI archive, 1.19.0).
+        let recoveryWindows: [ClosedRange<Double>] = holes.flatMap { Self.windows(for: $0, duration: duration) }
+        let total = recoveryWindows.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
         report("Recovering \(Int(total.rounded())) s of speech the first pass dropped…")
 
         var decodeOptions = options
@@ -220,7 +222,7 @@ enum HoleRecovery {
         decodeOptions.chunkingStrategy = nil
 
         var recovered: [(window: ClosedRange<Double>, segments: [TranscriptionSegment])] = []
-        for window in windows {
+        for window in recoveryWindows {
             let lo = max(0, Int(window.lowerBound * rate))
             let hi = min(audio.count, Int(window.upperBound * rate))
             guard hi > lo else { continue }
@@ -228,8 +230,8 @@ enum HoleRecovery {
             var candidates: [(segments: [TranscriptionSegment], stats: (words: Int, compressionRatio: Double, avgLogProb: Double))] = []
             for samples in [slice, gainNormalised(slice)] {
                 do {
-                    let decoded = try await whisper.transcribe(audioArray: samples, decodeOptions: decodeOptions)
-                    let segs = decoded.flatMap(\.segments)
+                    let decoded: [TranscriptionResult] = try await whisper.transcribe(audioArray: samples, decodeOptions: decodeOptions)
+                    let segs: [TranscriptionSegment] = decoded.flatMap { $0.segments }
                     let words = segs.reduce(0) { $0 + wordCount($1.text) }
                     let ratio = segs.map { Double($0.compressionRatio) }.max() ?? 0
                     let logProb = segs.isEmpty ? 0 : segs.reduce(0.0) { $0 + Double($1.avgLogprob) } / Double(segs.count)

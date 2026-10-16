@@ -28,11 +28,13 @@ public enum SummaryChecks {
     ///   - transcript: the clean transcript the model was given.
     ///   - context: the note context the prompt was built from.
     public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
+        // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
+        let relabelled = SpeakerLabelNormaliser.normalise(summary, transcript: transcript)
         // Facts-ledger rows the transcript does not support are dropped or flagged (#3581).
         guard context.promptStyle == .factsFirst else {
-            return SummaryCheckOutcome(text: summary, notes: context.summaryNotes)
+            return SummaryCheckOutcome(text: relabelled, notes: context.summaryNotes)
         }
-        let ledger = LedgerVerifier.verify(summary, transcript: transcript)
+        let ledger = LedgerVerifier.verify(relabelled, transcript: transcript)
         return SummaryCheckOutcome(text: ledger.text, notes: context.summaryNotes + LedgerVerifier.notes(for: ledger))
     }
 }

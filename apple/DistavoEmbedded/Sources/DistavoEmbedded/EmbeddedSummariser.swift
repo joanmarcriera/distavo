@@ -89,7 +89,10 @@ public enum EmbeddedSummariser {
         guard #available(macOS 26, *) else { return .unsupportedOS }
         switch SystemLanguageModel.default.availability {
         case .available:
-            return nil
+            // Observed 2026-10-16: the system reports "available" yet a context size of 0 for a
+            // while (the model is not actually ready). Treat it like "still downloading" so the
+            // recording DEFERS instead of failing with contextTooSmall (#1793).
+            return SystemLanguageModel.default.contextSize > 0 ? nil : .modelNotReady
         case .unavailable(let reason):
             switch reason {
             case .deviceNotEligible: return .deviceNotEligible
@@ -153,11 +156,12 @@ public enum EmbeddedSummariser {
         // DistavoCore's `SummaryDriver` (Vikunja #2198 S3); this type is the
         // Foundation Models adapter. Always the classic prompt on-device: the
         // 4096-token window cannot afford facts-first (Vikunja #2063).
-        let request = SummaryRequest(
+        var request = SummaryRequest(
             transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
             participants: participants, noteLanguage: noteLanguage,
             customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees, template: template,
             scratchpad: scratchpad)
+        request.endOfTurnBlock = template == nil ? EndOfTurnBlock.onDevice : EndOfTurnBlock.onDeviceTemplated   // #1793
         do {
             return try await SummaryDriver.run(
                 request, generator: FoundationModelsGenerator(), onProgress: report)

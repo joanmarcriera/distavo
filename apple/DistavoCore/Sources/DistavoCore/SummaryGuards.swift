@@ -466,6 +466,18 @@ public enum EndOfTurnBlock {
         }
     }
 
+    /// The short reminder for Apple's on-device model (#1793). Its 4096-token window cannot
+    /// afford the full block above, so this is one sentence (about 40 tokens): the 3B model
+    /// otherwise often stops before the last section (the follow-up email). English-worded for every language: the
+    /// note-language rule already leads and closes `Prompt.build`.
+    public static let onDevice = "FINAL REMINDER: the notes are not complete until they end with the section "
+        + "'## Suggested follow-up email', a short email written by the note owner. Write every section listed, "
+        + "in order, even if its content is \"none\"."
+
+    /// With a summary template the last section is the template's own.
+    public static let onDeviceTemplated = "FINAL REMINDER: write every section listed, in order, and nothing after "
+        + "the last one."
+
     /// The block for a note built from a summary template (#2940). English-worded
     /// for every language (the stock ca/es blocks name the stock sections, which a
     /// template does not have); the language rule leads it. Mentions only the

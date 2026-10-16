@@ -19,14 +19,18 @@ public enum NoteProvenance {
     ///   - languageUsed: the language the transcriber was actually told (Vikunja
     ///     #2667), e.g. "Catalan (detected, 92% confidence)"; nil omits it.
     ///   - recommendation: advice for a pinned model; nil omits it.
+    ///   - notes: transcriber remarks (the result's `footer_notes`), each a sentence; empty omits them.
     public static func footer(engine: String, detections: [(code: String, probability: Double)],
-                              languageUsed: String? = nil, recommendation: String? = nil) -> String {
+                              languageUsed: String? = nil, recommendation: String? = nil,
+                              notes: [String] = []) -> String {
         var line = "_Transcribed on this Mac with \(engine)."
         if let summary = detectedLanguages(detections) {
             line += " Detected language: \(summary)."
         }
         if let languageUsed { line += " Language used: \(languageUsed)." }
         if let recommendation { line += " \(recommendation)" }
+        // Transcriber remarks (1.19), e.g. "Recovered 52 s of speech the first pass missed."
+        for note in notes where !note.isEmpty { line += " \(note)" }
         line += "_"
         return "\n\n---\n\(line)"
     }

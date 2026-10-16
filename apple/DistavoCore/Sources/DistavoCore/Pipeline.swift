@@ -135,6 +135,9 @@ public struct NoteContext: Equatable, Sendable {
     public var scratchpad: ScratchpadNotes?
     /// Calendar attendees the owner has not confirmed (#2946); empty = prompt byte-identical.
     public var calendarAttendees: [String]
+    /// Sentences for the note's summary footer line (`NoteFooterLines`), e.g. why
+    /// a template was chosen (1.19). Never part of the prompt.
+    public var summaryNotes: [String] = []
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
@@ -498,13 +501,17 @@ public enum Pipeline {
                 }
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
+                // Post-summary checks shared with regenerate (1.19): may rewrite the text and add footer notes.
+                let checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context)
+                cleaned = checked.text
                 // Key moments (#2950) are appended after the model and excluded from validation.
                 // Note order (see `NoteAssembly`): frontmatter, body with Highlights, Key moments,
                 // Tracked terms, provenance footer. `noteBody` is the body INCLUDING Key moments.
-                let footer = provenanceFooter(from: result)
+                let footer = NoteFooterLines.footer(
+                    provenance: provenanceFooter(from: result), summaryNotes: checked.notes)
                 let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
                 (noteBody, noteFooter) = (withMoments, footer)
-                return (withMoments + footer, SummaryValidator.validate(cleaned + footer))
+                return (withMoments + footer, checked.failures + SummaryValidator.validate(cleaned + footer))
             }
 
             var (noteText, failures) = try await summariseAttempt()
@@ -715,7 +722,8 @@ public enum Pipeline {
         return NoteProvenance.footer(
             engine: engine, detections: detections,
             languageUsed: transcribeResult["language_used"] as? String,
-            recommendation: transcribeResult["recommendation"] as? String)
+            recommendation: transcribeResult["recommendation"] as? String,
+            notes: transcribeResult["footer_notes"] as? [String] ?? [])
     }
 
     /// Only "summary is empty" and "summary is truncated" failures (Vikunja

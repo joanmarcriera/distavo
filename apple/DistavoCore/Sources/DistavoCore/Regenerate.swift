@@ -226,7 +226,8 @@ extension Pipeline {
         // transcription, which did not change: carry it over.
         let notePath = state.notePath(base)
         let previousText = try? String(contentsOf: notePath, encoding: .utf8)
-        let footer = previousText.flatMap(provenanceFooter(in:)) ?? ""
+        // Only the provenance part: the summary line describes the old summary (1.19).
+        let provenance = previousText.flatMap(provenanceFooter(in:)).map(NoteFooterLines.provenanceOnly) ?? ""
 
         let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
             segments: TranscriptSegments.load(workDir: workDir, base: base)
@@ -236,7 +237,7 @@ extension Pipeline {
         deps.onPhase?(.summarising)
         do {
             var noteMeta: NoteMeta.Extracted?   // the model's title/tags (#2954)
-            var noteBody = ""
+            var noteBody = "", footer = provenance
             func attempt() async throws -> (text: String, failures: [String]) {
                 let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
@@ -245,10 +246,14 @@ extension Pipeline {
                     cleaned = noteMeta?.body ?? cleaned
                 }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
+                // Same post-summary checks as processOne (1.19).
+                let checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context)
+                cleaned = checked.text
+                footer = NoteFooterLines.footer(provenance: provenance, summaryNotes: checked.notes)
                 // Key moments (#2950): re-appended after the model, outside validation.
                 let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
                 noteBody = withMoments   // body INCLUDING Key moments; see `NoteAssembly` for the order
-                return (withMoments + footer, SummaryValidator.validate(cleaned + footer))
+                return (withMoments + footer, checked.failures + SummaryValidator.validate(cleaned + footer))
             }
             var (noteText, failures) = try await attempt()
             if isRetryableTruncation(failures) { (noteText, failures) = try await attempt() }

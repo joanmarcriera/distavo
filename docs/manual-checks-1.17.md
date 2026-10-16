@@ -385,3 +385,31 @@ title filter, selection retention, the batch export planner and the queue rows (
 13. Settings > Summaries > Bigger model: **Choose…** lists the models on the server, largest first, each marked
     bigger / smaller; picking one fills the field and a coloured line says "Bigger than the server model" (green)
     or "Smaller than…" (orange). With the server off the menu says it did not answer and typing still works.
+
+## 1.19 stop dialog, templates and transcription
+
+Headless tests cover the logic (`SpeakerCountTests`, `TemplateAutoPickTests`, `MeetingVocabularyTests`, `CorrectionLearnerTests`,
+`SpeechCoverageTests`, `HoleRecoveryTests`, `SpeakerAlignmentRepairTests`, `LedgerVerifierTests`); these steps check the
+AppKit/SwiftUI wiring and a real recording. Use invented names only (Anna, Joan, Pere, Laia).
+
+1. Stop a recording with `Other participants` = `Anna (CEO), Joan (IT), Pere`: the speaker count follows the names (you plus
+   three). Set the count by hand to 2: an orange "… people listed but 2 speakers set" warning appears. Clear it: Auto.
+2. Settings > Transcription: the speakers stepper reads "Automatic" at 0. A fresh install starts there; an existing config keeps its number.
+3. Template popup in the stop dialog and in Regenerate: "Auto (from the participants)". With participants "External consultant.
+   Other participants: Anna (CEO), Joan (IT lead)" the note uses the Consultancy sections and the footer names the template and
+   the matched words. Your own Settings > Notes > Note template may still hold an old global template: set it to Auto if wanted.
+4. In-person: tick "In-person meeting (microphone only)" in the stop dialog: no "no system audio" warning after saving, and the
+   speakers sidecar has `"capture": "in_person"`.
+5. With Note owner left as "Me", the participants line reads "The note owner (me)", never "Me (me)".
+6. "Terms for this meeting:" in the stop dialog: Save writes `terms` to the sidecar; the transcript prompt and note glossary list them first.
+7. Settings > Vocabulary: switch the Catalan IT pack on; a new Catalan transcript gets the pack's corrections; switch it off: unchanged.
+   The same pane shows "Last heard:" per term and offers to remove terms not heard for 90 days.
+8. Transcript viewer: edit the same mishearing in two places and save: "Learn from this transcript" offers the corrections;
+   accepting appends them to Replacements. Existing notes are not changed.
+9. Start a recording with the microphone covered and nothing playing: after about 15 s "Nothing is being recorded" appears once.
+10. A Catalan recording on the BSC model with a vocabulary set: the note footer may say "Recovered N s of speech the first pass
+    missed."; open the transcript at those times and check the text is there (#3579).
+11. A Catalan meeting with note language Auto: the note prose is Catalan; if the model answers in English once, the app retries
+    once and the footer says so (#3585).
+12. On-device summaries (macOS 26, Settings > Summaries > Built-in): the note has its last section and speaker labels read
+    SPEAKER_NN; a Mac whose model is still getting ready defers the recording instead of failing it (#1793).

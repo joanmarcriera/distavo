@@ -97,8 +97,8 @@ of the original Python module (noted in its header).
 - **Drive of 2026-10-16 (1.19 branch)** — `NoteLanguageCheck.swift` (ca/es note-language check + one retry, #3585), `TemplateAutoPick` in
   `SummaryTemplates.swift` (`auto` template id: pick from participants + transcript start, #3582), `ReplacementPacks.swift` (opt-in `ca_it`
   pack via `transcribe.replacement_packs`, #3584; per-meeting `SpeakerHints.terms`), `SpeechCoverage.swift` (+ `HoleRecovery` in DistavoEmbedded:
-  second decode of audible stretches the first pass dropped, #3579), `SpeakerAlignmentRepair.swift` in DistavoEmbedded (zero-length word timings and
-  speaker flips, #3583), `TrailingSilence.swift` (cuts a silent tail after `StereoBalancer`, #2677). `transcribe.num_speakers` 0 = auto (default).
+  re-decode without the vocabulary prompt of loud uncovered stretches and of VAD chunks decoded to < 1 word/s; text duplicates dropped, #3579), `SpeakerAlignmentRepair.swift` in DistavoEmbedded (zero-length word timings and
+  speaker flips, #3583) then `TurnRepair.swift` (lowercase continuation of an unfinished sentence goes back to its speaker; Whisper + Parakeet), `TrailingSilence.swift` (cuts a silent tail after `StereoBalancer`, #2677). `transcribe.num_speakers` 0 = auto (default).
 - **Queue** — `ProcessingQueue.swift` (view over durable markers, ETAs, `QueueScan`, `QueueRetry`), `QueueCoordinator.swift` (`PausePolicy`, retries).
 - **Notes output** — `NotesConfig.swift` (`notes` config section), `NoteFrontmatter.swift`, `NoteMeta.swift` (LLM title/tags),
   `TrackedTerms.swift` (`## Tracked terms`), `VaultExport.swift` (second copy in e.g. an Obsidian vault), `NoteAssembly.swift`.

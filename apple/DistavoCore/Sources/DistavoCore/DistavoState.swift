@@ -186,7 +186,17 @@ public enum DistavoState {
 
         public func markProcessing(_ base: String) { write("processing\n", marker(base, "processing")) }
         public func clearProcessing(_ base: String) { remove(marker(base, "processing")) }
-        public func clearFailed(_ base: String) { remove(marker(base, "failed")) }
+        /// Clear the `.failed` marker. A note file still sitting in the notes folder under a failed
+        /// base is a leftover of a failed run (1.12-1.14 wrote the rejected summary there), not a
+        /// result: left in place it made `isDone` true and a retry skipped the recording (Vikunja
+        /// #2673). It is set aside as a `.prev-` backup (never deleted, and every listing skips it)
+        /// so the retry really runs. A base with a `.done` marker keeps its note.
+        public func clearFailed(_ base: String) {
+            if exists(marker(base, "failed")), !exists(marker(base, "done")), exists(notePath(base)) {
+                _ = try? NoteVersions.keepPrevious(note: notePath(base), now: Date())
+            }
+            remove(marker(base, "failed"))
+        }
 
         public func markDone(_ base: String) {
             write("done\n", marker(base, "done"))
@@ -265,6 +275,7 @@ public enum DistavoState {
         /// `.tooshort`) markers so every recording gets retried right away
         /// (the "Process now" path) rather than waiting out its backoff window.
         public func retryFailed() {
+            for item in failedBases() { clearFailed(item.base) }     // sets leftover failed notes aside (#2673)
             removeMarkers(suffix: "failed")
             removeMarkers(suffix: "processing")
             removeMarkers(suffix: "deferred")

@@ -50,6 +50,15 @@ final class SpeakerAlignmentRepairTests: XCTestCase {
         XCTAssertEqual(SpeakerAlignmentRepair.smoothTurns(turns).map(\.speaker), ["A", "B", "A"])
     }
 
+    func testAFourWordFlipInsideAnUnfinishedSentenceJoinsIt() {
+        let turns = [
+            T(speaker: "A", text: "El termini per entregar és", start: 0, end: 3),
+            T(speaker: "B", text: "a finals de mes", start: 3, end: 4),
+            T(speaker: "A", text: "com vam quedar.", start: 4, end: 6),
+        ]
+        XCTAssertEqual(SpeakerAlignmentRepair.smoothTurns(turns).map(\.speaker), ["A", "A", "A"])
+    }
+
     func testUnlabelledSegmentsTakeTheNearestSpeakerWithinASecond() {
         let turns = [
             T(speaker: "A", text: "primer", start: 0, end: 2),

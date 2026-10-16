@@ -11,7 +11,7 @@ import WhisperKit
 ///
 ///  1. `repairWordTimings` runs BEFORE the speaker alignment and spreads each run of zero-length words
 ///     over the time up to the next properly timed word, so a run stays together;
-///  2. `smoothTurns` runs on the mapped segments AFTER it: a turn of at most two words that sits
+///  2. `smoothTurns` runs on the mapped segments AFTER it: a turn of at most two words (four when the turn before stops mid-sentence) that sits
 ///     between two turns of the same other speaker is a flip, not a turn, and joins them; a segment
 ///     with no speaker takes the nearest speaker within a second.
 public enum SpeakerAlignmentRepair {
@@ -80,6 +80,15 @@ public enum SpeakerAlignmentRepair {
     static let nearest = 1.0
     /// A turn of at most this many words between two turns of one speaker is a flip.
     static let flipWords = 2
+    /// ... or this many when the turn before it stops mid-sentence (no . ? ! at its end): a short
+    /// answer cannot interrupt a sentence the same speaker then finishes, so it is the aligner's flip
+    /// (Vikunja #3583: 2 words left 16.4 % mid-sentence changes on the field file, target < 15 %).
+    static let flipWordsMidSentence = 4
+
+    static func endsSentence(_ text: String) -> Bool {
+        guard let c = text.trimmingCharacters(in: .whitespacesAndNewlines).last else { return true }
+        return ".?!…".contains(c)
+    }
 
     public static func smoothTurns(_ turns: [Turn]) -> [Turn] {
         var t = turns
@@ -97,7 +106,8 @@ public enum SpeakerAlignmentRepair {
         var i = 1
         while i + 1 < t.count {
             if let s = t[i].speaker, let a = t[i - 1].speaker, let b = t[i + 1].speaker,
-               a == b, s != a, t[i].wordCount <= flipWords {
+               a == b, s != a,
+               t[i].wordCount <= (endsSentence(t[i - 1].text) ? flipWords : flipWordsMidSentence) {
                 t[i].speaker = a
             }
             i += 1

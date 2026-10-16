@@ -21,8 +21,8 @@ tone).
 ## Version bump — check reality, not the docs
 
 `apple/project.yml` holds `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION`. `docs/release-automation.md`
-still documents "every non-bot push to `main` gets a bot commit that bumps the minor version" —
-but **`.github/workflows/version-bump.yml` is now `on: workflow_dispatch` only.** Dev moved to
+(refreshed 2026-10-16) says the bump is manual because
+**`.github/workflows/version-bump.yml` is `on: workflow_dispatch` only** (as is `ci.yml`: run `swift test` locally before tagging). Dev moved to
 self-hosted Forgejo (`git.riera.co.uk`) for most repos. **But not this one — verified 2026-09-05:
 `git push forgejo main` is refused with "Mirror Repository marc/distavo is read-only". For Distavo,
 GitHub is PRIMARY and Forgejo is the read-only mirror, so push and tag to `origin`.** Treat the workflow file as

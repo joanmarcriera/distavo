@@ -8,16 +8,18 @@ one-time secrets each pipeline needs. The mechanical steps in
 
 | Stage | Channel | Automated? | Trigger |
 | --- | --- | --- | --- |
-| Build + test (all 3 editions) | — | ✅ fully | every push / PR (`ci.yml`) |
-| Bump releasable version | — | ✅ fully | every non-bot push to `main` (`version-bump.yml`) |
+| Build + test (all 3 editions) | — | ⚠ manual dispatch only (push/PR triggers are off to save the Actions allowance; run `swift test` locally) | Actions → CI (`ci.yml`), `workflow_dispatch` |
+| Bump releasable version | — | ❌ manual (`version-bump.yml` is `workflow_dispatch` only) | `python3 scripts/bump-minor-version.py`, commit with `[skip version bump]` |
 | Sign → notarize → DMG → GitHub Release | **Direct** | ✅ fully (once secrets set) | push a `v*` tag, or dispatch `release.yml` with `release_tag` for an existing tag |
 | Build → sign → upload → submit to App Review | **App Store** | ✅ upload fully; submission behind **one Approve click** (`app-store-submission` environment); release is automatic once Apple approves | push a `v*` tag (`release-appstore.yml`) |
 | Retry / staged-test an App Review submission | **App Store** | ✅ on demand (`dry_run` defaults on) | Actions → "Submit to App Review (manual)" (`submit-appstore.yml`) |
 | Submit build | **Setapp** | ❌ first version is Web-UI only; later versions scriptable | manual — see `setapp-submission.md` |
 
-Every merge to `main` gets a follow-up bot commit that bumps
-`MARKETING_VERSION` by one minor version (`1.1.0` → `1.2.0`, patch reset to
-zero) and increments `CURRENT_PROJECT_VERSION` by one build number. Update
+The version is bumped by hand (`scripts/bump-minor-version.py`: `MARKETING_VERSION` up
+one minor version, `1.1.0` → `1.2.0`, patch reset to zero, and `CURRENT_PROJECT_VERSION`
+up one build number; the automatic bot commit on every merge to `main` is switched off).
+GitHub (`joanmarcriera/distavo`) is the primary remote and Forgejo (`marc/distavo`) a
+read-only mirror, so tags are pushed to `origin`. Update
 `apple/metadata/whats-new/en-GB.txt` (the App Store "What's New" text — the
 workflow refuses to run without it), then push **one tag** for the version
 already on `main` (`git tag v1.2.0 && git push origin v1.2.0`) and both release
@@ -123,7 +125,7 @@ For App Store uploads, follow `docs/distribution-checklist.md` §4.4 or the
 `release-appstore.yml` workflow because they explicitly pin and verify the Mac
 App Store provisioning profile.
 
-To preview or apply the same main-merge version bump locally:
+To preview or apply the version bump (this is now the only way, the bot job is off):
 
 ```bash
 python3 scripts/bump-minor-version.py --dry-run

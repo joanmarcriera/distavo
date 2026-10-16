@@ -41,6 +41,28 @@ final class LedgerVerifierTests: XCTestCase {
         XCTAssertTrue(r.text.contains("## Executive summary\nText."), "other sections are untouched")
     }
 
+    /// Real facts-first notes write ledger rows with an asterisk bullet (`* fact | who | "quote" | …`);
+    /// a verifier that only read `-` rows would let every one of them through unchecked.
+    func testAsteriskBulletRowsAreVerifiedLikeDashRows() {
+        let note = ledger([
+            "* Visio | SPEAKER_01 | \"fem servir Visio per als diagrames de xarxa\" | diagram tool",
+            "* Lucidchart | SPEAKER_01 | “l'equip de disseny prefereix Lucidchart” | design team tool",
+            "* IR35 | SPEAKER_01 | \"outside IR35 for the whole contract\" | status",
+            "* 16 September | SPEAKER_00 | \"the sixteenth of September\" | date",
+            "* Bull | SPEAKER_01 | \"el termini és a finals de mes, sense falta\" | vendor",
+        ])
+        let r = LedgerVerifier.verify(note, transcript: transcript)
+        XCTAssertEqual(r.removed, 2)
+        XCTAssertEqual(r.flagged, 1)
+        XCTAssertTrue(r.text.contains("* Visio |"))
+        XCTAssertTrue(r.text.contains("* Lucidchart |"))
+        for gone in ["IR35", "16 September"] { XCTAssertFalse(r.text.contains(gone), gone) }
+        XCTAssertTrue(r.text.contains("* Bull | SPEAKER_01 | \"el termini és a finals de mes, sense falta\" | vendor [unverified]"))
+        // Same rows under a capitalised heading variant.
+        let capitalised = note.replacingOccurrences(of: "## Facts ledger", with: "## Facts Ledger")
+        XCTAssertEqual(LedgerVerifier.verify(capitalised, transcript: transcript).removed, 2)
+    }
+
     func testRealQuoteThatDoesNotContainTheFactIsFlaggedNotRemoved() {
         let note = ledger([
             "- Bull | SPEAKER_01 | \"el termini és a finals de mes, sense falta\" | vendor",

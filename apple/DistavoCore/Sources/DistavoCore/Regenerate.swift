@@ -222,7 +222,7 @@ extension Pipeline {
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
-            glossary: cfg.transcribe.vocabulary,
+            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + cfg.transcribe.vocabulary),   // this meeting's terms first (#3584)
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
                 resolvedTemplate.template,
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),

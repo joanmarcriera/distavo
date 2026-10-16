@@ -392,6 +392,12 @@ public enum Pipeline {
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
+        // This meeting's own terms come first, then the global vocabulary (#3584); the enabled replacement
+        // packs follow the user's own rules.
+        if let terms = hints?.terms, !terms.isEmpty {
+            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(terms + transcribeConfig.vocabulary)
+        }
+        transcribeConfig.replacements = transcribeConfig.effectiveReplacements
         // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
         let participants = hints?.participants?.trimmingCharacters(in: .whitespacesAndNewlines)
         let calendarAttendees = CalendarLookup.promptAttendees(participants: participants, match: calendarMatch, config: config)

@@ -30,6 +30,11 @@ struct VocabularySection: View {
             }
             SettingCaption("One per line, for example Slurm or EMBL-EBI.")
 
+            ForEach(ReplacementPacks.all, id: \.id) { pack in
+                Toggle("\(pack.name) replacements", isOn: packBinding(pack.id))
+                    .withHelp("\(pack.summary) Switched on, these built-in fixes run after your own replacements below (yours win). Off by default.")
+            }
+
             HStack {
                 Text("Replacements").font(.callout)
                 HelpButton(text: "Fixes applied to the transcript before it is summarised, so the transcript and the note both use your spelling. Matches whole words only, ignoring capitals (cat does not touch category), and runs top to bottom. Works with every engine, including Fast (Parakeet). For Chinese, Japanese, Korean and Thai, which have no spaces between words, a replacement matches anywhere in the text, so choose a distinctive phrase.")
@@ -51,6 +56,16 @@ struct VocabularySection: View {
             } label: { Label("Add replacement", systemImage: "plus.circle") }
                 .buttonStyle(.borderless)
         }
+    }
+
+    private func packBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { model.draft.transcribe.replacementPacks.contains(id) },
+            set: { on in
+                var packs = model.draft.transcribe.replacementPacks.filter { $0 != id }
+                if on { packs.append(id) }
+                model.draft.transcribe.replacementPacks = packs
+            })
     }
 
     /// Two-way binding to one field of one rule; tolerant of the row vanishing

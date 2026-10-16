@@ -248,7 +248,7 @@ public enum Prompt {
     /// stays byte-identical. The terms are capped (`Vocabulary.summaryTerms`)
     /// so the on-device 4096-token budget can count them.
     static let glossaryBlock = """
-    Names and terms to spell exactly as written here (speech-to-text may have misspelled them): {glossary}
+    Spelling aid, not meeting content (speech-to-text may have misspelled these names and terms): spell them exactly as written here only where a similar word is in the transcript, and never list one as a fact, speaker or topic unless the transcript mentions it: {glossary}
 
     """
 

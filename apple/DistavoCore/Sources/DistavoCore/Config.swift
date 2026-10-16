@@ -89,9 +89,18 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Ordered, case-insensitive whole-word find/replace map applied to the
     /// cleaned transcript. Absent in older configs -> `[]`.
     public var replacements: [ReplacementRule]
+    /// Ids of the opt-in built-in replacement packs (`ReplacementPacks`, Vikunja #3584), e.g. "ca_it".
+    /// Absent in older configs -> `[]`, so nothing changes until the user switches a pack on.
+    public var replacementPacks: [String]
+
+    /// The user's own rules first (they win), then every enabled pack's rules.
+    public var effectiveReplacements: [ReplacementRule] {
+        replacements + ReplacementPacks.rules(for: replacementPacks)
+    }
 
     enum CodingKeys: String, CodingKey {
         case vocabulary, replacements
+        case replacementPacks = "replacement_packs"
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
@@ -102,7 +111,9 @@ public struct TranscribeConfig: Codable, Equatable {
                 model: String = "medium", embeddedModel: String = EmbeddedModelCatalog.defaultModelID,
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 0,
                 preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
-                vocabulary: [String] = [], replacements: [ReplacementRule] = []) {
+                vocabulary: [String] = [], replacements: [ReplacementRule] = [],
+                replacementPacks: [String] = []) {
+        self.replacementPacks = replacementPacks
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
@@ -128,6 +139,7 @@ public struct TranscribeConfig: Codable, Equatable {
         // config load, which would reset every setting to defaults.
         vocabulary = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .vocabulary))?.elements ?? d.vocabulary
         replacements = (try? c.decodeIfPresent(LossyList<ReplacementRule>.self, forKey: .replacements))?.elements ?? d.replacements
+        replacementPacks = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .replacementPacks))?.elements ?? d.replacementPacks
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.

@@ -445,6 +445,9 @@ final class MeetingCaptureController: ObservableObject {
         others.usesSingleLineMode = false
         others.lineBreakMode = .byWordWrapping
         others.maximumNumberOfLines = 3
+        // Names and jargon for this meeting only (#3584): merged ahead of the global vocabulary.
+        let meetingTerms = NSTextField(string: "")
+        meetingTerms.placeholderString = "e.g. WatchGuard, Entra ID, ERP"
 
         // Language confirm/override (Vikunja #2202). Starts on "Automatic"
         // (empty code, `WhisperLanguageCatalog.autoDetect`) and STAYS there
@@ -538,6 +541,7 @@ final class MeetingCaptureController: ObservableObject {
             row("", countWarning, width: 300),
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
+            row("Terms for this meeting:", meetingTerms, width: 300),
         ]
         if detection != nil {
             rows.append(row("Meeting language:", language, width: 200))
@@ -551,7 +555,7 @@ final class MeetingCaptureController: ObservableObject {
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 190 : 240)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 215 : 265)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,
@@ -620,7 +624,8 @@ final class MeetingCaptureController: ObservableObject {
         if !rest.isEmpty { parts.append("Other participants: \(rest)") }
         let hints = SpeakerHints(
             count: Int(count.stringValue.trimmingCharacters(in: .whitespaces)),
-            participants: parts.isEmpty ? nil : parts.joined(separator: ". "))
+            participants: parts.isEmpty ? nil : parts.joined(separator: ". "),
+            terms: Vocabulary.normalisedTerms([meetingTerms.stringValue]))
         guard !hints.isEmpty else { return }
 
         do {

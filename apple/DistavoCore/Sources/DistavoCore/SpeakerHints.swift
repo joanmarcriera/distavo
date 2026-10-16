@@ -12,15 +12,21 @@ public struct SpeakerHints: Codable, Equatable {
     public var count: Int?
     /// Free text, e.g. "Edward (Cambridge University) — interviewer; Marc (me) — interviewee".
     public var participants: String?
+    /// Names and jargon for THIS meeting (Vikunja #3584), comma/newline separated terms as typed in
+    /// the recorder question. They go to the transcriber and the summary prompt ahead of the global
+    /// vocabulary, for this recording only.
+    public var terms: [String]?
 
-    public init(count: Int? = nil, participants: String? = nil) {
+    public init(count: Int? = nil, participants: String? = nil, terms: [String]? = nil) {
         self.count = count
         self.participants = participants
+        self.terms = terms
     }
 
     /// True when there is nothing worth passing on.
     public var isEmpty: Bool {
         (count ?? 0) <= 0 && (participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
+            && Vocabulary.normalisedTerms(terms ?? []).isEmpty
     }
 
     public static func url(workDir: URL, base: String) -> URL {

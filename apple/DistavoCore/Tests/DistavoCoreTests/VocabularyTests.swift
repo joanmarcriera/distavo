@@ -297,7 +297,7 @@ final class VocabularyTests: XCTestCase {
             XCTAssertEqual(p([], nil), base)
             XCTAssertEqual(p(["", " "], "  "), base)
             let both = p(["Slurm"], "Actions first")
-            let glossary = both.range(of: "spell exactly as written here")!
+            let glossary = both.range(of: "spell them exactly as written here only where")!
             let transcript = both.range(of: "TRANSCRIPT")!
             let instruction = both.range(of: "Actions first")!
             // Glossary rides in the header, the instruction after the transcript.
@@ -323,7 +323,7 @@ final class VocabularyTests: XCTestCase {
             let baseline = build(style: style)
             XCTAssertEqual(build(style: style, glossary: []), baseline)
             XCTAssertEqual(build(style: style, glossary: ["", "  ,"]), baseline)
-            XCTAssertFalse(baseline.contains("spell exactly"))
+            XCTAssertFalse(baseline.contains("Spelling aid, not meeting content"))
         }
         // And the baseline really is the untouched template.
         let expectedClassic = Prompt.template
@@ -337,7 +337,7 @@ final class VocabularyTests: XCTestCase {
         for style in [Prompt.Style.classic, .factsFirst] {
             let withTerms = build(style: style, glossary: ["Slurm", "EMBL-EBI"])
             let base = build(style: style)
-            let line = "Names and terms to spell exactly as written here (speech-to-text may have misspelled them): Slurm, EMBL-EBI\n"
+            let line = "Spelling aid, not meeting content (speech-to-text may have misspelled these names and terms): spell them exactly as written here only where a similar word is in the transcript, and never list one as a fact, speaker or topic unless the transcript mentions it: Slurm, EMBL-EBI\n"
             XCTAssertTrue(withTerms.contains(line))
             XCTAssertEqual(withTerms.replacingOccurrences(of: line, with: ""), base)
         }
@@ -465,7 +465,7 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(seen.vocabulary, ["Slurm"])
         XCTAssertTrue(seen.transcript.contains("Slurm cluster"))
         XCTAssertFalse(seen.transcript.contains("Slum"))
-        XCTAssertTrue(seen.prompt.contains("spell exactly as written here"))
+        XCTAssertTrue(seen.prompt.contains("spell them exactly as written here only where"))
         XCTAssertTrue(seen.prompt.contains(": Slurm\n"))
         let saved = try String(contentsOf: URL(fileURLWithPath: cfg.workDir)
             .appendingPathComponent("demo.transcript.clean.txt"), encoding: .utf8)

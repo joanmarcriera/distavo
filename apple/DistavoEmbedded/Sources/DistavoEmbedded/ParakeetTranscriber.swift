@@ -77,7 +77,8 @@ public actor ParakeetTranscriber {
             }
             await coordinator.report("Identifying speakers…")
             let turns = try await EmbeddedTranscriber.speakerTurns(wavURL: wavURL, numSpeakers: config.numSpeakers)
-            return WordSpeakerAligner.whisperXDictionary(words: words, turns: turns)
+            // Same turn repair as the Whisper path (#3583).
+            return TurnRepair.smoothTurns(result: WordSpeakerAligner.whisperXDictionary(words: words, turns: turns))
         }
     }
 }

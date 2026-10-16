@@ -312,7 +312,9 @@ public actor EmbeddedTranscriber {
             // Zero-length word timings would put one sentence on both sides of a speaker turn (#3583).
             SpeakerAlignmentRepair.repair(results)
             let groups = try await Self.diarize(wavURL: wavURL, results: results, numSpeakers: config.numSpeakers)
-            return finish(EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups))
+            // Mid-sentence speaker flips that survive the alignment repair: a lowercase continuation of an
+            // unfinished sentence goes back to its speaker (#3583, `TurnRepair`).
+            return finish(TurnRepair.smoothTurns(result: EmbeddedResultMapper.whisperXDictionary(speakerGroups: groups)))
         }
     }
 

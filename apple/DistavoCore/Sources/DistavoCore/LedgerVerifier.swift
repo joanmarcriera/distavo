@@ -264,6 +264,20 @@ enum NumberWords {
     private static let millions: Set<String> = ["million", "milio", "milions", "millon", "millones"]
     /// Ordinary words that are also number words: a lone one of these is left as a word.
     private static let ambiguous: Set<String> = ["un", "una", "uno", "one", "set", "deu", "nou", "cent", "once", "sis", "dos", "tres", "vint", "cien", "mil"]
+    static let maxRun = 12
+    /// Values above this are not spoken numbers; the run flushes instead of growing.
+    private static let ceiling = 1_000_000_000_000
+
+    /// `a * b + c`, or nil when it would pass `ceiling` (never traps).
+    private static func scaled(_ a: Int, by b: Int) -> Int? {
+        let (v, overflow) = a.multipliedReportingOverflow(by: b)
+        return overflow || v > ceiling ? nil : v
+    }
+    private static func sum(_ a: Int, _ b: Int) -> Int? {
+        let (v, overflow) = a.addingReportingOverflow(b)
+        return overflow || v > ceiling ? nil : v
+    }
+
     private static let bridges: Set<String> = ["i", "y", "and"]
 
     private static func isNumberWord(_ w: String) -> Bool {
@@ -279,7 +293,9 @@ enum NumberWords {
             guard isNumberWord(words[i]) else { out.append(words[i]); i += 1; continue }
             var run = [words[i]]
             var j = i + 1
-            while j < words.count {
+            // A run is at most `maxRun` words (a longer one continues as the next run), so the
+            // arithmetic below stays far from overflow whatever the transcript holds.
+            while j < words.count, run.count < maxRun {
                 if isNumberWord(words[j]) { run.append(words[j]); j += 1 }
                 // "treinta y dos", "trenta i dos": the bridge word belongs to the number.
                 else if bridges.contains(words[j]), j + 1 < words.count, tens[run.last!] != nil,
@@ -299,7 +315,7 @@ enum NumberWords {
         var results: [Int] = []
         var total = 0, current = 0
         var last = 0                       // 0 none, 1 unit, 2 tens, 3 hundreds, 4 thousand+
-        func flush() { if last != 0 { results.append(total + current) }; total = 0; current = 0; last = 0 }
+        func flush() { if last != 0 { results.append(sum(total, current) ?? ceiling) }; total = 0; current = 0; last = 0 }
         for w in run {
             if let u = units[w] {
                 if last == 1 { flush() }
@@ -311,12 +327,17 @@ enum NumberWords {
                 if last == 1 || last == 2 || last == 3 { flush() }
                 current += h; last = 3
             } else if hundredMultipliers.contains(w) {
-                if last == 1 { current *= 100 } else { if last != 0 { flush() }; current = 100 }
+                if last == 1, let v = scaled(current, by: 100) { current = v }
+                else { if last != 0 { flush() }; current = 100 }
                 last = 3
             } else if thousands.contains(w) {
-                total += (current == 0 ? 1 : current) * 1000; current = 0; last = 4
+                if let v = scaled(current == 0 ? 1 : current, by: 1000), let t = sum(total, v) { total = t }
+                else { flush() }
+                current = 0; last = 4
             } else if millions.contains(w) {
-                total += (current == 0 ? 1 : current) * 1_000_000; current = 0; last = 4
+                if let v = scaled(current == 0 ? 1 : current, by: 1_000_000), let t = sum(total, v) { total = t }
+                else { flush() }
+                current = 0; last = 4
             }
         }
         flush()

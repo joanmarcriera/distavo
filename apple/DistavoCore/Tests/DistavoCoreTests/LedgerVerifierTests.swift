@@ -80,6 +80,21 @@ final class LedgerVerifierTests: XCTestCase {
         XCTAssertEqual(LedgerVerifier.tokens("2003"), ["2003"])
     }
 
+    /// Security review: long runs of multipliers used to overflow Int and trap.
+    func testPathologicalNumberWordRunsDoNotCrash() {
+        let millions = Array(repeating: "million", count: 30)
+        let hundreds = Array(repeating: "hundred", count: 30)
+        let mixed = (0..<30).flatMap { _ in ["nine", "hundred", "million", "mil", "thousand"] }
+        for words in [millions, hundreds, mixed, millions + hundreds + millions] {
+            let out = NumberWords.collapse(words)
+            XCTAssertFalse(out.isEmpty)
+            XCTAssertLessThanOrEqual(out.count, words.count)
+            for token in out { XCTAssertNotNil(Int(token), token); XCTAssertLessThanOrEqual(Int(token)!, 1_000_000_000_000) }
+        }
+        let note = ledger(["- X | S | \"" + millions.joined(separator: " ") + "\" | y"])
+        _ = LedgerVerifier.verify(note, transcript: millions.joined(separator: " ") + " " + transcript)
+    }
+
     func testSmallSpellingVariantInTheQuoteCountsAsSupport() {
         // ASR wrote "Lucidchart" as "Lucidchat": the fact is still found in its own quote.
         let t = transcript.replacingOccurrences(of: "Lucidchart", with: "Lucidchat")

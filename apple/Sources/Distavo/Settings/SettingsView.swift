@@ -61,7 +61,7 @@ struct SettingsView: View {
         } detail: {
             detailForm
         }
-        .frame(minWidth: 700, idealWidth: 780, minHeight: 460, idealHeight: 600)
+        .frame(minWidth: 700, idealWidth: 960, minHeight: 460, idealHeight: 720)
         .sheet(isPresented: $model.showingPermissions) { PermissionsView(config: model.draft) }
         .onAppear { model.windowAppeared() }
         .onDisappear { model.saveIfNeededOnClose() }

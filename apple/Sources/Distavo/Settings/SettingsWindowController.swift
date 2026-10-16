@@ -25,7 +25,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
             window.isReleasedWhenClosed = false
             window.delegate = self
-            window.setContentSize(NSSize(width: 780, height: 600))
+            // First-launch size: roomy enough for the sidebar plus a long pane on a small laptop screen
+            // (Vikunja #2683), never larger than 90 % of the screen; afterwards the autosaved frame wins.
+            let screen = NSScreen.main?.visibleFrame.size ?? NSSize(width: 1280, height: 800)
+            window.setContentSize(NSSize(width: min(960, screen.width * 0.9), height: min(720, screen.height * 0.9)))
             window.center()
             window.setFrameAutosaveName("DistavoSettingsWindow")
             self.window = window

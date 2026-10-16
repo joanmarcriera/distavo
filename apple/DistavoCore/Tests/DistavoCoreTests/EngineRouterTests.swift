@@ -247,17 +247,17 @@ final class EngineRouterTests: XCTestCase {
     func testLogLines() {
         let turbo = EngineRouter.choose(detections: [d("ca", 0.92)], config: pin("large-v3-turbo"), memoryBytes: gb16)
         XCTAssertEqual(turbo.logLine,
-            "Using large-v3-turbo (pinned) \u{2014} language ca (detected, 92% confidence)")
+            "Using \(turbo.model.displayName) (pinned) \u{2014} language Catalan (detected, 92% confidence)")
         let bsc = EngineRouter.choose(detections: [d("ca", 0.92)], config: auto(), memoryBytes: gb16)
         XCTAssertEqual(bsc.logLine,
-            "Using bsc-los (automatic) \u{2014} language ca (detected, 92% confidence)")
+            "Using \(bsc.model.displayName) (automatic) \u{2014} language Catalan (detected, 92% confidence)")
         let de = EngineRouter.choose(detections: [], config: TranscribeConfig(
             backend: "embedded", embeddedModel: "auto", language: "de"), memoryBytes: gb16)
         XCTAssertEqual(de.logLine,
-            "Using parakeet-tdt-v3 (automatic) \u{2014} language de (set in Settings)")
+            "Using \(de.model.displayName) (automatic) \u{2014} language German (set in Settings)")
         let none = EngineRouter.choose(detections: [], config: pin("large-v3-turbo"), memoryBytes: gb16)
         XCTAssertEqual(none.logLine,
-            "Using large-v3-turbo (pinned) \u{2014} language not detected; the model detects it itself")
+            "Using \(none.model.displayName) (pinned) \u{2014} language not detected; the model detects it itself")
     }
 
     /// A single-language fine-tune must not be forced into a language it was not

@@ -24,10 +24,15 @@ public enum NoteProvenance {
                               languageUsed: String? = nil, recommendation: String? = nil,
                               notes: [String] = []) -> String {
         var line = "_Transcribed on this Mac with \(engine)."
+        // When the language used IS the detected one ("Catalan (detected, 92% confidence)"), saying both
+        // repeats itself (#2675): one sentence, "Detected language: Catalan 92% (used)."
+        let usedIsDetected = languageUsed?.contains("(detected") == true
         if let summary = detectedLanguages(detections) {
-            line += " Detected language: \(summary)."
+            line += " Detected language: \(summary)\(usedIsDetected ? " (used for transcription)" : "")."
         }
-        if let languageUsed { line += " Language used: \(languageUsed)." }
+        if let languageUsed, !(usedIsDetected && detectedLanguages(detections) != nil) {
+            line += " Language used: \(languageUsed)."
+        }
         if let recommendation { line += " \(recommendation)" }
         // Transcriber remarks (1.19), e.g. "Recovered 52 s of speech the first pass missed."
         for note in notes where !note.isEmpty { line += " \(note)" }

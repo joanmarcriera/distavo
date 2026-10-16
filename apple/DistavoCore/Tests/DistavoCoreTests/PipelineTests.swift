@@ -612,7 +612,7 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(result.status, .done)
         let note = try String(contentsOf: XCTUnwrap(result.notePath), encoding: .utf8)
         XCTAssertTrue(note.hasSuffix(
-            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92%. Language used: Catalan (detected, 92% confidence). Catalan detected \u{2014} the BSC model is recommended._"))
+            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92% (used for transcription). Catalan detected \u{2014} the BSC model is recommended._"))
     }
 
     /// A transcribe result without "engine" (the WhisperX server path, and

@@ -86,7 +86,7 @@ final class NoteProvenanceTests: XCTestCase {
             languageUsed: "Catalan (detected, 92% confidence)",
             recommendation: "Catalan detected \u{2014} the BSC model is recommended.")
         XCTAssertEqual(footer,
-            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92%. Language used: Catalan (detected, 92% confidence). Catalan detected \u{2014} the BSC model is recommended._")
+            "\n\n---\n_Transcribed on this Mac with Best (Whisper large-v3 turbo). Detected language: Catalan 92% (used for transcription). Catalan detected \u{2014} the BSC model is recommended._")
     }
 
     func testLanguageUsedDescriptions() {

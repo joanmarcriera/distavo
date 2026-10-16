@@ -39,15 +39,17 @@ public struct RoutingDecision: Equatable, Sendable {
     /// One activity-log line. Keeps the "Using " prefix — WatcherController's
     /// icon logic looks for it.
     public var logLine: String {
+        // Same wording as the note footer (display name, language name; #2675).
+        let name = languageHint.map { WhisperLanguageCatalog.language(forCode: $0)?.englishName ?? $0 } ?? "?"
         let language: String
         switch languageSource {
-        case .fixed: language = "\(languageHint ?? "?") (set in Settings)"
+        case .fixed: language = "\(name) (set in Settings)"
         case .detected:
             let pct = confidence.map { ", \(Int(($0 * 100).rounded()))% confidence" } ?? ""
-            language = "\(languageHint ?? "?") (detected\(pct))"
+            language = "\(name) (detected\(pct))"
         case .modelDetects: language = "not detected; the model detects it itself"
         }
-        return "Using \(model.id) (\(pinned ? "pinned" : "automatic")) \u{2014} language \(language)"
+        return "Using \(model.displayName) (\(pinned ? "pinned" : "automatic")) \u{2014} language \(language)"
     }
 }
 

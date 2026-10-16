@@ -1,8 +1,8 @@
 name: Bump version after main merge
 
-# Development moved to self-hosted Forgejo (git.riera.co.uk); GitHub is a push
-# mirror only, so this must not fire on mirrored pushes (it would also commit
-# to GitHub main and diverge from the mirror source). Bump manually instead:
+# GitHub is the PRIMARY remote and Forgejo (marc/distavo) a read-only mirror of it, so
+# a bot commit to main would reach the mirror on its next sync; the automatic trigger is
+# off to avoid that and to save the Actions allowance. Bump manually instead:
 # python3 scripts/bump-minor-version.py, commit with "[skip version bump]".
 on:
   workflow_dispatch:

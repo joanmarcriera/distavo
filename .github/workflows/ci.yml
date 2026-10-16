@@ -1,8 +1,9 @@
 name: CI
 
-# Development moved to self-hosted Forgejo (git.riera.co.uk); GitHub is a push
-# mirror only. Manual dispatch kept as an escape hatch — do not re-enable
-# push/PR triggers, they burn the Actions allowance on every mirror sync.
+# GitHub (joanmarcriera/distavo) is the PRIMARY remote; Forgejo (marc/distavo) is a
+# read-only mirror of it (pushes to Forgejo are refused). Manual dispatch only: push/PR
+# triggers were switched off to save the Actions allowance, so run the tests locally
+# (`cd apple/DistavoCore && swift test`) and dispatch this workflow by hand when needed.
 on:
   workflow_dispatch:
 

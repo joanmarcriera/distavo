@@ -16,17 +16,22 @@ public struct SpeakerHints: Codable, Equatable {
     /// the recorder question. They go to the transcriber and the summary prompt ahead of the global
     /// vocabulary, for this recording only.
     public var terms: [String]?
+    /// How the meeting was captured: `SpeakerHints.inPersonCapture` for an in-person meeting recorded on
+    /// the microphone alone (Vikunja #3586), nil for a normal call recording.
+    public var capture: String?
+    public static let inPersonCapture = "in_person"
 
-    public init(count: Int? = nil, participants: String? = nil, terms: [String]? = nil) {
+    public init(count: Int? = nil, participants: String? = nil, terms: [String]? = nil, capture: String? = nil) {
         self.count = count
         self.participants = participants
         self.terms = terms
+        self.capture = capture
     }
 
     /// True when there is nothing worth passing on.
     public var isEmpty: Bool {
         (count ?? 0) <= 0 && (participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty
-            && Vocabulary.normalisedTerms(terms ?? []).isEmpty
+            && Vocabulary.normalisedTerms(terms ?? []).isEmpty && (capture ?? "").isEmpty
     }
 
     public static func url(workDir: URL, base: String) -> URL {

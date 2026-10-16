@@ -302,7 +302,9 @@ final class MeetingCaptureController: ObservableObject {
         }
         if heldForCalendar && !ask { recorder.finalizeDeferred(as: savedURL) }
         log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")
-        if !outcome.systemAudioHeard {
+        // The "no system audio" notice is a problem for a call but not for an in-person meeting
+        // (microphone only, #3586): when the speakers question is coming, it waits for that answer.
+        func noSystemAudioNotice() {
             notify("Recording saved — but no system audio was captured",
                    "If you denied the System Audio Recording permission, enable it under "
                    + "System Settings → Privacy & Security → Screen & System Audio Recording "
@@ -311,6 +313,11 @@ final class MeetingCaptureController: ObservableObject {
             // A silence stop is expected to end a quiet recording; do not
             // yank the user into System Settings for it.
             if silenceMinutes == nil { openPrivacyPane() }
+        }
+        if !outcome.systemAudioHeard && ask {
+            // decided after the question below
+        } else if !outcome.systemAudioHeard {
+            noSystemAudioNotice()
         } else if !outcome.microphoneHeard {
             notify("Recording saved — but the microphone was silent",
                    "Check the Microphone permission in System Settings → Privacy & Security, "
@@ -335,9 +342,17 @@ final class MeetingCaptureController: ObservableObject {
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
             let detection = startLanguageDetection(partURL: savedURL.appendingPathExtension("part"))
-            askSpeakers(for: savedURL, config: config, detection: detection,
+            let inPerson = askSpeakers(for: savedURL, config: config, detection: detection,
                         prefillOthers: config.calendar.attendeesAsParticipants
                             ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "")
+            if !outcome.systemAudioHeard {
+                if inPerson {
+                    notify("Meeting recording saved", "\(savedURL.lastPathComponent) — in person, microphone only. Distavo will transcribe it shortly.")
+                    log("In-person recording (microphone only): \(savedURL.lastPathComponent)")
+                } else {
+                    noSystemAudioNotice()
+                }
+            }
             if calendarMatch != nil {
                 CalendarRecordingStep.pruneAttendees(recording: savedURL, recordingsDir: folderProvider(), config: config)
             }
@@ -428,8 +443,9 @@ final class MeetingCaptureController: ObservableObject {
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
+    @discardableResult
     private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
-                             prefillOthers: String = "") {
+                             prefillOthers: String = "") -> Bool {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -445,6 +461,9 @@ final class MeetingCaptureController: ObservableObject {
         others.usesSingleLineMode = false
         others.lineBreakMode = .byWordWrapping
         others.maximumNumberOfLines = 3
+        // In-person meeting, microphone only (#3586): no system-audio warnings, and a hint that speaker
+        // separation needs the number of people.
+        let inPersonBox = NSButton(checkboxWithTitle: "In-person meeting (microphone only)", target: nil, action: nil)
         // Names and jargon for this meeting only (#3584): merged ahead of the global vocabulary.
         let meetingTerms = NSTextField(string: "")
         meetingTerms.placeholderString = "e.g. WatchGuard, Entra ID, ERP"
@@ -542,6 +561,7 @@ final class MeetingCaptureController: ObservableObject {
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
             row("Terms for this meeting:", meetingTerms, width: 300),
+            row("", inPersonBox, width: 300),
         ]
         if detection != nil {
             rows.append(row("Meeting language:", language, width: 200))
@@ -555,7 +575,7 @@ final class MeetingCaptureController: ObservableObject {
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 215 : 265)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 240 : 290)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,
@@ -589,7 +609,8 @@ final class MeetingCaptureController: ObservableObject {
         alert.window.initialFirstResponder = myRole
         // NSControl.target is weak: keep both popup targets alive for the modal run.
         let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget)) { alert.runModal() }
-        guard response == .alertFirstButtonReturn else { return }
+        let inPerson = inPersonBox.state == .on
+        guard response == .alertFirstButtonReturn else { return false }
 
         let recordingsDir = folderProvider()
         let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
@@ -619,14 +640,18 @@ final class MeetingCaptureController: ObservableObject {
 
         var parts: [String] = []
         let role = myRole.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !role.isEmpty { parts.append("\(owner.isEmpty ? "The note owner" : owner) (\(ownerLabel)): \(role)") }
+        // "Me (me)" read oddly (#3586): the default owner name "Me" is written as "The note owner (me)".
+        let ownerName = owner.isEmpty || owner == "Me" ? "The note owner" : owner
+        if !role.isEmpty { parts.append("\(ownerName) (\(ownerLabel)): \(role)") }
+        if inPerson { parts.append("In-person meeting recorded with one microphone") }
         let rest = others.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !rest.isEmpty { parts.append("Other participants: \(rest)") }
         let hints = SpeakerHints(
             count: Int(count.stringValue.trimmingCharacters(in: .whitespaces)),
             participants: parts.isEmpty ? nil : parts.joined(separator: ". "),
-            terms: Vocabulary.normalisedTerms([meetingTerms.stringValue]))
-        guard !hints.isEmpty else { return }
+            terms: Vocabulary.normalisedTerms([meetingTerms.stringValue]),
+            capture: inPerson ? SpeakerHints.inPersonCapture : nil)
+        guard !hints.isEmpty else { return inPerson }
 
         do {
             try hints.save(workDir: workDir, base: base)
@@ -635,6 +660,7 @@ final class MeetingCaptureController: ObservableObject {
         } catch {
             log("Could not save the speakers for \(url.lastPathComponent): \(error.localizedDescription)")
         }
+        return inPerson
     }
 
     /// One-time, plain-language explanation before any system prompt appears.

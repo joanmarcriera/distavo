@@ -35,25 +35,38 @@ public enum NoteProvenance {
         return "\n\n---\n\(line)"
     }
 
-    /// "Catalan 92%, English 71%" — one entry per language at its highest
-    /// probability, ordered by probability (ties by code); nil when there are
-    /// no detections. Shared by the note footer and the menu's activity line
+    /// "Catalan 92%, English 71%" - one entry per language, ordered by its highest probability (ties by
+    /// code); nil when there are no detections. Shared by the note footer and the menu's activity line
     /// (Vikunja #2161) so both read the same.
+    ///
+    /// The detector samples up to three 30 s windows, each giving its own top language, so the numbers are
+    /// confidences of separate samples, NOT shares of the meeting (Vikunja #3586). When a language was seen
+    /// in several windows or only with low confidence (< 50 %) the line says so:
+    /// "3 samples: Catalan x2 (87%, 97%), English 23% (low confidence)". With one reading per language, all
+    /// confident, it stays "Catalan 92%, English 71%".
     public static func detectedLanguages(_ detections: [(code: String, probability: Double)]) -> String? {
         guard !detections.isEmpty else { return nil }
-        var best: [String: Double] = [:]
-        for detection in detections {
-            best[detection.code] = max(best[detection.code] ?? -.infinity, detection.probability)
+        var all: [String: [Double]] = [:]
+        for detection in detections { all[detection.code, default: []].append(detection.probability) }
+        let ordered = all.sorted { a, b in
+            let (ma, mb) = (a.value.max() ?? 0, b.value.max() ?? 0)
+            return ma == mb ? a.key < b.key : ma > mb
         }
-        let deduped = best.sorted { a, b in
-            a.value == b.value ? a.key < b.key : a.value > b.value
-        }
-        return deduped.map { code, probability -> String in
+        let needsDetail = ordered.contains { $0.value.count > 1 || ($0.value.max() ?? 0) < lowConfidence }
+        let entries = ordered.map { code, probabilities -> String in
             let name = WhisperLanguageCatalog.language(forCode: code)?.englishName ?? code
-            let percent = Int((probability * 100).rounded())
-            return "\(name) \(percent)%"
+            let percents = probabilities.sorted().map { "\(Int(($0 * 100).rounded()))%" }
+            let low = (probabilities.max() ?? 0) < lowConfidence
+            if probabilities.count > 1 {
+                return "\(name) \u{00D7}\(probabilities.count) (\(percents.joined(separator: ", "))\(low ? ", low confidence" : ""))"
+            }
+            return "\(name) \(percents[0])" + (low ? " (low confidence)" : "")
         }.joined(separator: ", ")
+        return needsDetail ? "\(detections.count) sample\(detections.count == 1 ? "" : "s"): " + entries : entries
     }
+
+    /// Below this a window's top language is only a weak guess.
+    static let lowConfidence = 0.5
 
     /// Human wording for the language the router handed the transcriber.
     public static func languageUsed(_ d: RoutingDecision) -> String {

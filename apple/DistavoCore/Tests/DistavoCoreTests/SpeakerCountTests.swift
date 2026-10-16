@@ -48,3 +48,15 @@ final class SpeakerCountTests: XCTestCase {
         _ = try await WhisperXClient(session: session).transcribe(wavURL: wav, config: TranscribeConfig())
     }
 }
+
+/// Vikunja #3586: in-person (microphone only) capture is remembered in the speakers sidecar.
+final class InPersonCaptureTests: XCTestCase {
+    func testCaptureKeepsTheHintAliveAndRoundTrips() throws {
+        let hints = SpeakerHints(capture: SpeakerHints.inPersonCapture)
+        XCTAssertFalse(hints.isEmpty, "the capture mode alone is worth saving")
+        let back = try JSONDecoder().decode(SpeakerHints.self, from: JSONEncoder().encode(hints))
+        XCTAssertEqual(back.capture, "in_person")
+        XCTAssertNil(try JSONDecoder().decode(SpeakerHints.self, from: Data(#"{"count": 3}"#.utf8)).capture)
+        XCTAssertTrue(SpeakerHints().isEmpty)
+    }
+}

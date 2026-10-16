@@ -53,7 +53,7 @@ final class NoteProvenanceTests: XCTestCase {
             detections: [(code: "en", probability: 0.91), (code: "en", probability: 0.89), (code: "en", probability: 0.93)])
         XCTAssertEqual(
             footer,
-            "\n\n---\n_Transcribed on this Mac with Fast (Parakeet, 25 languages). Detected language: English 93%._")
+            "\n\n---\n_Transcribed on this Mac with Fast (Parakeet, 25 languages). Detected language: 3 samples: English ×3 (89%, 91%, 93%)._")
     }
 
     /// Mixed windows: dedupe per code (keeping the max), then order by that
@@ -64,7 +64,20 @@ final class NoteProvenanceTests: XCTestCase {
             detections: [(code: "ca", probability: 0.85), (code: "en", probability: 0.7), (code: "ca", probability: 0.95)])
         XCTAssertEqual(
             footer,
-            "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: Catalan 95%, English 70%._")
+            "\n\n---\n_Transcribed on this Mac with Languages of Spain (BSC). Detected language: 3 samples: Catalan ×2 (85%, 95%), English 70%._")
+    }
+
+    /// Vikunja #3586: "Catalan 97%, English 23%" read like shares of the meeting. The numbers are
+    /// confidences of separate 30 s samples; the footer now says so and marks a weak reading.
+    func testFieldTestFooterSaysSamplesAndMarksLowConfidence() {
+        let text = NoteProvenance.detectedLanguages(
+            [(code: "ca", probability: 0.87), (code: "en", probability: 0.23), (code: "ca", probability: 0.97)])
+        XCTAssertEqual(text, "3 samples: Catalan ×2 (87%, 97%), English 23% (low confidence)")
+        // One confident reading per language keeps the compact form.
+        XCTAssertEqual(NoteProvenance.detectedLanguages([(code: "ca", probability: 0.92), (code: "en", probability: 0.71)]),
+                       "Catalan 92%, English 71%")
+        // A single weak reading is still marked.
+        XCTAssertEqual(NoteProvenance.detectedLanguages([(code: "ca", probability: 0.4)]), "1 sample: Catalan 40% (low confidence)")
     }
 
     func testLanguageUsedAndRecommendation() {

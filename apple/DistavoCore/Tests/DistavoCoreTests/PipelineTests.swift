@@ -386,7 +386,7 @@ final class PipelineTests: XCTestCase {
             }),
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
-        XCTAssertEqual(result.detectedLanguages, "Catalan 92%, English 71%")
+        XCTAssertEqual(result.detectedLanguages, "3 samples: Catalan ×2 (85%, 92%), English 71%")
         // The single highest-probability code, for `retryTranscribeBigger` to
         // resolve `EmbeddedModelCatalog.nextBigger(for:language:)` with
         // (Vikunja #2205) — independent of `summarise.note_language`.

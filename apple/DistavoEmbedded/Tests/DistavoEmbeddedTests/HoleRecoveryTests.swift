@@ -81,6 +81,46 @@ final class HoleRecoveryTests: XCTestCase {
         XCTAssertEqual(merged[0].text, "Aquesta frase ja hi era sencera.")
     }
 
+    /// The field-recording shape: a prompted 22 s chunk came back as one 10-word segment. It does
+    /// not count as coverage, a recovery of its window replaces it, and its words are not used to
+    /// call the recovery a duplicate (they must survive in the recovery).
+    func testSparseSegmentIsReplacedAndLeftOutOfTheDuplicateCheck() {
+        let sparse = segment("u dos tres quatre cinc sis set vuit nou deu", 182.8, 205.1)
+        let kept = segment("Abans d'això vam parlar de la xarxa nova i de les còpies.", 158.1, 182.8)
+        let window: ClosedRange<Double> = 182.3...205.6
+        XCTAssertTrue(HoleRecovery.isReplaceable(sparse, by: window))
+        XCTAssertFalse(HoleRecovery.isReplaceable(kept, by: window))
+        let nearby = HoleRecovery.neighbourText(of: window, in: [kept, sparse])
+        XCTAssertFalse(nearby.contains("quatre"))
+        XCTAssertTrue(nearby.contains("xarxa"))
+        let recovered = segment("u dos tres quatre cinc sis set vuit nou deu onze dotze tretze", 183, 196)
+        let merged = HoleRecovery.merged(original: [kept, sparse], recovered: [(window, [recovered])])
+        XCTAssertEqual(merged.map(\.text), [kept.text, recovered.text])
+    }
+
+    /// One WhisperKit result per voice-activity chunk (seekTime = chunk start). A collapsed chunk's
+    /// own segment is replaced by the recovery even when its timestamps look dense.
+    func testChunkSpansAndCollapsedChunkReplacement() {
+        let r0 = TranscriptionResult(text: "", segments: [segment("u", 0, 0.7)], language: "ca",
+                                     timings: TranscriptionTimings(), seekTime: 0)
+        let r1 = TranscriptionResult(text: "", segments: [segment("u dos tres quatre cinc", 24.5, 30)], language: "ca",
+                                     timings: TranscriptionTimings(), seekTime: 24.5)
+        let spans = HoleRecovery.chunkSpans(of: [r0, r1], duration: 31)
+        XCTAssertEqual(spans.map(\.start), [0, 24.5])
+        XCTAssertEqual(spans.map(\.end), [24.5, 31])
+        XCTAssertEqual(spans.map(\.words), [1, 5])
+
+        let collapsed: [ClosedRange<Double>] = [182.8...205.1]
+        let dense = segment("u dos tres quatre cinc sis set vuit nou deu", 182.8, 183.5)   // timestamps squeezed
+        let next = segment("Després en parlem.", 205.1, 207)
+        let window: ClosedRange<Double> = 182.3...205.6
+        XCTAssertTrue(HoleRecovery.isReplaceable(dense, by: window, collapsed: collapsed))
+        XCTAssertFalse(HoleRecovery.isReplaceable(next, by: window, collapsed: collapsed))
+        let recovered = segment("u dos tres quatre cinc sis set vuit nou deu onze dotze", 183, 200)
+        let merged = HoleRecovery.merged(original: [dense, next], recovered: [(window, [recovered])], collapsed: collapsed)
+        XCTAssertEqual(merged.map(\.text), [recovered.text, next.text])
+    }
+
     func testFooterNotes() {
         XCTAssertEqual(HoleRecovery.footerNotes(recoveredSeconds: 0, emptySeconds: 0), [])
         XCTAssertEqual(HoleRecovery.footerNotes(recoveredSeconds: 61.4, emptySeconds: 0),

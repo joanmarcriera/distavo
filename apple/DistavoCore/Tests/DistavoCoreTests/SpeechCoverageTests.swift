@@ -104,4 +104,39 @@ final class SpeechCoverageTests: XCTestCase {
         XCTAssertNil(SpeechCoverage.pickBest(candidates: [(0, 1.0, 0)]))
         XCTAssertNil(SpeechCoverage.pickBest(candidates: []))
     }
+
+    // MARK: - Duplicates (#3579: squeezed timestamps make transcribed speech look like a hole)
+
+    func testRedecodedTextTheFirstPassAlreadyHasIsADuplicate() {
+        let firstPass = "Bon dia a tothom. Avui parlarem de la xarxa de l'oficina i de les còpies de seguretat."
+        XCTAssertTrue(SpeechCoverage.isAlreadyTranscribed("avui parlarem de la xarxa de l'oficina", in: firstPass))
+        // Mostly the same words with a small recognition difference still counts.
+        XCTAssertTrue(SpeechCoverage.isAlreadyTranscribed("Avui parlarem de la xarxa de la oficina i de les còpies", in: firstPass))
+        XCTAssertFalse(SpeechCoverage.isAlreadyTranscribed("el pressupost del projecte arriba a final de mes", in: firstPass))
+    }
+
+    func testShortAndEmptyCandidates() {
+        let firstPass = "D'acord, ho mirem demà."
+        XCTAssertTrue(SpeechCoverage.isAlreadyTranscribed("d'acord", in: firstPass))
+        XCTAssertFalse(SpeechCoverage.isAlreadyTranscribed("molt bé", in: firstPass))
+        XCTAssertTrue(SpeechCoverage.isAlreadyTranscribed("  ", in: firstPass))
+        XCTAssertFalse(SpeechCoverage.isAlreadyTranscribed("una frase nova sencera", in: ""))
+    }
+
+    // MARK: - Collapsed chunks (#3579 root cause, found from word counts)
+
+    func testCollapsedChunksAreFoundFromWordsNotLoudness() {
+        let chunks: [(start: Double, end: Double, words: Int)] = [
+            (0, 24.2, 1),          // collapsed to one word
+            (24.2, 49.5, 58),      // normal speech
+            (158.1, 182.8, 59),
+            (182.8, 205.1, 10),    // 0.45 words per second: collapsed
+            (205.1, 209.0, 1),     // short chunk: not judged
+        ]
+        let found = SpeechCoverage.collapsedChunks(chunks)
+        XCTAssertEqual(found.count, 2)
+        XCTAssertEqual(found[0], 0...24.2)
+        XCTAssertEqual(found[1], 182.8...205.1)
+        XCTAssertEqual(SpeechCoverage.mergedRanges([5...9, 0...4, 4...6, 20...21]), [0...9, 20...21])
+    }
 }

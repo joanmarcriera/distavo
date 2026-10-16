@@ -40,6 +40,8 @@ enum HoleRecovery {
         /// Seconds of audible audio for which no candidate produced text.
         var emptySeconds = 0.0
         var holeCount = 0
+        /// Seconds whose re-decode only repeated text the first pass already had (timestamps squeezed, not dropped).
+        var duplicateSeconds = 0.0
 
         /// Sentences for the note's provenance line (`footer_notes`); empty when there were no holes.
         var footerNotes: [String] {
@@ -111,6 +113,49 @@ enum HoleRecovery {
         }
     }
 
+    /// Seconds of context on each side of a window whose first-pass text counts as "nearby".
+    /// Generous because the Catalan fine-tune can squeeze a chunk's timestamps towards its start.
+    static let neighbourSeconds = 90.0
+
+    /// The first-pass text of segments within `neighbourSeconds` of `window`, in order, leaving
+    /// out the ones a recovery of this window replaces (their words must survive in the recovery).
+    static func neighbourText(of window: ClosedRange<Double>, in segments: [TranscriptionSegment],
+                              collapsed: [ClosedRange<Double>] = []) -> String {
+        let lo = window.lowerBound - neighbourSeconds, hi = window.upperBound + neighbourSeconds
+        return segments
+            .filter { Double($0.end) >= lo && Double($0.start) <= hi && !isReplaceable($0, by: window, collapsed: collapsed) }
+            .map(\.text).joined(separator: " ")
+    }
+
+    /// A first-pass segment a recovery of `window` replaces: one that starts inside a collapsed
+    /// chunk the window overlaps, or a near-empty (<= 2 words) or long sparse segment lying
+    /// mostly inside the window.
+    static func isReplaceable(_ seg: TranscriptionSegment, by window: ClosedRange<Double>,
+                              collapsed: [ClosedRange<Double>] = []) -> Bool {
+        let start = Double(seg.start)
+        if collapsed.contains(where: { $0.contains(start) && $0.overlaps(window) }) { return true }
+        let words = wordCount(seg.text)
+        guard words <= replaceableWordCount
+                || SpeechCoverage.isSparse(start: start, end: Double(seg.end), wordCount: words)
+        else { return false }
+        let duration = Double(seg.end - seg.start)
+        return duration <= 0 ? window.contains(start) : overlap(seg, window) >= 0.5 * duration
+    }
+
+    /// (start, end, words) of each voice-activity chunk of the first pass. WhisperKit returns one
+    /// result per chunk with `seekTime` at the chunk start; a chunk ends where the next begins.
+    /// Results without a seek time (no chunking) give nothing.
+    static func chunkSpans(of results: [TranscriptionResult], duration: Double) -> [(start: Double, end: Double, words: Int)] {
+        let starts = results.map { $0.seekTime.map(Double.init) }
+        var spans: [(start: Double, end: Double, words: Int)] = []
+        for (i, result) in results.enumerated() {
+            guard let start = starts[i] else { continue }
+            let end = starts[(i + 1)...].compactMap { $0 }.first { $0 > start } ?? duration
+            spans.append((start, end, result.segments.reduce(0) { $0 + wordCount($1.text) }))
+        }
+        return spans
+    }
+
     private static func overlap(_ s: TranscriptionSegment, _ r: ClosedRange<Double>) -> Double {
         max(0, min(Double(s.end), r.upperBound) - max(Double(s.start), r.lowerBound))
     }
@@ -120,15 +165,16 @@ enum HoleRecovery {
     /// segment that mostly overlaps a kept, substantial first-pass segment is
     /// dropped instead, so no stretch is transcribed twice.
     static func merged(original: [TranscriptionSegment],
-                       recovered: [(window: ClosedRange<Double>, segments: [TranscriptionSegment])]
+                       recovered: [(window: ClosedRange<Double>, segments: [TranscriptionSegment])],
+                       collapsed: [ClosedRange<Double>] = []
     ) -> [TranscriptionSegment] {
         let windows = recovered.map(\.window)
-        let kept = original.filter { seg in
-            let duration = Double(seg.end - seg.start)
-            guard wordCount(seg.text) <= replaceableWordCount else { return true }
-            return !windows.contains { duration <= 0 ? $0.contains(Double(seg.start)) : overlap(seg, $0) >= 0.5 * duration }
+        let kept = original.filter { seg in !windows.contains { isReplaceable(seg, by: $0, collapsed: collapsed) } }
+        // `kept` excludes everything replaced, so a recovery is a duplicate only of what stays.
+        let substantial = kept.filter {
+            let n = wordCount($0.text)
+            return n > replaceableWordCount && !SpeechCoverage.isSparse(start: Double($0.start), end: Double($0.end), wordCount: n)
         }
-        let substantial = kept.filter { wordCount($0.text) > replaceableWordCount }
         var out = kept
         for (_, segments) in recovered {
             for seg in segments {
@@ -158,7 +204,10 @@ enum HoleRecovery {
         let duration = Double(audio.count) / rate
         let firstPass = results.flatMap(\.segments)
         let rms = SpeechCoverage.rmsFrames(samples: audio, sampleRate: WhisperKit.sampleRate)
-        let holes = SpeechCoverage.holes(rms: rms, frameSeconds: 1.0, covered: coverage(of: firstPass))
+        let loudHoles = SpeechCoverage.holes(rms: rms, frameSeconds: 1.0, covered: coverage(of: firstPass))
+        // Chunks the prompt collapsed: decoded far too short for their length, loud or not.
+        let collapsed = SpeechCoverage.collapsedChunks(chunkSpans(of: results, duration: duration))
+        let holes = SpeechCoverage.mergedRanges(loudHoles + collapsed)
         guard !holes.isEmpty else { return outcome }
         outcome.holeCount = holes.count
 
@@ -190,7 +239,12 @@ enum HoleRecovery {
                 }
             }
             if let best = SpeechCoverage.pickBest(candidates: candidates.map(\.stats)) {
-                let segments = shifted(candidates[best].segments, by: window.lowerBound)
+                let decoded = shifted(candidates[best].segments, by: window.lowerBound)
+                // Speech the first pass DID transcribe, but under squeezed timestamps, decodes again
+                // here; drop what the nearby first-pass text already says (#3579 duplicate fix).
+                let nearby = neighbourText(of: window, in: firstPass, collapsed: collapsed)
+                let segments = decoded.filter { !SpeechCoverage.isAlreadyTranscribed($0.text, in: nearby) }
+                if decoded.count > 0 && segments.isEmpty { outcome.duplicateSeconds += window.upperBound - window.lowerBound; continue }
                 if !segments.isEmpty {
                     recovered.append((window, segments))
                     outcome.recoveredSeconds += window.upperBound - window.lowerBound
@@ -201,7 +255,7 @@ enum HoleRecovery {
         }
 
         guard !recovered.isEmpty else { return outcome }
-        let segments = merged(original: firstPass, recovered: recovered)
+        let segments = merged(original: firstPass, recovered: recovered, collapsed: collapsed)
         let template = results.first
         outcome.results = [TranscriptionResult(
             text: segments.map(\.text).joined(),

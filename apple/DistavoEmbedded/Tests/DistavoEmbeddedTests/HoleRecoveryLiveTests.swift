@@ -57,6 +57,7 @@ final class HoleRecoveryLiveTests: XCTestCase {
                 whisper: whisper, audio: clipAudio, results: [], options: options, report: { _ in })
             let segs = out.results.flatMap(\.segments)
             let words = segs.map { $0.text.split(whereSeparator: \.isWhitespace).count }.reduce(0, +)
+            for g in segs { print(String(format: "SEG %.1f-%.1f words=%d", g.start, g.end, g.text.split(whereSeparator: \.isWhitespace).count)) }
             print(String(format: "METRIC clip=%.0f-%.0f segments=%d words=%d notes=%@ seconds=%.0f",
                          lo, hi, segs.count, words, out.footerNotes.joined(separator: " | ") as NSString,
                          Date().timeIntervalSince(started)))

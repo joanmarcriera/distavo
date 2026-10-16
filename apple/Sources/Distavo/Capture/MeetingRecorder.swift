@@ -259,6 +259,9 @@ final class MeetingRecorder {
     private static func finalize(part: URL, to url: URL) {
         do {
             try StereoBalancer.balance(from: part, to: url)
+            // A long silent tail (after an auto-stop) is cut so Whisper has nothing to invent over (#2677).
+            // Best effort: on any failure the balanced recording stays exactly as it is.
+            _ = try? TrailingSilence.trim(url)
         } catch {
             try? FileManager.default.removeItem(at: url)
             try? FileManager.default.moveItem(at: part, to: url)

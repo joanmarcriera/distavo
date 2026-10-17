@@ -78,3 +78,61 @@ final class ProjectSummaryTests: XCTestCase {
         XCTAssertTrue(md.contains("2 lines removed"))
     }
 }
+
+final class ProjectSummaryRunTests: XCTestCase {
+    private var notes: URL!
+    override func setUpWithError() throws {
+        notes = FileManager.default.temporaryDirectory.appendingPathComponent("ps-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
+        try "Budget of 40 units agreed.".write(to: notes.appendingPathComponent("A.md"), atomically: true, encoding: .utf8)
+        try "Delay of 3 weeks.".write(to: notes.appendingPathComponent("B.md"), atomically: true, encoding: .utf8)
+    }
+    override func tearDownWithError() throws { try? FileManager.default.removeItem(at: notes) }
+
+    private func config(url: String = "http://localhost:11434") -> Config {
+        var c = Config(); c.notesDir = notes.path
+        c.summarise.backend = "local"; c.summarise.local = OllamaTarget(url: url, model: "m"); return c
+    }
+    private func deps(reply: String) -> AskDeps {
+        AskDeps(ollamaReachable: { _ in true }, complete: { _, _, _, _, _ in reply }, resolver: { _ in [] })
+    }
+
+    func testWritesOneNewNoteAndNeverTouchesSources() async throws {
+        let out = await ProjectSummary.run(bases: ["A", "B"], title: "Launch", config: config(),
+                                           deps: deps(reply: "## Progress\n- 40 units [[A]]\n- 99 units [[A]]"))
+        guard case .written(let url, let dropped, _) = out else { return XCTFail("\(out)") }
+        XCTAssertEqual(url.lastPathComponent, "Project - Launch.md")
+        XCTAssertEqual(dropped, 1)
+        let text = try String(contentsOf: url)
+        XCTAssertTrue(text.contains("40 units [[A]]")); XCTAssertFalse(text.contains("99 units"))
+        XCTAssertEqual(try String(contentsOf: notes.appendingPathComponent("A.md")), "Budget of 40 units agreed.")
+        // a second run does not overwrite
+        let again = await ProjectSummary.run(bases: ["A", "B"], title: "Launch", config: config(),
+                                             deps: deps(reply: "- 3 weeks [[B]]"))
+        guard case .written(let url2, _, _) = again else { return XCTFail("\(again)") }
+        XCTAssertEqual(url2.lastPathComponent, "Project - Launch 2.md")
+    }
+
+    func testNothingSupportedWritesNothing() async {
+        let out = await ProjectSummary.run(bases: ["A", "B"], title: "L", config: config(), deps: deps(reply: "- invented"))
+        guard case .failed = out else { return XCTFail("\(out)") }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: notes.appendingPathComponent("Project - L.md").path))
+    }
+
+    func testPublicEndpointIsRefusedBeforeAnyCall() async {
+        var called = false
+        let d = AskDeps(ollamaReachable: { _ in true }, complete: { _, _, _, _, _ in called = true; return "" },
+                        resolver: { _ in ["8.8.8.8"] })
+        let out = await ProjectSummary.run(bases: ["A", "B"], title: "L", config: config(url: "http://example.com:11434"), deps: d)
+        guard case .refused = out else { return XCTFail("\(out)") }
+        XCTAssertFalse(called)
+    }
+
+    func testBadSelectionAndMissingNote() async {
+        var out = await ProjectSummary.run(bases: ["A"], title: "L", config: config(), deps: deps(reply: ""))
+        guard case .failed = out else { return XCTFail() }
+        out = await ProjectSummary.run(bases: ["A", "Nope"], title: "L", config: config(), deps: deps(reply: ""))
+        guard case .failed(let m) = out else { return XCTFail() }
+        XCTAssertTrue(m.contains("Nope"))
+    }
+}

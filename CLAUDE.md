@@ -87,6 +87,7 @@ of the original Python module (noted in its header).
 - **Search and Ask** — `SearchIndex.swift` (system SQLite FTS5 cache, `docs/search.md`); `AskNotes.swift` / `AskPrompt.swift`
   (retrieval, token budget, citations) / `AskEndpoint.swift` (local-only endpoint guard, `docs/ask-local-only.md`).
 - **Automation** — `AutomationCommand.swift` (`distavo://` allow-list, Finder Service, App Intents; `docs/automation.md`), `AutomationCopySafety.swift`.
+- **Summarise together** — `ProjectSummary.swift` (`docs/project-summary.md`): 2-10 notes -> one cited `Project - <title>.md`, unsupported bullets dropped.
 - **Meeting detection** — `MeetingDetector.swift`: offers to record when a listed call app captures the mic (fake-clock policy, like `SilenceMonitor`).
 - **Scratchpad, key moments** — `Scratchpad.swift` (typed Quick Notes -> `Prompt.build(scratchpad:)`), `RecordingBookmarks.swift`
   (markers -> deterministic `## Key moments`), `ClipExporter.swift` (AVFoundation m4a clips).

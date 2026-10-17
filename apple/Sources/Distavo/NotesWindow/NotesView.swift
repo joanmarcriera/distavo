@@ -215,7 +215,8 @@ struct NotesView: View {
         } else if selected.count > 1 {
             NotesMultiDetailView(entries: selected,
                                  export: { controller.exportTranscripts(selected) },
-                                 reveal: { controller.revealNotes(selected) })
+                                 reveal: { controller.revealNotes(selected) },
+                                 summarise: { title in await controller.summariseTogether(selected, title: title) })
         } else {
             VStack(spacing: 10) {
                 Text("Select a note").font(.title3).foregroundStyle(.secondary)
@@ -363,6 +364,13 @@ private struct NotesMultiDetailView: View {
     let entries: [NoteEntry]
     let export: () -> Void
     let reveal: () -> Void
+    /// "Summarise together" (#3199): runs on the local backend, writes one new note.
+    let summarise: (String) async -> ProjectOutcome
+
+    @State private var asking = false
+    @State private var title = ""
+    @State private var running = false
+    @State private var result = ""
 
     var body: some View {
         let split = NotesLibrary.exportable(entries)
@@ -381,11 +389,53 @@ private struct NotesMultiDetailView: View {
                 }
             }
             Button("Reveal in Finder", action: reveal)
+            VStack(alignment: .leading, spacing: 1) {
+                Button("Summarise Together…") { result = ""; asking = true }
+                    .disabled(running || ProjectSummary.selectionProblem(entries.map { ProjectSource(name: $0.base, body: "") }) != nil)
+                if let problem = ProjectSummary.selectionProblem(entries.map { ProjectSource(name: $0.base, body: "") }) {
+                    Text(problem).font(.caption).foregroundStyle(.orange)
+                }
+                if running { ProgressView().controlSize(.small) }
+                if !result.isEmpty { Text(result).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
             Text("Regenerate, Rename Speakers, Compare and the transcript viewer work on one note at a time.")
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Spacer()
         }
         .padding(16)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .sheet(isPresented: $asking) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Summarise \(entries.count) notes together").font(.headline)
+                Text("Reads only these notes, on this Mac or your local network (never a public server). Writes one new note, \"Project - <title>.md\", with every line cited to its source note; lines the notes do not support are removed. The selected notes are not changed.")
+                    .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                TextField("Project title", text: $title).textFieldStyle(.roundedBorder)
+                HStack {
+                    Spacer()
+                    Button("Cancel") { asking = false }.keyboardShortcut(.cancelAction)
+                    Button("Summarise") {
+                        asking = false; running = true
+                        let t = title
+                        Task {
+                            let outcome = await summarise(t)
+                            running = false
+                            result = Self.describe(outcome)
+                        }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(title.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(20).frame(width: 440)
+        }
+    }
+
+    private static func describe(_ o: ProjectOutcome) -> String {
+        switch o {
+        case .written(let url, let dropped, let backend):
+            return "Wrote \(url.lastPathComponent) with \(backend)" + (dropped > 0 ? "; \(dropped) unsupported line\(dropped == 1 ? "" : "s") removed." : ".")
+        case .deferred(let why), .refused(let why), .failed(let why): return why
+        case .cancelled: return "Stopped."
+        }
     }
 }

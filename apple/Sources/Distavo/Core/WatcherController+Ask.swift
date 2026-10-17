@@ -51,7 +51,8 @@ extension WatcherController {
         _ = await SearchWork.run { Self.searchIndex.reconcile(notesDir: notes, workDir: work) }
     }
 
-    private func answer(_ question: String, scope: AskScope, history: [AskTurn]) async -> AskOutcome {
+    /// The live Ask dependencies (Ollama + on-device engines + busy check); also used by "Summarise together".
+    func liveAskDeps() -> AskDeps {
         // A running scan/regenerate may be using the on-device model; two concurrent
         // on-device generations are not allowed, so Ask asks the user to retry.
         // (Ollama is a separate process and is never blocked.)
@@ -82,6 +83,11 @@ extension WatcherController {
                     ? "Distavo is processing a recording and the on-device model is busy. Try again when it finishes." : nil
             }
         }
+        return deps
+    }
+
+    private func answer(_ question: String, scope: AskScope, history: [AskTurn]) async -> AskOutcome {
+        let deps = liveAskDeps()
         return await AskNotes.ask(question: question, scope: scope, history: history, config: config, deps: deps)
     }
 }

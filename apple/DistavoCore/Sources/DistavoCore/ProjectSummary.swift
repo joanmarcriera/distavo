@@ -202,3 +202,89 @@ public enum ProjectSummary {
         return out
     }
 }
+
+// MARK: - Running against the configured local backend, and writing the note
+
+/// What "Summarise together" ended with. Never throws.
+public enum ProjectOutcome: Equatable, Sendable {
+    /// `url` = the new note; `dropped` = unsupported lines removed; `backend` = "Ollama (m)" etc.
+    case written(url: URL, dropped: Int, backend: String)
+    case deferred(String)
+    case refused(String)
+    case failed(String)
+    case cancelled
+}
+
+extension ProjectSummary {
+
+    /// Reads `<notesDir>/<base>.md` for each base, in the given order; nil names the first unreadable one.
+    public static func loadSources(bases: [String], notesDir: URL) -> (sources: [ProjectSource], missing: String?) {
+        var out: [ProjectSource] = []
+        for base in bases {
+            guard let text = try? String(contentsOf: notesDir.appendingPathComponent("\(base).md"), encoding: .utf8) else {
+                return (out, base)
+            }
+            out.append(ProjectSource(name: base, body: text))
+        }
+        return (out, nil)
+    }
+
+    /// A file name in `dir` that does not exist yet: "Project - X.md", "Project - X 2.md", ...
+    static func freeURL(_ name: String, in dir: URL) -> URL {
+        let fm = FileManager.default
+        let stem = (name as NSString).deletingPathExtension
+        var url = dir.appendingPathComponent(name), n = 2
+        while fm.fileExists(atPath: url.path) { url = dir.appendingPathComponent("\(stem) \(n).md"); n += 1 }
+        return url
+    }
+
+    /// Summarise `bases` together and write ONE new note into the notes folder.
+    /// Backend choice, local-only guard and on-device busy handling are exactly Ask's
+    /// (`AskNotes.chooseTarget`); source notes are only read.
+    public static func run(
+        bases: [String], title rawTitle: String, config: Config, deps: AskDeps, now: Date = Date()
+    ) async -> ProjectOutcome {
+        let title = rawTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return .failed("Give the project a title.") }
+        let notesDir = Config.resolvePath(config.notesDir)
+        let loaded = loadSources(bases: bases, notesDir: notesDir)
+        if let missing = loaded.missing { return .failed("The note \(missing) could not be read.") }
+        if let problem = selectionProblem(loaded.sources) { return .failed(problem) }
+
+        let target: SummariseTarget, endpoint: AskEndpoint?
+        switch await AskNotes.chooseTarget(config, deps) {
+        case .use(let t, let e): target = t; endpoint = e
+        case .deferred(let why): return .deferred(why)
+        case .refused(let why): return .refused(why)
+        case .failed(let why): return .failed(why)
+        }
+        if case .embedded = target, let busy = await deps.onDeviceBusy() { return .deferred(busy) }
+
+        let window = AskPrompt.effectiveWindow(AskBackend.contextSize(target, options: config.summarise.options))
+        var options = config.summarise.options
+        options.numPredict = outputTokens
+        do {
+            let result = try await summarise(loaded.sources, title: title, contextSize: window) { prompt, max in
+                if Task.isCancelled { throw CancellationError() }
+                return try await deps.complete(prompt, target, options, max, endpoint)
+            }
+            if Task.isCancelled { return .cancelled }
+            guard result.markdown.contains("[[") else {
+                return .failed("The model's summary had no line supported by the selected notes, so nothing was written.")
+            }
+            let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"; df.locale = Locale(identifier: "en_US_POSIX")
+            let text = compose(title: title, sources: loaded.sources, summary: result.markdown,
+                               droppedLines: result.droppedLines, date: df.string(from: now))
+            let url = freeURL(fileName(title: title), in: notesDir)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return .written(url: url, dropped: result.droppedLines, backend: AskBackend.label(target))
+        } catch is CancellationError {
+            return .cancelled
+        } catch let retry as RetryableDependencyError {
+            return .deferred("\(retry.localizedDescription) Try again later.")
+        } catch {
+            if Task.isCancelled { return .cancelled }
+            return .failed(String(((error as? LocalizedError)?.errorDescription ?? "\(error)").prefix(300)))
+        }
+    }
+}

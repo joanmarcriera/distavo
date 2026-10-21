@@ -156,11 +156,13 @@ final class MeetingCaptureController: ObservableObject {
         let alert = NSAlert()
         alert.messageText = "Delete this recording?"
         alert.informativeText = "The recording so far (\(elapsedLabel)) will be deleted and never transcribed. This cannot be undone."
-        alert.addButton(withTitle: "Delete recording")
-        alert.addButton(withTitle: "Keep recording")
+        // Safe answer first so Return keeps the take (#3929); order pinned by DiscardPromptTests.
+        for title in DiscardPrompt.buttonTitles { alert.addButton(withTitle: title) }
+        if #available(macOS 11.0, *) { alert.buttons[DiscardPrompt.destructiveIndex].hasDestructiveAction = true }
         alert.alertStyle = .warning
         NSApp.activate(ignoringOtherApps: true)
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let response = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        guard DiscardPrompt.shouldDelete(buttonIndex: response) else { return }
         // The user may have stopped it through the other menu item while the
         // alert was up; nothing to discard then.
         guard isRecording else { return }

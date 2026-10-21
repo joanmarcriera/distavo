@@ -1,13 +1,3 @@
-• Better notes for non-English meetings: the requested note language is stated more firmly, and for Catalan and Spanish Distavo checks the note and asks the model once more if it answered in another language.
-• Fewer invented facts: each line of the facts ledger is checked against what was said. Lines the transcript does not support are removed, doubtful ones are marked, and the note says how many.
-• Recovered dropped speech: stretches of a meeting that the built-in transcriber left out (this could happen with a custom word list) are transcribed again, and the note says how much was recovered.
-• Fewer speaker mix-ups in built-in transcription: when the speaker label changes in the middle of a sentence, the rest of that sentence goes back to the person who was speaking.
-• Speaker count from your participants: after a recording, the number of speakers follows the names you type, and you are warned if they do not match. Leave it on Auto and Distavo works it out.
-• Automatic summary template: Distavo picks the template that fits the meeting, such as a client meeting or an interview, and says why at the end of the note. New "Consultancy / client meeting" template.
-• Terms for this meeting: add names and jargon for one meeting when you stop recording.
-• Optional "Catalan IT" correction pack for IT terms the Catalan models often mishear, such as ERP, firewall and backups.
-• Learn from your corrections: after you edit a transcript, Distavo offers to turn your fixes into replacement rules for next time. Settings also shows when each vocabulary term was last heard.
-• In-person meetings: tick "In-person meeting (microphone only)" and Distavo stops warning about missing computer audio.
-• A warning when nothing is being recorded in the first 15 seconds, and a long silent stretch at the end of a Distavo recording is trimmed.
-• Clearer language line at the end of the note, and the note owner is no longer shown as "Me (me)".
-• Includes everything from 1.18: the Notes window, search inside notes, and regenerate in the queue.
+• Summarise together: select two to ten notes in the Notes window and choose "Summarise Together…" to get one project note. Every bullet cites the meeting it came from, and any bullet the notes do not support is dropped.
+• Tidier vocabulary: when you change the participants or the language of a recording, Distavo offers to clear the custom terms that were not heard, so old jargon does not leak into the next meeting.
+• Includes everything from 1.19: better Catalan and Spanish notes, fewer invented facts, recovered dropped speech, an automatic summary template and in-person meeting mode.

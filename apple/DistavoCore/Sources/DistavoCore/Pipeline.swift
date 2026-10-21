@@ -434,8 +434,11 @@ public enum Pipeline {
             // needs it regardless of the note-language setting (#2205).
             let dominantCode = dominantLanguageCode(from: result)
 
-            let clean = TranscriptCleaner.clean(
+            let cleanedOnce = TranscriptCleaner.clean(
                 TranscriptCleaner.segments(from: result), replacements: transcribeConfig.replacements)
+            // Safety net (#3951): a mis-heard slur never reaches the transcript, segments or summary prompt.
+            let guarded = OffensiveWordGuard.apply(cleanedOnce)
+            let clean = guarded.text
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")
@@ -457,6 +460,7 @@ public enum Pipeline {
                 // exports spell the term like the note does (Vikunja #2939).
                 let compiled = CompiledReplacements(transcribeConfig.replacements)
                 if !compiled.isEmpty { timed = timed.applying(compiled) }
+                if guarded.flagged > 0 { timed = timed.guardedAgainstOffensiveWords().0 }
                 timedForNote = timed
                 do { try timed.save(workDir: workDir, base: base) }
                 catch { print("[Distavo] could not save \(base).segments.json: \(error.localizedDescription)") }

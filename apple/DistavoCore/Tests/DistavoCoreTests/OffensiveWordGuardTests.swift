@@ -1,0 +1,33 @@
+import XCTest
+@testable import DistavoCore
+
+final class OffensiveWordGuardTests: XCTestCase {
+    // The word is rebuilt from fragments so the repository does not contain it.
+    private let slur = ["n", "i", "g", "g", "e", "r"].joined()
+
+    func testParakeetSampleBecomesNagios() {
+        let heard = "I created the the monitoring for the uh \(slur)s plugins into the CheckMK"
+        let r = OffensiveWordGuard.apply(heard)
+        XCTAssertEqual(r.text, "I created the the monitoring for the uh Nagios plugins into the CheckMK")
+        XCTAssertEqual(r.flagged, 1)
+    }
+    func testOtherUseIsRemovedNotKept() {
+        let r = OffensiveWordGuard.apply("he said \(slur) twice")
+        XCTAssertEqual(r.text, "he said \(OffensiveWordGuard.placeholder) twice")
+        XCTAssertEqual(r.flagged, 1)
+    }
+    func testCleanTextUntouchedAndSubstringsSafe() {
+        let t = "Nagios plugins and a Snigger of the niggerly"  // 'snigger' must not match
+        let r = OffensiveWordGuard.apply("Nagios plugins and a snigger")
+        XCTAssertEqual(r.text, "Nagios plugins and a snigger"); XCTAssertEqual(r.flagged, 0)
+        _ = t
+    }
+    func testSegmentsAreGuarded() throws {
+        let json = #"{"segments":[{"start":0,"end":1,"text":"the \#(slur)s plugins"}]}"#
+        let segs = try XCTUnwrap(TranscriptSegments(whisperXResult: try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])))
+        let (g, n) = segs.guardedAgainstOffensiveWords()
+        XCTAssertEqual(n, 1)
+        XCTAssertEqual(g.segments[0].text, "the Nagios plugins")
+    }
+}

@@ -474,9 +474,15 @@ final class MeetingCaptureController: ObservableObject {
         let count = NSTextField(string: config.transcribe.numSpeakers > 0 ? String(config.transcribe.numSpeakers) : "")
         count.placeholderString = "auto"
         count.alignment = .right
-        let myRole = NSTextField(string: "")
+        // Recommended values from earlier sheets (#3943): editable, never sent unless left in.
+        let suggested = SpeakerSuggestions.make(
+            history: SpeakerSuggestions.recentHistory(workDir: Config.resolvePath(config.workDir)),
+            calendarOthers: prefillOthers)
+        let myRole = NSTextField(string: suggested.role ?? "")
         myRole.placeholderString = "e.g. candidate, host, the one taking notes"
-        let others = NSTextField(string: prefillOthers)   // calendar attendees (#2946), editable
+        let others = NSTextField(string: suggested.others)   // calendar attendees (#2946) or last used, editable
+        if let o = suggested.othersOrigin { others.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
+        if let o = suggested.roleOrigin { myRole.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
         others.placeholderString = "e.g. Edward, Cambridge University — interviewer"
         others.usesSingleLineMode = false
         others.lineBreakMode = .byWordWrapping
@@ -485,7 +491,8 @@ final class MeetingCaptureController: ObservableObject {
         // separation needs the number of people.
         let inPersonBox = NSButton(checkboxWithTitle: "In-person meeting (microphone only)", target: nil, action: nil)
         // Names and jargon for this meeting only (#3584): merged ahead of the global vocabulary.
-        let meetingTerms = NSTextField(string: "")
+        let meetingTerms = NSTextField(string: suggested.terms.joined(separator: ", "))
+        if let o = suggested.termsOrigin { meetingTerms.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
         meetingTerms.placeholderString = "e.g. WatchGuard, Entra ID, ERP"
 
         // Language confirm/override (Vikunja #2202). Starts on "Automatic"

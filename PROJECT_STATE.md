@@ -1,5 +1,19 @@
 # Project State
 
+## Resume here (2026-10-21)
+
+- **v1.20.0 (build 23) shipped** from `main` @ c7e1f68, tag `v1.20.0` on `origin` (GitHub, primary).
+  Contents: Summarise Together (#3199) and vocabulary clear-offer.
+- Direct DMG: https://github.com/joanmarcriera/distavo/releases/tag/v1.20.0 (`Distavo.dmg`, `appcast.xml`);
+  https://distavo.com/appcast.xml serves 1.20.0.
+- App Store: build 23 VALID, version 1.20.0 `WAITING_FOR_REVIEW` (submitted by the gated job, releaseType AFTER_APPROVAL).
+- **Next action:** watch App Review for 1.20.0 (ASC dry run: `scripts/submit-appstore-review.py --version 1.20.0 --build-number 23 --dry-run --until version`);
+  confirm the Forgejo mirror catches up (`git ls-remote --tags forgejo | grep v1.20.0`).
+- Setapp upload remains manual.
+
+---
+
+
 > **Stale snapshot (flagged 2026-09-24):** this file is a point-in-time handoff from the 1.9.1
 > build-11 review cycle. Current shipped version is 1.14.0 (live on the Mac App Store since
 > 2026-09-18) — see `HANDOFF-2026-09-06.md` and Vikunja project 18 for the current state.

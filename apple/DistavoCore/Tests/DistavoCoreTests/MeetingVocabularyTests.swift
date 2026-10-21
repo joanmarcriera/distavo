@@ -100,3 +100,18 @@ private final class Lock<T>: @unchecked Sendable {
     func set(_ x: T) { l.lock(); v = x; l.unlock() }
     var value: T { l.lock(); defer { l.unlock() }; return v }
 }
+
+final class ParticipantTermsTests: XCTestCase {
+    // #3950: names from the participants line seed the glossary; roles and "me" do not.
+    func testNamesAndCompanySeeded() {
+        let h = SpeakerHints(participants: "Bong Cha (Lightning AI) - interviewer, Annika for WWT, me")
+        XCTAssertEqual(h.participantTerms, ["Lightning AI", "Bong Cha", "Annika"])
+    }
+    func testLongDescriptionAndEmptyYieldNothing() {
+        XCTAssertEqual(SpeakerHints(participants: "the whole team from the other office today").participantTerms, [])
+        XCTAssertEqual(SpeakerHints(participants: nil).participantTerms, [])
+    }
+    func testEmptyGlossaryEntryIsStripped() {
+        XCTAssertEqual(Vocabulary.normalisedTerms(["Slurm", "Nvidia", "Bull", ""]), ["Slurm", "Nvidia", "Bull"])
+    }
+}

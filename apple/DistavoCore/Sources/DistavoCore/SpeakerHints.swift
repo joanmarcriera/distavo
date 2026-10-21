@@ -28,6 +28,30 @@ public struct SpeakerHints: Codable, Equatable {
         self.capture = capture
     }
 
+    /// Names worth giving the transcriber as spelling hints, taken from the participants line
+    /// (Vikunja #3950): "Bong Cha (Lightning AI) - interviewer, Annika for WWT" gives
+    /// ["Bong Cha", "Lightning AI", "Annika"]. A parenthesised company is kept as its own term; a role
+    /// after a dash or "for" is dropped; anything longer than four words is a description, not a name.
+    /// They ride the glossary, which the prompt already frames as a spelling aid and never as facts.
+    public var participantTerms: [String] {
+        guard let text = participants else { return [] }
+        var terms: [String] = []
+        for raw in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "\n" }) {
+            var piece = String(raw)
+            if let open = piece.firstIndex(of: "("), let close = piece[open...].firstIndex(of: ")") {
+                terms.append(String(piece[piece.index(after: open)..<close]))
+                piece.removeSubrange(open...close)
+            }
+            for sep in [" \u{2014} ", " \u{2013} ", " - ", " for "] {
+                if let r = piece.range(of: sep) { piece = String(piece[..<r.lowerBound]) }
+            }
+            terms.append(piece)
+        }
+        return Vocabulary.normalisedTerms(terms).filter {
+            $0.count >= 2 && $0.split(separator: " ").count <= 4 && $0.lowercased() != "me"
+        }
+    }
+
     /// True when there is nothing worth passing on.
     public var isEmpty: Bool {
         (count ?? 0) <= 0 && (participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "").isEmpty

@@ -304,6 +304,8 @@ final class SettingsModel: ObservableObject {
     }
 
     func save() {
+        // Blank / duplicate glossary lines are dropped on save (#3950); they stay while typing.
+        draft.transcribe.vocabulary = Vocabulary.normalisedTerms(draft.transcribe.vocabulary)
         controller.applyConfig(draft)
         saved = true
         Task {
@@ -320,6 +322,7 @@ final class SettingsModel: ObservableObject {
     /// Window closing (titlebar close, Cmd-W, quit) must not lose edits the user
     /// forgot to Save — persist them and note it in the activity log.
     func saveIfNeededOnClose() {
+        draft.transcribe.vocabulary = Vocabulary.normalisedTerms(draft.transcribe.vocabulary)
         if draft != controller.config {
             controller.applyConfigOnClose(draft)
         }

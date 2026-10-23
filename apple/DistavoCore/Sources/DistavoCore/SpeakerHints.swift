@@ -67,6 +67,18 @@ public struct SpeakerHints: Codable, Equatable {
         return try? JSONDecoder().decode(SpeakerHints.self, from: data)
     }
 
+    /// The hints for a recording: the work-dir sidecar the recorder's question writes, else a
+    /// `<name>.speakers.json` the user put NEXT TO a dropped file (Vikunja #4012; same schema).
+    /// The work-dir copy always wins, so an answered sheet is never overridden by a stray file.
+    public static func load(workDir: URL, base: String, source: URL) -> SpeakerHints? {
+        if let own = load(workDir: workDir, base: base) { return own }
+        let beside = source.deletingPathExtension().appendingPathExtension("speakers.json")
+        guard let data = try? Data(contentsOf: beside),
+              let hints = try? JSONDecoder().decode(SpeakerHints.self, from: data), !hints.isEmpty
+        else { return nil }
+        return hints
+    }
+
     public func save(workDir: URL, base: String) throws {
         try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()

@@ -397,7 +397,7 @@ public enum Pipeline {
         // Calendar event for this recording (#2946); nil when off / no match.
         let calendarMatch = await CalendarLookup.resolve(
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
-        let hints = SpeakerHints.load(workDir: workDir, base: sourceBase)
+        let hints = SpeakerHints.load(workDir: workDir, base: sourceBase, source: path)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
         // This meeting's own terms come first, then the global vocabulary (#3584); the enabled replacement

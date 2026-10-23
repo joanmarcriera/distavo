@@ -347,6 +347,8 @@ public struct Config: Codable, Equatable {
     /// "Auto-stop" ends the recording after M silent minutes (see `SilenceMonitor`).
     public var autoStopOnSilence: Bool
     public var autoStopSilenceMinutes: Int
+    /// Early mic-silent warning after N seconds (Vikunja #3930); 0 = off, clamped 0...120.
+    public var micSilenceWarningSeconds: Int
     /// "Benchmark this Mac" results (Vikunja #2160), newest run replaces all.
     public var benchmark: [BenchmarkResult]
     /// Actions to run once a recording finishes (Vikunja #2205, superseding
@@ -382,6 +384,7 @@ public struct Config: Codable, Equatable {
         case suggestStopSilenceMinutes = "suggest_stop_silence_minutes"
         case autoStopOnSilence = "auto_stop_on_silence"
         case autoStopSilenceMinutes = "auto_stop_silence_minutes"
+        case micSilenceWarningSeconds = "mic_silence_warning_seconds"
         case benchmark
         case whenDone = "when_done"
         case meetingDetection = "meeting_detection"
@@ -406,6 +409,7 @@ public struct Config: Codable, Equatable {
                 suggestStopSilenceMinutes: Int = 2,
                 autoStopOnSilence: Bool = false,
                 autoStopSilenceMinutes: Int = 5,
+                micSilenceWarningSeconds: Int = 10,
                 benchmark: [BenchmarkResult] = [],
                 whenDone: [WhenDoneAction] = [],
                 meetingDetection: MeetingDetectionConfig = .init(),
@@ -424,6 +428,7 @@ public struct Config: Codable, Equatable {
         self.suggestStopSilenceMinutes = Config.clampSilenceMinutes(suggestStopSilenceMinutes)
         self.autoStopOnSilence = autoStopOnSilence
         self.autoStopSilenceMinutes = Config.clampSilenceMinutes(autoStopSilenceMinutes)
+        self.micSilenceWarningSeconds = min(max(micSilenceWarningSeconds, 0), 120)
         self.benchmark = benchmark
         self.whenDone = whenDone
         self.meetingDetection = meetingDetection
@@ -453,6 +458,7 @@ public struct Config: Codable, Equatable {
         suggestStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .suggestStopSilenceMinutes)).flatMap { $0 } ?? d.suggestStopSilenceMinutes)
         autoStopOnSilence = (try? c.decodeIfPresent(Bool.self, forKey: .autoStopOnSilence)).flatMap { $0 } ?? d.autoStopOnSilence
         autoStopSilenceMinutes = Config.clampSilenceMinutes((try? c.decodeIfPresent(Int.self, forKey: .autoStopSilenceMinutes)).flatMap { $0 } ?? d.autoStopSilenceMinutes)
+        micSilenceWarningSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .micSilenceWarningSeconds)).flatMap { $0 } ?? d.micSilenceWarningSeconds, 0), 120)
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
         notes = (try? c.decodeIfPresent(NotesConfig.self, forKey: .notes)) ?? d.notes
         // `when_done` (an array); unknown entries are dropped rather than

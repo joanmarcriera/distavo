@@ -217,7 +217,7 @@ final class MeetingCaptureController: ObservableObject {
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
         startLevelCheck = StartLevelCheck()
-        micLevelCheck = MicLevelCheck()
+        micLevelCheck = MicLevelCheck(window: configProvider().micSilenceWarningSeconds)   // 0 = off (#3930)
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
@@ -244,6 +244,7 @@ final class MeetingCaptureController: ObservableObject {
     func keepRecording() {
         guard isRecording else { return }
         silenceMonitor?.keepRecording()
+        micLevelCheck.ignore()   // listening-only call: no mic warning again (#3930)
         silenceNotice = nil
         clearSilenceNotification()
         log("Silence suggestion dismissed - keeping the recording")
@@ -434,6 +435,8 @@ final class MeetingCaptureController: ObservableObject {
         case .none:
             if monitor.suggestionActive {
                 silenceNotice = "silent \(max(1, Int(monitor.silentFor / 60))) min"
+            } else if micLevelCheck.warning {
+                silenceNotice = "mic silent"   // withdraws itself when sound arrives (#3930)
             } else if silenceNotice != nil {
                 // Sound came back: withdraw the notice and the notification.
                 silenceNotice = nil

@@ -107,6 +107,11 @@ final class MeetingDetectionController: ObservableObject {
         case .none: break
         case .offerRecording(let app): present(app: app, name: Self.name(for: app), fallback: false)
         case .offerPossibleCall(let frontmost): present(app: frontmost, name: nil, fallback: true)
+        case .offerBrowserCall(let browser, let eventTitle):
+            // Browser mic use cannot be tied to a tab, so the headline stays generic unless a calendar call is in progress.
+            let name = Self.name(for: browser)
+            present(app: browser, name: name, fallback: false,
+                    headline: eventTitle.map { "\(name) call: \($0)" } ?? "\(name) is using the microphone")
         }
     }
 
@@ -115,8 +120,8 @@ final class MeetingDetectionController: ObservableObject {
             ?? MeetingDetectionConfig.displayName(forBundleID: app)
     }
 
-    private func present(app: String, name: String?, fallback: Bool) {
-        let headline = name.map { "\($0) is using the microphone" } ?? "A call may be in progress"
+    private func present(app: String, name: String?, fallback: Bool, headline custom: String? = nil) {
+        let headline = custom ?? name.map { "\($0) is using the microphone" } ?? "A call may be in progress"
         offeredApp = app
         offerWasFallback = fallback
         pendingOffer = headline

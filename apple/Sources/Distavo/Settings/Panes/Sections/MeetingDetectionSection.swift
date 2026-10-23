@@ -11,12 +11,14 @@ struct MeetingDetectionSection: View {
     var body: some View {
         Section("Meeting detection") {
             Toggle("Offer to record when a call starts", isOn: $model.draft.meetingDetection.enabled)
-                .withHelp("While this is on, Distavo checks about once a second whether one of the apps below is capturing from the microphone, and then shows a notification with Record and Not now buttons. Nothing is recorded until you click Record. It reads only which apps are running and which are using the microphone - it never listens to or opens the microphone. Google Meet in a browser can only be detected by adding your browser to the list, and then any other microphone use in that browser (a voice message, a dictation site) also prompts. Some apps capture audio from a helper process under a different name; if a call is not detected, add that helper's bundle id.")
+                .withHelp("While this is on, Distavo checks about once a second whether one of the apps below is capturing from the microphone, and then shows a notification with Record and Not now buttons. Nothing is recorded until you click Record. It reads only which apps are running and which are using the microphone - it never listens to or opens the microphone. Google Meet in a browser is detected only if you switch on \"Also watch browsers\" below; then any other microphone use in a browser (a voice message, a dictation site) also prompts, because a browser does not say which tab is using the microphone and Distavo never reads tab titles. Some apps capture audio from a helper process under a different name; if a call is not detected, add that helper's bundle id.")
             SettingCaption("Nothing is recorded until you click Record.")
             if model.draft.meetingDetection.enabled {
                 Stepper("Not now snoozes that app for \(model.draft.meetingDetection.snoozeMinutes) min",
                         value: $model.draft.meetingDetection.snoozeMinutes,
                         in: MeetingDetectionConfig.snoozeMinutesRange, step: 5)
+                Toggle("Also watch browsers (Google Meet, calls on the web)", isOn: $model.draft.meetingDetection.browserDetection)
+                    .withHelp("Chrome, Safari, Arc, Edge, Firefox, Brave, Vivaldi and Opera. An offer appears when one of them starts using the microphone. Distavo cannot tell which tab, so the offer says only that the browser is using the microphone. Off by default.")
                 ForEach(model.draft.meetingDetection.apps, id: \.self) { id in
                     HStack {
                         Text(MeetingDetectionConfig.displayName(forBundleID: id))
@@ -41,7 +43,7 @@ struct MeetingDetectionSection: View {
                 if !newApp.isEmpty, !MeetingDetectionConfig.isPlausibleBundleID(newApp.trimmingCharacters(in: .whitespaces)) {
                     SettingCaption("A bundle id looks like com.company.app (letters, digits, dots, hyphens).")
                 }
-                SettingCaption("Browsers are not watched by default; add one only if you take calls in it.")
+                SettingCaption("Browsers are watched only if the switch above is on.")
             }
         }
     }

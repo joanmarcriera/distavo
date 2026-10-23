@@ -153,13 +153,16 @@ one runs (shared config).
    remains; it says "A call may be in progress" and names no app.
 10. **Record start-only** — click Record while the pre-flight dialog is still open
     from an earlier click: it never turns into a stop.
-11. **Browser caveat** — add your browser's id (`com.google.Chrome`, …) and open
-    meet.google.com with the mic on. Chrome and other Chromium/Electron apps often
-    capture from a helper process (e.g. `com.google.Chrome.helper`); helpers match
-    their listed app by dotted prefix, but whether the Core Audio process object
-    reports the helper's or the parent's id is unconfirmed - check the log line.
-    Any other mic use in that browser (a voice message) also prompts (documented).
-    Remove it again afterwards.
+11. **Browser / Google Meet (#4002)** — switch on "Also watch browsers"
+    (`meeting_detection.browser_detection`, default false) and join a real
+    meet.google.com call in Chrome (repeat in Safari/Arc/Edge if used). Expected: the
+    offer "Chrome is using the microphone" within about 5 s (2 s debounce + 1 s poll).
+    Chromium captures from a helper (`com.google.Chrome.helper`); helpers match their
+    listed browser by dotted prefix, but whether Core Audio reports the helper's or
+    the parent's id is unconfirmed - check the log line "Meeting offer: ...". The
+    offer is generic (a browser cannot say which tab); any other browser mic use (a
+    voice message) also prompts. With the switch off nothing prompts. Record the
+    result, with Zoom and Teams, on Vikunja #2945 / #4002.
 12. **Sleep/wake** — enable, sleep the Mac with a call app open, wake mid-call: no
     prompt storm; a call that is still live prompts once after about 2 s.
 

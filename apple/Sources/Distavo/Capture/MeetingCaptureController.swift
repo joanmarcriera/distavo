@@ -352,7 +352,8 @@ final class MeetingCaptureController: ObservableObject {
             let detection = startLanguageDetection(partURL: savedURL.appendingPathExtension("part"))
             let inPerson = askSpeakers(for: savedURL, config: config, detection: detection,
                         prefillOthers: config.calendar.attendeesAsParticipants
-                            ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "")
+                            ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "",
+                        systemAudioHeard: outcome.systemAudioHeard)
             if !outcome.systemAudioHeard {
                 if inPerson {
                     notify("Meeting recording saved", "\(savedURL.lastPathComponent) — in person, microphone only. Distavo will transcribe it shortly.")
@@ -466,7 +467,7 @@ final class MeetingCaptureController: ObservableObject {
     /// the prompt stays exactly as it was for this recording.
     @discardableResult
     private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
-                             prefillOthers: String = "") -> Bool {
+                             prefillOthers: String = "", systemAudioHeard: Bool = false) -> Bool {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -490,7 +491,12 @@ final class MeetingCaptureController: ObservableObject {
         others.maximumNumberOfLines = 3
         // In-person meeting, microphone only (#3586): no system-audio warnings, and a hint that speaker
         // separation needs the number of people.
-        let inPersonBox = NSButton(checkboxWithTitle: "In-person meeting (microphone only)", target: nil, action: nil)
+        let boxPolicy = InPersonBoxPolicy.make(systemAudioHeard: systemAudioHeard)   // #4023
+        let inPersonBox = NSButton(checkboxWithTitle: boxPolicy.title, target: nil, action: nil)
+        inPersonBox.toolTip = boxPolicy.tooltip
+        let inPersonHelp = NSTextField(wrappingLabelWithString: boxPolicy.help)
+        inPersonHelp.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        inPersonHelp.textColor = .secondaryLabelColor
         // Names and jargon for this meeting only (#3584): merged ahead of the global vocabulary.
         let meetingTerms = NSTextField(string: suggested.terms.joined(separator: ", "))
         if let o = suggested.termsOrigin { meetingTerms.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
@@ -589,8 +595,11 @@ final class MeetingCaptureController: ObservableObject {
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
             row("Terms for this meeting:", meetingTerms, width: 300),
-            row("", inPersonBox, width: 300),
         ]
+        if boxPolicy.visible {
+            rows.append(row("", inPersonBox, width: 300))
+            rows.append(row("", inPersonHelp, width: 300))
+        }
         if detection != nil {
             rows.append(row("Meeting language:", language, width: 200))
             let statusRow = NSStackView(views: [NSTextField(labelWithString: ""), languageStatus])

@@ -29,7 +29,8 @@ public enum SummaryChecks {
     ///   - context: the note context the prompt was built from.
     public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
-        let relabelled = SpeakerLabelNormaliser.normalise(summary, transcript: transcript)
+        // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
+        let relabelled = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
         // Facts-ledger rows the transcript does not support are dropped or flagged (#3581).
         guard context.promptStyle == .factsFirst else {
             return SummaryCheckOutcome(text: relabelled, notes: context.summaryNotes)

@@ -138,6 +138,8 @@ public struct NoteContext: Equatable, Sendable {
     /// Sentences for the note's summary footer line (`NoteFooterLines`), e.g. why
     /// a template was chosen (1.19). Never part of the prompt.
     public var summaryNotes: [String] = []
+    /// The recording stops while people were still talking (`TruncationCheck`, #4013). false = prompt byte-identical.
+    public var recordingMayBeTruncated: Bool = false
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
@@ -159,7 +161,8 @@ public struct NoteContext: Equatable, Sendable {
         Prompt.build(transcript: transcript, noteOwner: noteOwner, userSpeaker: userSpeaker,
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
                      noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
-                     template: template, scratchpad: scratchpad)
+                     template: template, scratchpad: scratchpad,
+                     truncated: recordingMayBeTruncated)
     }
 }
 
@@ -501,6 +504,13 @@ public enum Pipeline {
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            // #4013: a recording that stops mid-conversation is flagged, not summarised as complete.
+            if let timed = timedForNote, let audio = await deps.audioDurationSeconds(path),
+               TruncationCheck.isTruncated(segments: timed.segments, audioSeconds: audio) {
+                context.recordingMayBeTruncated = true
+                context.summaryNotes.append(TruncationCheck.banner)
+                print("[Distavo] " + TruncationCheck.logLine(lastSegmentEnd: timed.segments.last?.end ?? 0, audioSeconds: audio))
+            }
             let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
                 segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked

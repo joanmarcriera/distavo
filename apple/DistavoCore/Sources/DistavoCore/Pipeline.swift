@@ -194,6 +194,9 @@ public struct PipelineDeps {
     /// built-in recorder's file name or the media's embedded creation date -
     /// never the filesystem creation/modification date (Vikunja #2946).
     public var recordingStart: (URL) async -> Date?
+    /// The container's embedded creation date (when the recording ENDED, usually UTC), for dating a
+    /// dropped file's note when its name carries no stamp (Vikunja #4018). Defaults to AVAsset metadata.
+    public var containerCreationDate: (URL) async -> Date?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -204,8 +207,10 @@ public struct PipelineDeps {
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
         calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
-        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) }
+        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) },
+        containerCreationDate: @escaping (URL) async -> Date? = { await Pipeline.containerCreation($0) }
     ) {
+        self.containerCreationDate = containerCreationDate
         self.calendarLookup = calendarLookup
         self.recordingStart = recordingStart
         self.convertToWav = convertToWav
@@ -496,9 +501,12 @@ public enum Pipeline {
                 sidecarID: LanguageOverride.load(
                     workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template,
                 participants: participants, transcript: clean)
+            let noteDate: Date?
+            if let calendarStart = calendarMatch?.recordingStart { noteDate = calendarStart }
+            else { noteDate = await noteStart(for: path, deps: deps) }
             var context = NoteContext(
                 noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
-                participants: participants, meetingDate: calendarMatch?.recordingStart ?? meetingDate(for: path),
+                participants: participants, meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
                 customInstruction: NoteMeta.mergedInstruction(nil, notes: config.notes),
@@ -733,6 +741,29 @@ public enum Pipeline {
         // Phone / export names (`interview-22-10-2026-10.00`) beat the copy-time file date (#4018).
         if let date = RecordingStamp.parse(stem, timeZone: timeZone) { return date }
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
+    }
+
+    /// Start of the recording for NOTE dating (#4018), in order of evidence: the recorder's or a phone's
+    /// name stamp, the container `creation_time` minus the duration, the file system date.
+    static func noteStart(for url: URL, deps: PipelineDeps, timeZone: TimeZone = .current) async -> Date? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        if let date = recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone) {
+            return date
+        }
+        if let created = await deps.containerCreationDate(url),
+           let duration = await deps.audioDurationSeconds(url),
+           let start = RecordingStamp.start(creation: created, duration: duration) {
+            return start
+        }
+        return meetingDate(for: url, timeZone: timeZone)
+    }
+
+    /// The media's embedded creation date (AVAsset), nil when absent.
+    public static func containerCreation(_ url: URL) async -> Date? {
+        let asset = AVURLAsset(url: url)
+        guard let item = try? await asset.load(.creationDate),
+              let date = try? await item.load(.dateValue) else { return nil }
+        return date
     }
 
     /// The start time in a recorder-style name, exactly as before #2946 (any

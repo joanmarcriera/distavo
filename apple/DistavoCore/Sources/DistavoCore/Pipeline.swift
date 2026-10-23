@@ -509,8 +509,9 @@ public enum Pipeline {
             var noteMeta: NoteMeta.Extracted?       // the model's title/tags (#2954)
             var noteBody = "", noteFooter = ""
             var languageRetried = false             // #3585: the one retry for a note in the wrong language
+            var summaryOptions = config.summarise.options   // #4011: stiffened for the one retry after a repetition collapse
             func summariseAttempt() async throws -> (text: String, failures: [String]) {
-                let raw = try await deps.summarise(clean, target, config.summarise.options, context)
+                let raw = try await deps.summarise(clean, target, summaryOptions, context)
                 // A rare edge case (the ledger only existed in the discarded
                 // preamble): print rather than writing to the real
                 // ActivityLog file, so a unit test exercising it never
@@ -553,6 +554,33 @@ public enum Pipeline {
             // keep failing immediately as before.
             if isRetryableTruncation(failures) {
                 (noteText, failures) = try await summariseAttempt()
+            }
+            // A repetition collapse (a loop the guard rightly rejects) gets ONE retry with a firmer
+            // repeat penalty and another seed (#4011); the same options would loop the same way.
+            var collapsed = failures.contains { $0.contains("repetition collapse") }
+            if collapsed {
+                summaryOptions = Pipeline.stiffened(summaryOptions)
+                (noteText, failures) = try await summariseAttempt()
+                collapsed = failures.contains { $0.contains("repetition collapse") }
+            }
+            // Still looping: keep the work. A transcript-only note that says why beats no note and a stuck
+            // `.failed` marker; Regenerate can fill the summary in later. The rejected text stays quarantined.
+            if collapsed {
+                let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
+                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                let reason = failures.joined(separator: "; ")
+                let fallback = composeNote(
+                    body: Pipeline.transcriptOnlyNote(reason: reason, transcript: clean), footer: "", meta: nil,
+                    config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
+                    cleanTranscript: clean, dominantCode: dominantCode,
+                    existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                try fallback.write(to: notePath, atomically: true, encoding: .utf8)
+                state.markDone(base)
+                return ProcessResult(status: .done, base: base,
+                                     message: "note written (transcript only: summary rejected twice: \(reason))",
+                                     notePath: notePath, transcriptPath: transcriptPath,
+                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
             // A Catalan/Spanish note that came back in another language gets one retry with the
             // language stated again (#3585). The first note is kept if the retry is rejected.
@@ -766,6 +794,25 @@ public enum Pipeline {
             languageUsed: transcribeResult["language_used"] as? String,
             recommendation: transcribeResult["recommendation"] as? String,
             notes: transcribeResult["footer_notes"] as? [String] ?? [])
+    }
+
+    /// Options for the one retry after a repetition collapse (#4011): firmer penalty over a longer window,
+    /// a little more temperature and a different seed, so the retry does not walk the same loop.
+    static func stiffened(_ o: SummariseOptions) -> SummariseOptions {
+        var n = o
+        n.repeatPenalty = max(o.repeatPenalty, 1.0) + 0.2
+        n.repeatLastN = max(o.repeatLastN, 1024)
+        n.temperature = max(o.temperature, 0.3)
+        n.seed = o.seed &+ 1
+        return n
+    }
+
+    /// Body of the fallback note written when the summary collapsed twice (#4011).
+    static func transcriptOnlyNote(reason: String, transcript: String) -> String {
+        "# Meeting notes\n\n"
+        + "> No summary: the model's output looped twice and was rejected (\(reason)). "
+        + "Use Regenerate Note… with another model; the transcript is below.\n\n"
+        + "## Transcript\n\n" + transcript.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 
     /// Only "summary is empty" and "summary is truncated" failures (Vikunja

@@ -662,7 +662,8 @@ final class PipelineTests: XCTestCase {
             path: input, config: cfg,
             deps: deps(summarise: { _, _, _, _ in repeated }),
             stableChecks: 1, stableDelay: 0)
-        XCTAssertEqual(result.status, .failed)
+        // #4011: a collapse is retried, then falls back to a transcript-only note instead of failing.
+        XCTAssertEqual(result.status, .done)
         XCTAssertTrue(result.message.contains("repetition collapse"))
     }
 
@@ -679,22 +680,42 @@ final class PipelineTests: XCTestCase {
             path: input, config: cfg,
             deps: deps(summarise: { _, _, _, _ in repeated }),
             stableChecks: 1, stableDelay: 0)
-        XCTAssertEqual(result.status, .failed)
-        XCTAssertTrue(result.message.hasPrefix("summary rejected"), result.message)
+        // #4011: no longer a failure: a transcript-only note is written; the looping text stays quarantined.
+        XCTAssertEqual(result.status, .done)
         XCTAssertTrue(result.message.contains("repetition collapse"), result.message)
 
         let fm = FileManager.default
         let notesDir = URL(fileURLWithPath: cfg.notesDir)
         let notes = ((try? fm.contentsOfDirectory(atPath: notesDir.path)) ?? []).filter { $0.hasSuffix(".md") }
-        XCTAssertTrue(notes.isEmpty, "failed summary leaked into notesDir: \(notes)")
+        XCTAssertEqual(notes.count, 1)
+        let noteText = try String(contentsOf: notesDir.appendingPathComponent(notes[0]), encoding: .utf8)
+        XCTAssertFalse(noteText.contains("the cat sat on mat the cat sat on mat"), "the looping text must not be in the note")
+        XCTAssertTrue(noteText.contains("No summary"))
 
         let quarantined = URL(fileURLWithPath: cfg.workDir)
             .appendingPathComponent("\(result.base).failed-summary.md")
         let saved = try String(contentsOf: quarantined, encoding: .utf8)
         XCTAssertTrue(saved.contains("the cat sat on mat"))
-        // Nothing the app could open as a note.
-        XCTAssertNil(result.notePath)
-        XCTAssertTrue(result.message.contains(quarantined.path), "message should say where the text was kept")
+    }
+
+    /// #4011: the first collapse is retried with firmer options; a good second answer becomes the note.
+    func testCollapseIsRetriedOnceWithStifferOptions() async throws {
+        let (cfg, input) = try makeEnv()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let seen = OptionsLog()
+        let good = fullLengthGoodNote
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(summarise: { _, _, o, _ in
+                seen.add(o)
+                return seen.all.count == 1 ? repeated : good
+            }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(seen.all.count, 2)
+        XCTAssertGreaterThan(seen.all[1].repeatPenalty, seen.all[0].repeatPenalty)
+        XCTAssertNotEqual(seen.all[1].seed, seen.all[0].seed)
+        XCTAssertFalse(result.message.contains("transcript only"))
     }
 
     func testEmptySummaryMessageNamesReason() async throws {
@@ -782,9 +803,9 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(calls.count, 2)
     }
 
-    /// Repetition collapse and overlong failures are NOT retried — they keep
-    /// failing after exactly one summarise call, same as before this change.
-    func testRepetitionCollapseIsNotRetried() async throws {
+    /// #4011: a repetition collapse is retried exactly once (stiffer options), then the note is transcript-only.
+    /// (Was: not retried.) Overlong failures still fail after one call.
+    func testRepetitionCollapseIsRetriedOnceThenFallsBack() async throws {
         let (cfg, input) = try makeEnv()
         let calls = CallCounter()
         let repeated = String(repeating: "the cat sat on mat ", count: 20)
@@ -792,8 +813,8 @@ final class PipelineTests: XCTestCase {
             path: input, config: cfg,
             deps: deps(summarise: { _, _, _, _ in calls.increment(); return repeated }),
             stableChecks: 1, stableDelay: 0)
-        XCTAssertEqual(result.status, .failed)
-        XCTAssertEqual(calls.count, 1)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertEqual(calls.count, 2)
     }
 
     // MARK: Summariser selection
@@ -1236,4 +1257,12 @@ final class PipelineTests: XCTestCase {
             config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(results.map(\.status), [.done])
     }
+}
+
+/// Thread-safe log of the options the fake summariser was called with (#4011).
+final class OptionsLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var items: [SummariseOptions] = []
+    func add(_ o: SummariseOptions) { lock.lock(); items.append(o); lock.unlock() }
+    var all: [SummariseOptions] { lock.lock(); defer { lock.unlock() }; return items }
 }

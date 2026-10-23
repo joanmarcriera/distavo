@@ -39,6 +39,7 @@ struct RecordingPane: View {
         }
 
         if MeetingCaptureController.isSupported { MeetingDetectionSection(model: model) }
+        if MeetingCaptureController.isSupported { RecordHotkeySection(model: model) }   // #4001
         if MeetingCaptureController.isSupported { KeyMomentsSection(model: model) }   // #2950
 
         Section("Recordings") {

@@ -256,14 +256,23 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
     /// Try the other microphones when the selected one is silent (Vikunja #4039, `MicFallback`).
     /// Off for any config predating it; on for fresh installs via `recommendedForThisMac()`.
     public var micAutoSwitch: Bool
+    /// Global shortcut that starts/stops a recording with no questions (Vikunja #4001). Off by default,
+    /// also for fresh installs (inert-until-switched-on rule); registered whenever enabled, not only
+    /// while recording. The default combination is ⌃⌥⌘R.
+    public var recordHotkeyEnabled: Bool
+    public var recordHotkey: HotkeySpec
 
     public static let clipSecondsRange = 0...600
 
     public init(bookmarkHotkeyEnabled: Bool = false, bookmarkHotkey: HotkeySpec = .default,
                 clipLeadSeconds: Int = RecordingBookmarks.defaultLeadSeconds,
                 clipTailSeconds: Int = RecordingBookmarks.defaultTailSeconds,
-                micAutoSwitch: Bool = false) {
+                micAutoSwitch: Bool = false,
+                recordHotkeyEnabled: Bool = false,
+                recordHotkey: HotkeySpec = .recordDefault) {
         self.micAutoSwitch = micAutoSwitch
+        self.recordHotkeyEnabled = recordHotkeyEnabled
+        self.recordHotkey = recordHotkey
         self.bookmarkHotkeyEnabled = bookmarkHotkeyEnabled
         self.bookmarkHotkey = bookmarkHotkey
         self.clipLeadSeconds = Self.clamp(clipLeadSeconds)
@@ -276,6 +285,8 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         case clipLeadSeconds = "clip_lead_seconds"
         case clipTailSeconds = "clip_tail_seconds"
         case micAutoSwitch = "mic_auto_switch"
+        case recordHotkeyEnabled = "record_hotkey_enabled"
+        case recordHotkey = "record_hotkey"
     }
 
     public init(from decoder: Decoder) throws {
@@ -288,6 +299,21 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         clipLeadSeconds = Self.clamp((try? c.decodeIfPresent(Int.self, forKey: .clipLeadSeconds)).flatMap { $0 } ?? d.clipLeadSeconds)
         clipTailSeconds = Self.clamp((try? c.decodeIfPresent(Int.self, forKey: .clipTailSeconds)).flatMap { $0 } ?? d.clipTailSeconds)
         micAutoSwitch = (try? c.decodeIfPresent(Bool.self, forKey: .micAutoSwitch)).flatMap { $0 } ?? d.micAutoSwitch
+        recordHotkeyEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .recordHotkeyEnabled)).flatMap { $0 } ?? d.recordHotkeyEnabled
+        let rspec = (try? c.decodeIfPresent(HotkeySpec.self, forKey: .recordHotkey)).flatMap { $0 }
+        recordHotkey = (rspec?.isValid == true ? rspec : nil) ?? d.recordHotkey
+    }
+
+    /// Why the record shortcut cannot be used right now, or nil. The same combination must not be
+    /// bound to both the record and the key-moment shortcut (the second registration would fail
+    /// silently), so a clash is reported before either is registered.
+    public var recordHotkeyProblem: String? {
+        guard recordHotkeyEnabled else { return nil }
+        if !recordHotkey.isValid { return "The record shortcut needs \u{2303}, \u{2325} or \u{2318}." }
+        if bookmarkHotkeyEnabled, bookmarkHotkey == recordHotkey {
+            return "The record shortcut \(recordHotkey.displayName) is also the key-moment shortcut. Choose a different combination."
+        }
+        return nil
     }
 
     static func clamp(_ s: Int) -> Int {
@@ -305,6 +331,8 @@ public struct HotkeySpec: Codable, Equatable, Sendable {
     public static let cmd = 256, shift = 512, option = 2048, control = 4096
     /// ⌃⌥⌘M.
     public static let `default` = HotkeySpec(keyCode: 46, modifiers: control | option | cmd)
+    /// ⌃⌥⌘R (kVK_ANSI_R = 15): the record start/stop shortcut (#4001).
+    public static let recordDefault = HotkeySpec(keyCode: 15, modifiers: control | option | cmd)
 
     public init(keyCode: Int, modifiers: Int) { self.keyCode = keyCode; self.modifiers = modifiers }
 

@@ -216,6 +216,7 @@ final class WatcherController: ObservableObject {
             }
         }
         meetingDetection.configure()
+        capture.applyRecordHotkeyConfig()   // #4001: the global start/stop shortcut, from launch
         notifier.requestAuthorization()
         scanTask = Task { [weak self] in await self?.runAfterLaunch() }
     }

@@ -139,8 +139,33 @@ final class MeetingCaptureController: ObservableObject {
     /// "Quick Notes…" menu item: open the floating notes panel (recording only).
     func showQuickNotes() { quickNotes.showPanel() }
 
+    private let recordHotkey = RecordHotkeyModel()
+
+    /// Register (or release) the global record start/stop shortcut from Settings (#4001). Called at
+    /// launch and on every Settings change. Pressing it starts a recording with no dialog, or stops
+    /// the running one (the end-of-recording sheet then appears as for the menu's Stop).
+    func applyRecordHotkeyConfig() {
+        let cfg = configProvider().recording
+        guard Self.isSupported else { return }
+        if let problem = recordHotkey.apply(cfg, onPress: { [weak self] in self?.recordHotkeyPressed() }) {
+            log(problem)
+        }
+    }
+
+    private func recordHotkeyPressed() {
+        if isRecording {
+            log("Recording stopped by the global shortcut")
+            stopRecording()
+        } else {
+            log("Recording started by the global shortcut")
+            startIfIdle()
+            notify("Recording started", "Started with the keyboard shortcut. Press it again to stop.")
+        }
+    }
+
     /// Settings changed: re-register (or release) the hotkey of a running recording.
     func applyKeyMomentHotkeyConfig() {
+        applyRecordHotkeyConfig()   // #4001: the record shortcut (and its clash check) follows the same changes
         guard isRecording else { return }
         let cfg = configProvider().recording
         if let problem = keyMoments.updateHotkey(cfg.bookmarkHotkeyEnabled ? cfg.bookmarkHotkey : nil) {

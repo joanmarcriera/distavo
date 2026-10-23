@@ -99,33 +99,45 @@ final class KeyMomentsModel: ObservableObject {
 
 /// One global hotkey through Carbon's `RegisterEventHotKey` (the only public API
 /// that works sandboxed without extra permissions). Press events arrive on the
-/// application event target; the C callback hops to the main actor.
+/// application event target; the C callback reads WHICH hotkey fired (its id) and
+/// hops to the main actor, so several instances (key moment = 1, record = 2, #4001)
+/// share one installed handler.
 @MainActor
 final class KeyMomentHotkey {
     private var ref: EventHotKeyRef?
     private static var handler: EventHandlerRef?
-    private static var onPress: (@MainActor () -> Void)?
+    private static var presses: [UInt32: @MainActor () -> Void] = [:]
+
+    let id: UInt32
+    /// Used in failure messages, e.g. "key-moment" or "record".
+    let label: String
+    init(id: UInt32 = 1, label: String = "key-moment") { self.id = id; self.label = label }
 
     /// Registers `spec`; returns a message on failure (nil = registered).
     func register(_ spec: HotkeySpec, onPress: @escaping @MainActor () -> Void) -> String? {
         unregister()
-        guard spec.isValid else { return "The key-moment shortcut \(spec.displayName) is not valid (it needs ⌃, ⌥ or ⌘)." }
+        guard spec.isValid else { return "The \(label) shortcut \(spec.displayName) is not valid (it needs \u{2303}, \u{2325} or \u{2318})." }
         if Self.handler == nil {
             var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-            let status = InstallEventHandler(GetApplicationEventTarget(), { _, _, _ in
-                DispatchQueue.main.async { MainActor.assumeIsolated { KeyMomentHotkey.onPress?() } }
+            let status = InstallEventHandler(GetApplicationEventTarget(), { _, event, _ in
+                var hkID = EventHotKeyID()
+                let got = GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
+                                            nil, MemoryLayout<EventHotKeyID>.size, nil, &hkID)
+                guard got == noErr else { return noErr }
+                let pressed = hkID.id
+                DispatchQueue.main.async { MainActor.assumeIsolated { KeyMomentHotkey.presses[pressed]?() } }
                 return noErr
             }, 1, &eventType, nil, &Self.handler)
-            guard status == noErr else { return "Could not listen for the key-moment shortcut (error \(status))." }
+            guard status == noErr else { return "Could not listen for the \(label) shortcut (error \(status))." }
         }
-        Self.onPress = onPress
-        let id = EventHotKeyID(signature: OSType(0x444B4D4B), id: 1)   // 'DKMK'
+        Self.presses[id] = onPress
+        let hkID = EventHotKeyID(signature: OSType(0x444B4D4B), id: id)   // 'DKMK'
         var newRef: EventHotKeyRef?
-        let status = RegisterEventHotKey(UInt32(spec.keyCode), UInt32(spec.modifiers), id,
+        let status = RegisterEventHotKey(UInt32(spec.keyCode), UInt32(spec.modifiers), hkID,
                                          GetApplicationEventTarget(), 0, &newRef)
         guard status == noErr, let newRef else {
-            Self.onPress = nil
-            return "The key-moment shortcut \(spec.displayName) could not be registered - another app probably uses it. Choose a different combination in Settings > Recording; the menu item still works."
+            Self.presses[id] = nil
+            return "The \(label) shortcut \(spec.displayName) could not be registered - another app probably uses it. Choose a different combination in Settings > Recording."
         }
         ref = newRef
         return nil
@@ -134,6 +146,33 @@ final class KeyMomentHotkey {
     func unregister() {
         if let ref { UnregisterEventHotKey(ref) }
         ref = nil
-        Self.onPress = nil
+        Self.presses[id] = nil
+    }
+}
+
+/// The global record start/stop shortcut (Vikunja #4001). Unlike the key-moment hotkey it is registered
+/// whenever it is enabled in Settings, not only while recording. Press = start (if idle) or stop; the
+/// controller posts the "Recording started" notification so an accidental press is visible.
+@MainActor
+final class RecordHotkeyModel {
+    /// UserDefaults key the Settings section reads to show a registration failure or a clash.
+    static let errorKey = "distavo.recordHotkey.error"
+    private let hotkey = KeyMomentHotkey(id: 2, label: "record")
+
+    /// Apply the config: register, re-register or release. Returns the problem text, if any.
+    @discardableResult
+    func apply(_ options: RecordingOptions, onPress: @escaping @MainActor () -> Void) -> String? {
+        hotkey.unregister()
+        UserDefaults.standard.removeObject(forKey: Self.errorKey)
+        guard options.recordHotkeyEnabled else { return nil }
+        if let problem = options.recordHotkeyProblem {
+            UserDefaults.standard.set(problem, forKey: Self.errorKey)
+            return problem
+        }
+        if let failure = hotkey.register(options.recordHotkey, onPress: onPress) {
+            UserDefaults.standard.set(failure, forKey: Self.errorKey)
+            return failure
+        }
+        return nil
     }
 }

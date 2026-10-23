@@ -38,7 +38,7 @@ struct KeyMomentsSection: View {
 
 /// A click-to-record shortcut field: click it, press a combination, it shows
 /// e.g. "⌃⌥⌘M". Rejects combinations without ⌘/⌥/⌃ (they would steal typing).
-private struct HotkeyRecorderField: NSViewRepresentable {
+struct HotkeyRecorderField: NSViewRepresentable {
     @Binding var spec: HotkeySpec
 
     func makeNSView(context: Context) -> RecorderView {

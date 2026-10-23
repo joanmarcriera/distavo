@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# ops/tests/test-weekly-metrics.sh — fixture test for ops/weekly-metrics.sh (no network).
+# Usage: ops/tests/test-weekly-metrics.sh   (exit 0 = pass)
+set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
+out="$("$HERE/../weekly-metrics.sh" --fixture "$HERE/fixtures/metrics")" || { echo "FAIL: nonzero exit"; exit 1; }
+fail=0
+for pat in '^ratings: ' '^review: ' '^downloads: '; do
+  echo "$out" | grep -q "$pat" || { echo "FAIL: no line matching $pat"; fail=1; }
+done
+[ "$(echo "$out" | grep -c '^ratings: ')" -eq 2 ] || { echo "FAIL: expected 2 ratings lines"; fail=1; }
+echo "$out" | grep -q 'unavailable' && { echo "FAIL: unavailable in fixture output"; fail=1; }
+[ $fail -eq 0 ] && echo "PASS test-weekly-metrics"
+exit $fail

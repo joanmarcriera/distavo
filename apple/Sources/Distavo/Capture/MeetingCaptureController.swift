@@ -312,14 +312,15 @@ final class MeetingCaptureController: ObservableObject {
         // The "no system audio" notice is a problem for a call but not for an in-person meeting
         // (microphone only, #3586): when the speakers question is coming, it waits for that answer.
         func noSystemAudioNotice() {
-            notify("Recording saved — but no system audio was captured",
-                   "If you denied the System Audio Recording permission, enable it under "
-                   + "System Settings → Privacy & Security → Screen & System Audio Recording "
-                   + "and record again.")
+            // Never opens System Settings unasked (#4022); the policy only picks the wording and rate-limits the hint.
+            let key = "permissionNudge.lastHint"
+            let last = UserDefaults.standard.object(forKey: key) as? Date
+            let kind = PermissionNudgePolicy.notice(
+                stoppedBySilence: silenceMinutes != nil, microphoneHeard: outcome.microphoneHeard,
+                lastHint: last, now: Date())
+            if kind == .permissionHint { UserDefaults.standard.set(Date(), forKey: key) }
+            notify(PermissionNudgePolicy.title(kind), PermissionNudgePolicy.body(kind))
             log("Warning: recording contained no system audio (permission denied or nothing was playing)")
-            // A silence stop is expected to end a quiet recording; do not
-            // yank the user into System Settings for it.
-            if silenceMinutes == nil { openPrivacyPane() }
         }
         if !outcome.systemAudioHeard && ask {
             // decided after the question below
@@ -739,12 +740,6 @@ final class MeetingCaptureController: ObservableObject {
                 NSWorkspace.shared.open(url)
             }
             return false
-        }
-    }
-
-    private func openPrivacyPane() {
-        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-            NSWorkspace.shared.open(url)
         }
     }
 }

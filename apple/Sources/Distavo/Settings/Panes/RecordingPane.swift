@@ -12,6 +12,9 @@ struct RecordingPane: View {
                 Toggle("Ask who was in the meeting when a recording stops",
                        isOn: $model.draft.askSpeakersOnStop)
                     .withHelp("After you stop the built-in recorder, Distavo asks how many people spoke, your role and who the others were, and hands that to the summariser so the notes name the speakers and the follow-up email is written from your side. Skip the question any time.")
+                Toggle("Switch to another microphone if the selected one is silent",
+                       isOn: $model.draft.recording.micAutoSwitch)
+                    .withHelp("If nothing comes in from the microphone for the first few seconds, Distavo tries your other microphones one by one (virtual devices such as BlackHole are skipped) and tells you each time. If none of them picks up sound it goes back to the first and warns you. It never changes your Mac's input setting, and stops looking as soon as any microphone is heard.")
                 // Silence handling (Vikunja #2665). Both are off by default:
                 // an unwanted stop loses audio for good.
                 HStack {

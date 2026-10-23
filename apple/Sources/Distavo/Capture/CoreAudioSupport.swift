@@ -1,5 +1,6 @@
 import Foundation
 import AudioToolbox
+import DistavoCore
 
 // Core Audio property-access helpers for the meeting recorder.
 // Adapted from insidegui/AudioCap (BSD-2-Clause, © 2024 Guilherme Rambo) —
@@ -37,6 +38,13 @@ extension AudioObjectID {
     func readDeviceUID() throws -> String {
         try read(AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain), defaultValue: "" as CFString) as String
+    }
+
+    func readDeviceName() throws -> String {
+        try read(AudioObjectPropertyAddress(
+            mSelector: kAudioObjectPropertyName,
             mScope: kAudioObjectPropertyScopeGlobal,
             mElement: kAudioObjectPropertyElementMain), defaultValue: "" as CFString) as String
     }
@@ -102,6 +110,50 @@ extension AudioObjectID {
         }
         guard err == noErr else { throw CaptureError.coreAudio("property read", err) }
         return value
+    }
+}
+
+/// Input-device listing for the microphone fallback (#4039). Pure policy lives in DistavoCore.
+enum AudioInputDevices {
+    static func all() -> [AudioDeviceID] {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(.system, &address, 0, nil, &size) == noErr, size > 0 else { return [] }
+        var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
+        guard AudioObjectGetPropertyData(.system, &address, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }
+
+    static func deviceID(forUID uid: String) -> AudioDeviceID? {
+        all().first { (try? $0.readDeviceUID()) == uid }
+    }
+
+    /// Output channels of a device (output scope), for the "real input" filter.
+    private static func outputChannels(_ id: AudioDeviceID) -> Int {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr, size > 0 else { return 0 }
+        let raw = UnsafeMutableRawPointer.allocate(byteCount: Int(size), alignment: MemoryLayout<AudioBufferList>.alignment)
+        defer { raw.deallocate() }
+        guard AudioObjectGetPropertyData(id, &address, 0, nil, &size, raw) == noErr else { return 0 }
+        return UnsafeMutableAudioBufferListPointer(raw.assumingMemoryBound(to: AudioBufferList.self))
+            .reduce(0) { $0 + Int($1.mNumberChannels) }
+    }
+
+    /// Every device with input channels, in the system order, as plain values for `MicCandidates`.
+    static func inputs() -> [InputDeviceInfo] {
+        all().compactMap { id in
+            guard let uid = try? id.readDeviceUID(), !uid.isEmpty,
+                  let channels = try? id.readInputChannelCount(), channels > 0 else { return nil }
+            return InputDeviceInfo(id: uid, name: (try? id.readDeviceName()) ?? uid,
+                                   inputChannels: channels, outputChannels: outputChannels(id))
+        }
     }
 }
 

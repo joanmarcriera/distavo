@@ -63,6 +63,9 @@ struct StatusMenu: View {
                    : "● Record meeting (system audio + mic)") {
                 capture.toggle()
             }
+            if capture.isRecording, let input = capture.liveInputName {
+                Text("🎙 \(input)")   // #4039: the input actually recorded, live
+            }
             if capture.isRecording, capture.silenceNotice != nil {
                 // Vikunja #2665: the menu-side answer to the silence suggestion
                 // (also the fallback when notifications are denied).

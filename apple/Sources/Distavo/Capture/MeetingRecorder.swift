@@ -32,6 +32,12 @@ final class MeetingRecorder {
     private var partURL: URL?
     private var outputBuffer: AVAudioPCMBuffer?
     private var micChannelCount = 1
+    private var skipChannelCount = 0          // input channels of the output device (not the mic)
+    private var tapUUIDString = ""
+    private var outputFormat: AVAudioFormat?
+    /// Name/UID of the input currently recorded (menu label, provenance), nil until started (#4039).
+    private(set) var inputName: String?
+    private(set) var inputUID: String?
 
     // Written on `queue` while recording, read after stop — used to tell the
     // user when a permission problem produced a silent track (a denied
@@ -86,44 +92,8 @@ final class MeetingRecorder {
         do {
             // 2. Private aggregate: default output (clock source — a tap-only
             // aggregate silently yields zeros) + default mic + the tap.
-            let outputDevice = try AudioObjectID.readDefaultSystemOutputDevice()
-            let outputUID = try outputDevice.readDeviceUID()
-            let inputDevice = try AudioObjectID.readDefaultInputDevice()
-            let inputUID = try inputDevice.readDeviceUID()
-            micChannelCount = max(1, (try? inputDevice.readInputChannelCount()) ?? 1)
-            // A pro-audio interface can be the system OUTPUT and still expose
-            // input channels; those appear before the mic's in the aggregate's
-            // buffer list (sub-device order) and must not be counted as mic.
-            let outputInputChannels = (outputDevice == inputDevice)
-                ? 0 : ((try? outputDevice.readInputChannelCount()) ?? 0)
-
-            var subDevices: [[String: Any]] = [[kAudioSubDeviceUIDKey: outputUID]]
-            if inputUID != outputUID {
-                subDevices.append([kAudioSubDeviceUIDKey: inputUID,
-                                   kAudioSubDeviceDriftCompensationKey: true])
-            }
-            // No kAudioAggregateDeviceTapAutoStartKey: that key makes
-            // AudioDeviceStart WAIT for the first tapped audio, so nothing —
-            // including the mic — would be recorded until some app plays
-            // sound (a spoken preamble before joining a call was lost).
-            let description: [String: Any] = [
-                kAudioAggregateDeviceNameKey: "Distavo Meeting Recorder",
-                kAudioAggregateDeviceUIDKey: UUID().uuidString,
-                kAudioAggregateDeviceMainSubDeviceKey: outputUID,
-                kAudioAggregateDeviceIsPrivateKey: true,
-                kAudioAggregateDeviceIsStackedKey: false,
-                kAudioAggregateDeviceSubDeviceListKey: subDevices,
-                kAudioAggregateDeviceTapListKey: [
-                    [kAudioSubTapUIDKey: tapDescription.uuid.uuidString,
-                     kAudioSubTapDriftCompensationKey: true],
-                ],
-            ]
-            var newAggregateID = AudioObjectID.unknown
-            let aggErr = AudioHardwareCreateAggregateDevice(description as CFDictionary, &newAggregateID)
-            guard aggErr == noErr, newAggregateID.isValid else {
-                throw CaptureError.coreAudio("create aggregate device", aggErr)
-            }
-            aggregateID = newAggregateID
+            try buildAggregate(inputDevice: try AudioObjectID.readDefaultInputDevice(),
+                               tapUUID: tapDescription.uuid.uuidString)
 
             // 3. Output file: stereo float32 WAV at the tap's sample rate
             // (mic = left, system audio = right; transcription downmixes).
@@ -151,34 +121,122 @@ final class MeetingRecorder {
             micPeak = 0
             tapPeak = 0
             queue.sync { micSumSq = 0; tapSumSq = 0; levelFrames = 0 }
-            let micChannels = micChannelCount
-            let skipChannels = outputInputChannels
-
-            // 4. One IOProc reads the aggregate's aligned input buffers, in
-            // sub-device order: any input channels of the output device
-            // (skipped), then the mic's, then the tap's stereo mixdown — mix
-            // mic and tap down to one file channel each.
-            var newProcID: AudioDeviceIOProcID?
-            let procErr = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, queue) {
-                [weak self] _, inInputData, _, _, _ in
-                guard let self, let file = self.file else { return }
-                let buffers = UnsafeMutableAudioBufferListPointer(
-                    UnsafeMutablePointer(mutating: inInputData))
-                self.writeMixed(buffers: buffers, skipChannels: skipChannels,
-                                micChannels: micChannels, format: format, to: file)
-            }
-            guard procErr == noErr, let procID = newProcID else {
-                throw CaptureError.coreAudio("create IO proc", procErr)
-            }
-            ioProcID = procID
+            self.outputFormat = format
+            try installIOProc()
 
             startedAt = Date()
-            let startErr = AudioDeviceStart(aggregateID, procID)
+            let startErr = AudioDeviceStart(aggregateID, ioProcID!)
             guard startErr == noErr else { throw CaptureError.coreAudio("start device", startErr) }
             isRecording = true
         } catch {
             teardown()
             throw error
+        }
+    }
+
+
+    // MARK: aggregate + IOProc (also used to move to another microphone, #4039)
+
+    /// Create the private aggregate (default output as clock + `inputDevice` + the tap) and remember
+    /// the channel split. Throws without leaving an aggregate behind.
+    private func buildAggregate(inputDevice: AudioDeviceID, tapUUID: String) throws {
+        let outputDevice = try AudioObjectID.readDefaultSystemOutputDevice()
+        let outputUID = try outputDevice.readDeviceUID()
+        let inputUID = try inputDevice.readDeviceUID()
+        let mic = max(1, (try? inputDevice.readInputChannelCount()) ?? 1)
+        // A pro-audio interface can be the system OUTPUT and still expose input channels; those
+        // appear before the mic's in the aggregate's buffer list and must not be counted as mic.
+        let skip = (outputDevice == inputDevice) ? 0 : ((try? outputDevice.readInputChannelCount()) ?? 0)
+
+        var subDevices: [[String: Any]] = [[kAudioSubDeviceUIDKey: outputUID]]
+        if inputUID != outputUID {
+            subDevices.append([kAudioSubDeviceUIDKey: inputUID,
+                               kAudioSubDeviceDriftCompensationKey: true])
+        }
+        // No kAudioAggregateDeviceTapAutoStartKey: that key makes AudioDeviceStart WAIT for the first
+        // tapped audio, so nothing (including the mic) would be recorded until some app plays sound.
+        let description: [String: Any] = [
+            kAudioAggregateDeviceNameKey: "Distavo Meeting Recorder",
+            kAudioAggregateDeviceUIDKey: UUID().uuidString,
+            kAudioAggregateDeviceMainSubDeviceKey: outputUID,
+            kAudioAggregateDeviceIsPrivateKey: true,
+            kAudioAggregateDeviceIsStackedKey: false,
+            kAudioAggregateDeviceSubDeviceListKey: subDevices,
+            kAudioAggregateDeviceTapListKey: [
+                [kAudioSubTapUIDKey: tapUUID, kAudioSubTapDriftCompensationKey: true],
+            ],
+        ]
+        var newAggregateID = AudioObjectID.unknown
+        let aggErr = AudioHardwareCreateAggregateDevice(description as CFDictionary, &newAggregateID)
+        guard aggErr == noErr, newAggregateID.isValid else {
+            throw CaptureError.coreAudio("create aggregate device", aggErr)
+        }
+        aggregateID = newAggregateID
+        tapUUIDString = tapUUID
+        // The IOProc reads these on `queue`; set them there.
+        queue.sync { micChannelCount = mic; skipChannelCount = skip }
+        self.inputUID = inputUID
+        inputName = (try? inputDevice.readDeviceName()) ?? inputUID
+    }
+
+    /// One IOProc reads the aggregate's aligned input buffers in sub-device order: any input
+    /// channels of the output device (skipped), then the mic's, then the tap's stereo mixdown.
+    private func installIOProc() throws {
+        guard let format = outputFormat else { throw CaptureError.setup("no output format") }
+        var newProcID: AudioDeviceIOProcID?
+        let procErr = AudioDeviceCreateIOProcIDWithBlock(&newProcID, aggregateID, queue) {
+            [weak self] _, inInputData, _, _, _ in
+            guard let self, let file = self.file else { return }
+            let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inInputData))
+            self.writeMixed(buffers: buffers, skipChannels: self.skipChannelCount,
+                            micChannels: self.micChannelCount, format: format, to: file)
+        }
+        guard procErr == noErr, let procID = newProcID else {
+            throw CaptureError.coreAudio("create IO proc", procErr)
+        }
+        ioProcID = procID
+    }
+
+    /// Record the microphone channel from another input without ending the take (#4039): the
+    /// aggregate and IOProc are rebuilt on the new input; the tap, the file and the system channel
+    /// continue (the mic channel has a gap of well under a second). The macOS default input is not
+    /// changed. On failure the previous input is restored when possible. Returns the new input name.
+    @discardableResult
+    func switchInput(toUID uid: String) throws -> String {
+        guard isRecording else { throw CaptureError.setup("not recording") }
+        guard let device = AudioInputDevices.deviceID(forUID: uid) else {
+            throw CaptureError.setup("input device is no longer available")
+        }
+        let previous = inputUID
+        stopIOAndAggregate()
+        do {
+            try buildAggregate(inputDevice: device, tapUUID: tapUUIDString)
+            try installIOProc()
+            let err = AudioDeviceStart(aggregateID, ioProcID!)
+            guard err == noErr else { throw CaptureError.coreAudio("start device", err) }
+        } catch {
+            stopIOAndAggregate()
+            // Try to get the old input back so the recording continues.
+            if let previous, let old = AudioInputDevices.deviceID(forUID: previous),
+               (try? buildAggregate(inputDevice: old, tapUUID: tapUUIDString)) != nil,
+               (try? installIOProc()) != nil, let proc = ioProcID {
+                AudioDeviceStart(aggregateID, proc)
+            }
+            throw error
+        }
+        return inputName ?? uid
+    }
+
+    private func stopIOAndAggregate() {
+        if aggregateID.isValid {
+            if let procID = ioProcID {
+                AudioDeviceStop(aggregateID, procID)
+                queue.sync {}
+                AudioDeviceDestroyIOProcID(aggregateID, procID)
+                ioProcID = nil
+            }
+            AudioHardwareDestroyAggregateDevice(aggregateID)
+            aggregateID = .unknown
         }
     }
 

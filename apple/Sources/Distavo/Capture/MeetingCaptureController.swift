@@ -63,6 +63,12 @@ final class MeetingCaptureController: ObservableObject {
     /// Start-of-recording level check (Vikunja #3502); reset per recording.
     private var startLevelCheck = StartLevelCheck()
     private var micLevelCheck = MicLevelCheck()   // #3930
+    /// Input fallback (#4039); nil when `recording.mic_auto_switch` is off or there is nothing to switch to.
+    private var micFallback: MicFallback?
+    /// Set once every input stayed silent: keeps the menu label up (notifications can be off or hidden).
+    private var allInputsSilent = false
+    /// Name of the input being recorded, shown in the menu while recording (#4039).
+    @Published private(set) var liveInputName: String?
     private static let preflightKey = "distavo.didExplainCapture"
     /// How long to wait before telling the user the meeting side is silent
     /// (Vikunja #2060). Long enough to join a call and hear someone speak.
@@ -216,6 +222,17 @@ final class MeetingCaptureController: ObservableObject {
         }
         elapsedLabel = "0:00"
         warnedSilentSystemAudio = false
+        allInputsSilent = false
+        micFallback = nil
+        if #available(macOS 14.4, *), let rec = recorder as? MeetingRecorder {
+            liveInputName = rec.inputName
+            if configProvider().recording.micAutoSwitch {
+                let ring = MicCandidates.ordered(devices: AudioInputDevices.inputs(), defaultID: rec.inputUID).map(\.id)
+                // Only when the device we started on leads the ring (it may have been filtered out as virtual).
+                if ring.first == rec.inputUID { micFallback = MicFallback(ring: ring) }
+            }
+            log("Recording input: \(rec.inputName ?? "?")")
+        }
         startLevelCheck = StartLevelCheck()
         micLevelCheck = MicLevelCheck(window: configProvider().micSilenceWarningSeconds)   // 0 = off (#3930)
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
@@ -251,6 +268,9 @@ final class MeetingCaptureController: ObservableObject {
     }
 
     private func endSilenceTracking() {
+        micFallback = nil
+        allInputsSilent = false
+        liveInputName = nil
         silenceMonitor = nil
         silenceNotice = nil
         clearSilenceNotification()
@@ -261,6 +281,9 @@ final class MeetingCaptureController: ObservableObject {
         timer?.invalidate()
         timer = nil
         endSilenceTracking()
+        micFallback = nil
+        allInputsSilent = false
+        liveInputName = nil
         var silenceMinutes: Int?
         if case .silence(let m) = reason { silenceMinutes = m }
         let config = configProvider()
@@ -423,6 +446,8 @@ final class MeetingCaptureController: ObservableObject {
                    + "Check it is not muted, the right input is selected, and Distavo has microphone access.")
         }
 
+        applyMicFallback(levels: levels, recorder: recorder)
+
         switch event {
         case .autoStop(let silentFor):
             stop(reason: .silence(minutes: max(1, Int((silentFor / 60).rounded()))))
@@ -435,14 +460,50 @@ final class MeetingCaptureController: ObservableObject {
         case .none:
             if monitor.suggestionActive {
                 silenceNotice = "silent \(max(1, Int(monitor.silentFor / 60))) min"
-            } else if micLevelCheck.warning {
-                silenceNotice = "mic silent"   // withdraws itself when sound arrives (#3930)
+            } else if micLevelCheck.warning || allInputsSilent {
+                silenceNotice = "mic silent"   // withdraws itself when sound arrives (#3930, #4039)
             } else if silenceNotice != nil {
                 // Sound came back: withdraw the notice and the notification.
                 silenceNotice = nil
                 clearSilenceNotification()
             }
         }
+    }
+
+    /// #4039: feed the shared silence signal to the fallback policy and carry out what it says.
+    /// Every switch is announced (notification, activity log, menu label); all-silent is announced
+    /// even when the call side is silent too, the case #3930 skips.
+    @available(macOS 14.4, *)
+    private func applyMicFallback(levels: (mic: Float, system: Float), recorder: MeetingRecorder) {
+        guard var fb = micFallback else { return }
+        let available = Set(AudioInputDevices.inputs().map(\.id))
+        let action = fb.ingest(mic: levels.mic, available: available)
+        micFallback = fb.finished ? nil : fb
+        let before = recorder.inputName ?? "the microphone"
+        func move(to uid: String) -> String? {
+            do { return try recorder.switchInput(toUID: uid) }
+            catch { log("Microphone switch failed: \(error.localizedDescription)"); return nil }
+        }
+        switch action {
+        case .none:
+            break
+        case .switchTo(let uid):
+            if let now = move(to: uid) {
+                liveInputName = now
+                log("Microphone \(before) was silent, now using \(now)")
+                notify("Microphone switched", "\(before) was silent, now using \(now).")
+            } else {
+                micFallback = nil   // could not move: stop trying rather than loop on a broken device
+            }
+        case .allSilent(let back):
+            if let back, let now = move(to: back) { liveInputName = now }
+            allInputsSilent = true
+            log("No microphone is picking up sound; staying on \(recorder.inputName ?? "the first input")")
+            notify("No microphone is picking up sound",
+                   "Check that it is not muted, plugged in, and that Distavo has microphone access.")
+            silenceNotice = "mic silent"
+        }
+        if levels.mic >= StereoBalancer.noiseGate { allInputsSilent = false }
     }
 
     /// Vikunja #2060: a denied permission (or a call that isn't actually

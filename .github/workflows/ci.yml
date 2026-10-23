@@ -1,11 +1,13 @@
 name: CI
 
 # GitHub (joanmarcriera/distavo) is the PRIMARY remote; Forgejo (marc/distavo) is a
-# read-only mirror of it (pushes to Forgejo are refused). Manual dispatch only: push/PR
-# triggers were switched off to save the Actions allowance, so run the tests locally
+# read-only mirror of it (pushes to Forgejo are refused). Manual dispatch plus release tags (v*):
+# per-push/PR triggers were switched off to save the Actions allowance, so run the tests locally
 # (`cd apple/DistavoCore && swift test`) and dispatch this workflow by hand when needed.
 on:
   workflow_dispatch:
+  push:
+    tags: ["v*"]
 
 jobs:
   test:

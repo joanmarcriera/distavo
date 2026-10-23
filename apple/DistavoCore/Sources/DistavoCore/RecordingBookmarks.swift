@@ -253,12 +253,17 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
     /// Clip lead / tail around a marker, seconds (clamped to `clipSecondsRange`).
     public var clipLeadSeconds: Int
     public var clipTailSeconds: Int
+    /// Try the other microphones when the selected one is silent (Vikunja #4039, `MicFallback`).
+    /// Off for any config predating it; on for fresh installs via `recommendedForThisMac()`.
+    public var micAutoSwitch: Bool
 
     public static let clipSecondsRange = 0...600
 
     public init(bookmarkHotkeyEnabled: Bool = false, bookmarkHotkey: HotkeySpec = .default,
                 clipLeadSeconds: Int = RecordingBookmarks.defaultLeadSeconds,
-                clipTailSeconds: Int = RecordingBookmarks.defaultTailSeconds) {
+                clipTailSeconds: Int = RecordingBookmarks.defaultTailSeconds,
+                micAutoSwitch: Bool = false) {
+        self.micAutoSwitch = micAutoSwitch
         self.bookmarkHotkeyEnabled = bookmarkHotkeyEnabled
         self.bookmarkHotkey = bookmarkHotkey
         self.clipLeadSeconds = Self.clamp(clipLeadSeconds)
@@ -270,6 +275,7 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         case bookmarkHotkey = "bookmark_hotkey"
         case clipLeadSeconds = "clip_lead_seconds"
         case clipTailSeconds = "clip_tail_seconds"
+        case micAutoSwitch = "mic_auto_switch"
     }
 
     public init(from decoder: Decoder) throws {
@@ -281,6 +287,7 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         bookmarkHotkey = (spec?.isValid == true ? spec : nil) ?? d.bookmarkHotkey
         clipLeadSeconds = Self.clamp((try? c.decodeIfPresent(Int.self, forKey: .clipLeadSeconds)).flatMap { $0 } ?? d.clipLeadSeconds)
         clipTailSeconds = Self.clamp((try? c.decodeIfPresent(Int.self, forKey: .clipTailSeconds)).flatMap { $0 } ?? d.clipTailSeconds)
+        micAutoSwitch = (try? c.decodeIfPresent(Bool.self, forKey: .micAutoSwitch)).flatMap { $0 } ?? d.micAutoSwitch
     }
 
     static func clamp(_ s: Int) -> Int {

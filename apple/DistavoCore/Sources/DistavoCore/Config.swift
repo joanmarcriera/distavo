@@ -535,6 +535,8 @@ public struct Config: Codable, Equatable {
         // Fresh installs pick the note template per recording from the participants (#3582), so a
         // stale global template never decides the shape of an unrelated meeting.
         cfg.summarise.template = SummaryTemplateCatalog.autoID
+        // Fresh installs let the recorder try other microphones when the first is silent (#4039).
+        cfg.recording.micAutoSwitch = true
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

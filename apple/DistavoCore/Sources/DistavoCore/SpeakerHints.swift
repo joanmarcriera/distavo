@@ -122,6 +122,16 @@ public struct SpeakerHints: Codable, Equatable {
         return people.isEmpty ? nil : people.count + 1
     }
 
+    /// The speaker count to give the diarizer (Vikunja #3953). The owner's explicit count wins. Without
+    /// one, a participants list naming more people than the configured count raises it, because forcing
+    /// 2 on a 3-person call merges two voices into one turn; it never lowers a configured count, and
+    /// 0 (auto) stays auto. Result 0 = auto.
+    public static func reconciledCount(hintCount: Int?, participants: String?, configured: Int) -> Int {
+        if let c = hintCount, c > 0 { return c }
+        if configured > 0, let listed = suggestedCount(participants), listed > configured { return listed }
+        return configured
+    }
+
     /// Lowercased first names (first word of each listed person) in a participants text, or [] when none.
     /// Same item splitting and role-word filter as `suggestedCount`; used to tell whether two meetings
     /// had different people (Vikunja #3584). Falls back to the whole text when there is no

@@ -399,7 +399,8 @@ public enum Pipeline {
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase, source: path)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
-        if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
+        transcribeConfig.numSpeakers = SpeakerHints.reconciledCount(
+            hintCount: hints?.count, participants: hints?.participants, configured: transcribeConfig.numSpeakers)
         // This meeting's own terms come first, then the global vocabulary (#3584); the enabled replacement
         // packs follow the user's own rules.
         // Names from the participants line are seeded too (#3950).

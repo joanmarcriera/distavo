@@ -432,6 +432,12 @@ public enum Pipeline {
 
             deps.onPhase?(.transcribing)
             let result = try await deps.transcribe(wavPath, transcribeConfig)
+            // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
+            // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
+            if transcribeConfig.fuzzyVocabulary, !transcribeConfig.vocabulary.isEmpty {
+                let text = TranscriptCleaner.segments(from: result).map(\.text).joined(separator: " ")
+                transcribeConfig.replacements += FuzzyVocabulary.rules(terms: transcribeConfig.vocabulary, text: text)
+            }
             let detectedLanguages = detectedLanguages(from: result)
             // Computed unconditionally (unlike `noteLanguage` below, which
             // only uses it for "auto") so `ProcessResult`

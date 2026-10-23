@@ -92,6 +92,9 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Ids of the opt-in built-in replacement packs (`ReplacementPacks`, Vikunja #3584), e.g. "ca_it".
     /// Absent in older configs -> `[]`, so nothing changes until the user switches a pack on.
     public var replacementPacks: [String]
+    /// Snap near-miss spellings to the vocabulary after transcription (`FuzzyVocabulary`, Vikunja #3950): the
+    /// only way the vocabulary reaches Parakeet, which takes no prompt. Absent in older configs -> false.
+    public var fuzzyVocabulary: Bool
 
     /// The user's own rules first (they win), then every enabled pack's rules.
     public var effectiveReplacements: [ReplacementRule] {
@@ -101,6 +104,7 @@ public struct TranscribeConfig: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case vocabulary, replacements
         case replacementPacks = "replacement_packs"
+        case fuzzyVocabulary = "fuzzy_vocabulary"
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
@@ -112,8 +116,9 @@ public struct TranscribeConfig: Codable, Equatable {
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 0,
                 preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
                 vocabulary: [String] = [], replacements: [ReplacementRule] = [],
-                replacementPacks: [String] = []) {
+                replacementPacks: [String] = [], fuzzyVocabulary: Bool = false) {
         self.replacementPacks = replacementPacks
+        self.fuzzyVocabulary = fuzzyVocabulary
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
         self.embeddedModel = embeddedModel; self.language = language
         self.diarize = diarize; self.numSpeakers = numSpeakers
@@ -140,6 +145,7 @@ public struct TranscribeConfig: Codable, Equatable {
         vocabulary = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .vocabulary))?.elements ?? d.vocabulary
         replacements = (try? c.decodeIfPresent(LossyList<ReplacementRule>.self, forKey: .replacements))?.elements ?? d.replacements
         replacementPacks = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .replacementPacks))?.elements ?? d.replacementPacks
+        fuzzyVocabulary = (try? c.decodeIfPresent(Bool.self, forKey: .fuzzyVocabulary)).flatMap { $0 } ?? d.fuzzyVocabulary
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.

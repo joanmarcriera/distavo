@@ -730,10 +730,11 @@ final class CalendarMatchTests: XCTestCase {
         return nil
     }
 
+    // `Meeting_2026-09-16_16.13.08` (underscores) is dated by `RecordingStamp` since #4018: see RecordingStampTests.
     func testMeetingDateNameShapesMatchMain() {
         let tz = TimeZone(identifier: "Europe/London")!
         let stems = ["Meeting 2026-09-16 16.13.08", "2026-09-16 16.13.08", "voice 2026-09-16 16.13.08 copy",
-                     "sub__Meeting_2026-09-16_16.13.08", "sub__Meeting 2026-09-16 16.13.08", "Meeting 2026-09-16 16.13.08 2",
+                     "sub__Meeting 2026-09-16 16.13.08", "Meeting 2026-09-16 16.13.08 2",
                      "2026-10-05 10.30.00 Standup", "2026-10-05 Event Title", "memo", "Meeting 2026-13-45 99.99.99", ""]
         for stem in stems {
             let url = URL(fileURLWithPath: "/nonexistent/\(stem).wav")

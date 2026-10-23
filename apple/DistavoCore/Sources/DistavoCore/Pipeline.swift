@@ -714,6 +714,8 @@ public enum Pipeline {
     static func meetingDate(for url: URL, timeZone: TimeZone = .current) -> Date? {
         let stem = url.deletingPathExtension().lastPathComponent
         if let date = recorderNameDate(stem, timeZone: timeZone) { return date }
+        // Phone / export names (`interview-22-10-2026-10.00`) beat the copy-time file date (#4018).
+        if let date = RecordingStamp.parse(stem, timeZone: timeZone) { return date }
         return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.creationDate] as? Date
     }
 

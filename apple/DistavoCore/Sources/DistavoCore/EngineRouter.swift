@@ -159,6 +159,12 @@ public enum EngineRouter {
             // meeting with English asides is transcribed as Hebrew.
             chosen = packModel
             hint = code
+        } else if let majority = strictMajority(detections),
+                  EmbeddedModelCatalog.parakeetLanguages.contains(majority) {
+            // Rule 5m (Vikunja #4016): one stray window ("cy 67%" among en 75 / en 72) must not send an
+            // English call to the Whisper path. A strict majority of the confident windows decides.
+            chosen = EmbeddedModelCatalog.model(id: "parakeet-tdt-v3")
+            hint = majority
         } else if !set.isEmpty, set.isSubset(of: EmbeddedModelCatalog.parakeetLanguages) {
             chosen = EmbeddedModelCatalog.model(id: "parakeet-tdt-v3")  // rule 5b
         } else {
@@ -214,6 +220,17 @@ public enum EngineRouter {
             }
         }
         return nil
+    }
+
+    /// The code held by MORE than half of the confident windows (>= `confidenceFloor`), or nil.
+    /// Pure: windows are equal-length audio samples, so a count is a weight by sample count.
+    static func strictMajority(_ detections: [LanguageDetection]) -> String? {
+        let confident = detections.filter { $0.probability >= confidenceFloor }
+        guard !confident.isEmpty else { return nil }
+        var counts: [String: Int] = [:]
+        for d in confident { counts[d.code, default: 0] += 1 }
+        guard let top = counts.max(by: { $0.value < $1.value }), top.value * 2 > confident.count else { return nil }
+        return top.key
     }
 
     /// The code with the highest summed probability, or nil when nothing was detected.

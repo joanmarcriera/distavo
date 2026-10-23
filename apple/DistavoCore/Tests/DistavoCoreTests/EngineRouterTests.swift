@@ -295,4 +295,27 @@ final class EngineRouterTests: XCTestCase {
             XCTAssertTrue(plan.language != nil || plan.detectLanguage, "hint \(hint ?? "nil")")
         }
     }
+
+    // Vikunja #4016: a stray window must not send an English call to the Whisper path.
+    func testStrayWelshWindowAmongEnglishStaysOnParakeet() {
+        let r = EngineRouter.choose(detections: [d("en", 0.75), d("en", 0.72), d("cy", 0.67)], config: auto(), memoryBytes: gb16)
+        XCTAssertEqual(r.model.id, "parakeet-tdt-v3")
+        XCTAssertEqual(r.languageHint, "en")
+        let r2 = EngineRouter.choose(detections: [d("nn", 0.70), d("en", 0.96), d("en", 0.99)], config: auto(), memoryBytes: gb16)
+        XCTAssertEqual(r2.model.id, "parakeet-tdt-v3")
+        XCTAssertEqual(r2.languageHint, "en")
+    }
+
+    func testNoStrictMajorityStillFallsBackToWhisper() {
+        let r = EngineRouter.choose(detections: [d("en", 0.9), d("cy", 0.9)], config: auto(), memoryBytes: gb16)
+        XCTAssertNotEqual(r.model.id, "parakeet-tdt-v3")
+        XCTAssertNil(EngineRouter.strictMajority([d("en", 0.9), d("cy", 0.9)]))
+        XCTAssertNil(EngineRouter.strictMajority([d("en", 0.3)]), "below the confidence floor")
+        XCTAssertEqual(EngineRouter.strictMajority([d("en", 0.9), d("cy", 0.2), d("cy", 0.1)]), "en")
+    }
+
+    func testCatalanStillBeatsMajority() {
+        let r = EngineRouter.choose(detections: [d("en", 0.9), d("en", 0.9), d("ca", 0.6)], config: auto(), memoryBytes: gb16)
+        XCTAssertTrue(r.model.id.hasPrefix("bsc-"), r.model.id)
+    }
 }

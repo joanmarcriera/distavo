@@ -71,6 +71,18 @@ public enum TranscriptCleaner {
         return textValue.isEmpty ? [] : [Segment(speaker: "SPEAKER_UNKNOWN", text: textValue)]
     }
 
+    /// Removes sound tags Whisper hallucinates on room noise (Vikunja #4016): `*music*`, `*pain*`,
+    /// `[Music]`, `[BLANK_AUDIO]`, `(applause)`. Asterisk tags are 1-3 plain words; bracketed ones are
+    /// limited to a known list so real parenthetical speech is never touched.
+    public static func stripSoundTags(_ value: String) -> String {
+        var out = value
+        out = out.replacingOccurrences(of: #"\*[A-Za-z]+(?: [A-Za-z]+){0,2}\*"#, with: " ", options: .regularExpression)
+        out = out.replacingOccurrences(
+            of: #"(?i)[\[(]\s*(?:blank[_ ]audio|music|applause|laughter|silence|noise|inaudible|background noise)\s*[\])]"#,
+            with: " ", options: .regularExpression)
+        return out == value ? value : normaliseSpace(out)
+    }
+
     /// Group consecutive same-speaker turns under one `[SPEAKER_xx]` header,
     /// flushing on speaker change or when a turn would exceed `maxTurnChars`.
     ///
@@ -95,7 +107,7 @@ public enum TranscriptCleaner {
 
         for segment in segments {
             let speaker = segment.speaker.isEmpty ? "SPEAKER_UNKNOWN" : segment.speaker
-            let text = normaliseSpace(segment.text)
+            let text = normaliseSpace(stripSoundTags(segment.text))
             if text.isEmpty { continue }
             if let cs = currentSpeaker, speaker != cs || currentLen + text.count > maxTurnChars {
                 flush()

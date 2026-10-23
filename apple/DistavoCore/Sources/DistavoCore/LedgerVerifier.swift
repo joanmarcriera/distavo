@@ -16,6 +16,15 @@ import Foundation
 //   (b) the fact's key tokens (numbers and proper-looking words, see `keyTokens`) must
 //       occur in the quote (a one/two-letter spelling difference is accepted, which covers the
 //       usual speech-to-text variants); otherwise the row is kept but marked "[unverified]".
+// 1.21 (#4017) adds, on top of (a)/(b):
+//   (c) every figure in the fact must be in the quote (digits or spoken numbers, thousands separators
+//       folded: "30,000" vs a quote of "35 and 40,000" fails); otherwise the row is REMOVED, or only
+//       marked [unverified] when its interpretation says "interpreted" (the speech-to-text dropped digits);
+//   (d) the speaker field is CORRECTED to the speaker of the transcript turn that holds the quote, but
+//       only when the field names a speaker label the transcript actually uses;
+//   (e) trivia is DROPPED: a fact made only of a generic product/vendor name ("Teams", "AI"), a clock time
+//       or an age, and rows whose interpretation is "unclear"/"none"/"possible transcription error";
+//   (f) at most `maxRows` rows are kept (the first ones, in the model's order).
 // Rows with fewer than three fields cannot be checked and are kept. Only the ledger section is
 // touched, and only when the transcript can be tokenised into words (an unsegmented script such
 // as Thai or Chinese is left alone rather than judged against a tokeniser that cannot read it).
@@ -27,7 +36,19 @@ public enum LedgerVerifier {
         public var text: String
         public var removed: Int
         public var flagged: Int
+        /// Rows dropped as trivia, "unclear" rows, or over the row cap (#4017).
+        public var dropped: Int = 0
+        /// Rows whose speaker field was rewritten from the transcript turn holding the quote (#4017).
+        public var corrected: Int = 0
+
+        public init(text: String, removed: Int, flagged: Int, dropped: Int = 0, corrected: Int = 0) {
+            self.text = text; self.removed = removed; self.flagged = flagged
+            self.dropped = dropped; self.corrected = corrected
+        }
     }
+
+    /// Most rows kept in a ledger.
+    public static let maxRows = 15
 
     /// Marker appended to a row whose quote is real but does not contain its fact.
     public static let unverifiedMarker = " [unverified]"
@@ -48,26 +69,39 @@ public enum LedgerVerifier {
         }
         let index = TokenIndex(source)
 
+        let turns = Turn.parse(transcript)
+
         var out = Array(lines[...start])
-        var removed = 0, flagged = 0
+        var removed = 0, flagged = 0, dropped = 0, corrected = 0, kept = 0
         for line in lines[(start + 1)..<end] {
             guard let row = Row(line) else { out.append(line); continue }
-            switch judge(row, index: index) {
-            case .keep: out.append(line)
-            case .flag:
-                flagged += 1
-                out.append(line.hasSuffix(unverifiedMarker) ? line : trimmedTrailing(line) + unverifiedMarker)
-            case .remove: removed += 1
+            if isTrivia(row) { dropped += 1; continue }
+            var verdict = judge(row, index: index)
+            if verdict != .remove, let missing = missingFigure(row), missing {
+                verdict = row.interpreted ? .flag : .remove
             }
+            if verdict == .remove { removed += 1; continue }
+            if kept >= maxRows { dropped += 1; continue }
+            kept += 1
+            var text = line
+            if let fixed = speakerFix(row, turns: turns) { text = fixed; corrected += 1 }
+            if verdict == .flag {
+                flagged += 1
+                if !text.hasSuffix(unverifiedMarker) { text = trimmedTrailing(text) + unverifiedMarker }
+            }
+            out.append(text)
         }
         out.append(contentsOf: lines[end...])
-        return Result(text: out.joined(separator: "\n"), removed: removed, flagged: flagged)
+        return Result(text: out.joined(separator: "\n"), removed: removed, flagged: flagged,
+                      dropped: dropped, corrected: corrected)
     }
 
     /// The footer sentences for a result ("3 ledger rows removed as unsupported."), "" parts dropped.
     public static func notes(for r: Result) -> [String] {
         var notes: [String] = []
         if r.removed > 0 { notes.append("\(r.removed) ledger \(r.removed == 1 ? "row" : "rows") removed as unsupported by the transcript") }
+        if r.dropped > 0 { notes.append("\(r.dropped) trivial ledger \(r.dropped == 1 ? "row" : "rows") dropped") }
+        if r.corrected > 0 { notes.append("\(r.corrected) ledger \(r.corrected == 1 ? "speaker" : "speakers") corrected from the transcript") }
         if r.flagged > 0 { notes.append("\(r.flagged) ledger \(r.flagged == 1 ? "row" : "rows") marked [unverified]") }
         return notes
     }
@@ -75,6 +109,90 @@ public enum LedgerVerifier {
     // MARK: Judging a row
 
     enum Verdict { case keep, flag, remove }
+
+    // MARK: Hygiene (#4017)
+
+    /// Generic product / vendor names that are not facts on their own.
+    static let genericNames: Set<String> = [
+        "teams", "microsoft", "ai", "zoom", "google", "meet", "slack", "email", "outlook", "excel",
+        "word", "windows", "mac", "linux", "iphone", "android", "chrome", "linkedin", "whatsapp",
+    ]
+
+    /// Digit strings in `text` with thousands separators folded ("30,000" -> "30000"; "2.5" kept).
+    static func figures(in text: String) -> [String] {
+        var out: [String] = []
+        var cur = ""
+        let chars = Array(text)
+        for (i, ch) in chars.enumerated() {
+            if ch.isASCII && ch.isNumber { cur.append(ch); continue }
+            let next: Character = i + 1 < chars.count ? chars[i + 1] : " "
+            if !cur.isEmpty, ch == "," || ch == ".", next.isASCII, next.isNumber {
+                if ch == "." { cur.append(ch) }
+                continue
+            }
+            if !cur.isEmpty { out.append(cur); cur = "" }
+        }
+        if !cur.isEmpty { out.append(cur) }
+        return out
+    }
+
+    /// True when the row is a clock time / age / generic-name fact, or its interpretation is "unclear".
+    static func isTrivia(_ row: Row) -> Bool {
+        let junk: Set<String> = ["unclear", "none", "n/a", "unknown"]
+        for extra in row.extra {
+            let e = extra.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: " .*_\""))
+            if junk.contains(e) || e.contains("possible transcription error") { return true }
+        }
+        let f = row.fact.lowercased()
+        if f.range(of: #"^\s*\d{1,2}([:.]\d\d)?\s*(a\.?m\.?|p\.?m\.?)\s*$"#, options: .regularExpression) != nil { return true }
+        if f.range(of: #"^\s*\d{1,3}\s*(years?|yrs?)[ -]old\b"#, options: .regularExpression) != nil { return true }
+        let keys = keyTokens(row.fact)
+        return !keys.isEmpty && keys.allSatisfy { genericNames.contains($0) }
+    }
+
+    /// nil when the fact has no figure; otherwise whether some figure of the fact is NOT in the quote.
+    static func missingFigure(_ row: Row) -> Bool? {
+        let wanted = figures(in: row.fact)
+        guard !wanted.isEmpty else { return nil }
+        let have = Set(figures(in: row.quote) + tokens(row.quote).filter { $0.allSatisfy { $0.isNumber } })
+        return wanted.contains { !have.contains($0) }
+    }
+
+    /// The line with its speaker field replaced, when the quote sits only in turns of one other known speaker.
+    static func speakerFix(_ row: Row, turns: [Turn]) -> String? {
+        let labels = Set(turns.map { $0.label.lowercased() })
+        guard row.fields.count >= 3, labels.contains(row.who.lowercased()) else { return nil }
+        let q = tokens(row.quote.components(separatedBy: "...").first ?? row.quote)
+        guard q.count >= 3 else { return nil }
+        let holders = turns.filter { $0.index.bestCoverage(of: q) >= quoteThreshold }
+        let holderLabels = Set(holders.map { $0.label.lowercased() })
+        guard holderLabels.count == 1, let label = holders.first?.label,
+              !holderLabels.contains(row.who.lowercased()) else { return nil }
+        var fields = row.fields
+        fields[1] = label
+        return row.isTable ? "| " + fields.joined(separator: " | ") + " |" : row.bullet + fields.joined(separator: " | ")
+    }
+
+    /// One `[LABEL]` block of the clean transcript.
+    struct Turn {
+        let label: String
+        let index: TokenIndex
+        static func parse(_ transcript: String) -> [Turn] {
+            var turns: [Turn] = []
+            var label: String?
+            var body: [String] = []
+            func flush() {
+                if let l = label { turns.append(Turn(label: l, index: TokenIndex(LedgerVerifier.tokens(body.joined(separator: " "))))) }
+            }
+            for line in transcript.components(separatedBy: "\n") {
+                let t = line.trimmingCharacters(in: .whitespaces)
+                if t.hasPrefix("["), t.hasSuffix("]"), t.count > 2 { flush(); label = String(t.dropFirst().dropLast()); body = [] }
+                else { body.append(t) }
+            }
+            flush()
+            return turns
+        }
+    }
 
     private static func judge(_ row: Row, index: TokenIndex) -> Verdict {
         let quoteParts = row.quote.components(separatedBy: CharacterSet(charactersIn: "…"))
@@ -87,7 +205,7 @@ public enum LedgerVerifier {
               parts.allSatisfy({ $0.isEmpty || index.bestCoverage(of: $0) >= quoteThreshold })
         else { return .remove }
         // (b) the fact itself must show up in its own quote.
-        let quote = Set(parts.flatMap { $0 })
+        let quote = Set(parts.flatMap { $0 } + figures(in: row.quote).flatMap { $0.contains(".") ? $0.components(separatedBy: ".") : [$0] })
         let keys = keyTokens(row.fact)
         guard !keys.isEmpty else { return .keep }          // nothing checkable ("who said it" style facts)
         return keys.contains(where: { key in quote.contains { matches(key, $0) } }) ? .keep : .flag
@@ -109,7 +227,9 @@ public enum LedgerVerifier {
     static func keyTokens(_ fact: String) -> [String] {
         let words = fact.components(separatedBy: CharacterSet.letters.union(.decimalDigits).inverted)
             .filter { !$0.isEmpty }
-        var keys = tokens(fact).filter { $0.contains(where: { $0.isNumber }) }
+        // Whole figures (thousands separators folded) plus letter+digit codes ("IR35"); decimals split.
+        var keys = figures(in: fact).flatMap { $0.contains(".") ? $0.components(separatedBy: ".") : [$0] }
+        keys += tokens(fact).filter { t in t.contains(where: { $0.isNumber }) && t.contains(where: { $0.isLetter }) }
         for (i, w) in words.enumerated() where w.contains(where: { $0.isLetter }) {
             let capitalised = w.first!.isUppercase && (words.count == 1 || i > 0)
             let innerCapital = w.dropFirst().contains(where: { $0.isUppercase })
@@ -120,14 +240,22 @@ public enum LedgerVerifier {
 
     // MARK: Rows
 
-    private struct Row {
+    struct Row {
         let fact: String, quote: String
+        let fields: [String], isTable: Bool, bullet: String
+        var who: String { fields[1] }
+        /// Fields after the quote (interpretation and anything else).
+        var extra: [String] { Array(fields.dropFirst(3)) }
+        var interpreted: Bool { extra.contains { $0.lowercased().contains("interpreted") } }
         init?(_ line: String) {
             var body = line.trimmingCharacters(in: .whitespaces)
+            isTable = body.hasPrefix("|")
+            var bullet = "- "
             if body.hasPrefix("|") {
                 body.removeFirst()
                 if body.hasSuffix("|") { body.removeLast() }
             } else if body.hasPrefix("- ") || body.hasPrefix("* ") {
+                bullet = String(body.prefix(2))
                 body.removeFirst(2)
             } else { return nil }
             let fields = body.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -135,6 +263,8 @@ public enum LedgerVerifier {
             // Table header and separator rows are not facts.
             if fields.allSatisfy({ $0.allSatisfy { "-: ".contains($0) } }) { return nil }
             if fields[0].lowercased() == "fact" { return nil }
+            self.fields = fields
+            self.bullet = bullet
             fact = fields[0]
             quote = fields[2].trimmingCharacters(in: CharacterSet(charactersIn: "\"“”«»'‘’ *_"))
         }
@@ -300,6 +430,10 @@ enum NumberWords {
                 // "treinta y dos", "trenta i dos": the bridge word belongs to the number.
                 else if bridges.contains(words[j]), j + 1 < words.count, tens[run.last!] != nil,
                         units[words[j + 1]] != nil { j += 1 }
+                // "two hundred and fifty": "and" after a hundreds word, before a tens/units word.
+                else if words[j] == "and", j + 1 < words.count,
+                        hundredMultipliers.contains(run.last!) || hundreds[run.last!] != nil,
+                        tens[words[j + 1]] != nil || units[words[j + 1]] != nil { j += 1 }
                 else { break }
             }
             if run.count == 1 && ambiguous.contains(run[0]) { out.append(run[0]) }

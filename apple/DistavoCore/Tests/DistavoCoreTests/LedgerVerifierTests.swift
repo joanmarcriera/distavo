@@ -57,7 +57,7 @@ final class LedgerVerifierTests: XCTestCase {
         XCTAssertTrue(r.text.contains("* Visio |"))
         XCTAssertTrue(r.text.contains("* Lucidchart |"))
         for gone in ["IR35", "16 September"] { XCTAssertFalse(r.text.contains(gone), gone) }
-        XCTAssertTrue(r.text.contains("* Bull | SPEAKER_01 | \"el termini és a finals de mes, sense falta\" | vendor [unverified]"))
+        XCTAssertTrue(r.text.contains("* Bull | SPEAKER_00 | \"el termini és a finals de mes, sense falta\" | vendor [unverified]"))
         // Same rows under a capitalised heading variant.
         let capitalised = note.replacingOccurrences(of: "## Facts ledger", with: "## Facts Ledger")
         XCTAssertEqual(LedgerVerifier.verify(capitalised, transcript: transcript).removed, 2)
@@ -71,7 +71,7 @@ final class LedgerVerifierTests: XCTestCase {
         let r = LedgerVerifier.verify(note, transcript: transcript)
         XCTAssertEqual(r.removed, 0)
         XCTAssertEqual(r.flagged, 1)
-        XCTAssertTrue(r.text.contains("- Bull | SPEAKER_01 | \"el termini és a finals de mes, sense falta\" | vendor [unverified]"))
+        XCTAssertTrue(r.text.contains("- Bull | SPEAKER_00 | \"el termini és a finals de mes, sense falta\" | vendor [unverified]"))
         // A lower-case fact in the note's language is not checked against the quote's language.
         XCTAssertFalse(r.text.contains("deadline [unverified]"))
     }

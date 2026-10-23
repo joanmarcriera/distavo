@@ -30,4 +30,15 @@ final class OffensiveWordGuardTests: XCTestCase {
         XCTAssertEqual(n, 1)
         XCTAssertEqual(g.segments[0].text, "the Nagios plugins")
     }
+
+    func testGuardReportRoundTripAndWarning() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("guard-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        XCTAssertEqual(GuardReport.load(workDir: dir, base: "m"), 0)
+        GuardReport.store(2, workDir: dir, base: "m")
+        XCTAssertEqual(GuardReport.load(workDir: dir, base: "m"), 2)
+        GuardReport.store(0, workDir: dir, base: "m")   // reprocess with nothing found clears it
+        XCTAssertEqual(GuardReport.load(workDir: dir, base: "m"), 0)
+    }
 }

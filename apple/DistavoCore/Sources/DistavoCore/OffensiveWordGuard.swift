@@ -82,3 +82,25 @@ extension TranscriptSegments {
         return (copy, flagged)
     }
 }
+
+/// Sidecar `<base>.guard.json`: how many words the guard replaced in this recording, so the Notes
+/// window can tell the user (Vikunja #3951, fix part 2). Absent = nothing was replaced.
+public struct GuardReport: Codable, Equatable, Sendable {
+    public var replaced: Int
+
+    public static func url(workDir: URL, base: String) -> URL {
+        workDir.appendingPathComponent("\(base).guard.json")
+    }
+    /// Count for `base`, 0 for a missing or corrupt file.
+    public static func load(workDir: URL, base: String) -> Int {
+        guard let data = try? Data(contentsOf: url(workDir: workDir, base: base)),
+              let r = try? JSONDecoder().decode(GuardReport.self, from: data), r.replaced > 0 else { return 0 }
+        return r.replaced
+    }
+    /// Write when `count` > 0, else remove a stale file (a reprocess that found nothing). Never throws.
+    public static func store(_ count: Int, workDir: URL, base: String) {
+        let u = url(workDir: workDir, base: base)
+        guard count > 0 else { try? FileManager.default.removeItem(at: u); return }
+        try? JSONEncoder().encode(GuardReport(replaced: count)).write(to: u, options: .atomic)
+    }
+}

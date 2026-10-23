@@ -312,6 +312,10 @@ private struct NoteDetailView: View {
                          : "This note is being regenerated. The current version is kept as a .prev- copy.")
                         .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
                 }
+                if let warning = NotesLibrary.guardWarning(entry) {
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .font(.callout).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: 6) {
                     ForEach(NotesLibrary.assets(entry), id: \.text) { asset in
                         Label(asset.text, systemImage: asset.present ? "checkmark" : "minus")

@@ -38,6 +38,8 @@ public struct NoteEntry: Identifiable, Equatable, Sendable {
     /// Notes this recording has (the automatic run plus its `@variant` runs).
     public var versionCount: Int
     public var keyMoments: Int
+    /// Words the offensive-word guard replaced in the transcript (#3951); 0 = none.
+    public var wordsReplaced: Int = 0
     public var isVariant: Bool
 
     public var id: String { base }
@@ -210,6 +212,7 @@ public enum NotesLibrary {
             calendarTitle: calendar.flatMap { CalendarTitle.displayTitle($0.title) },
             versionCount: versionCount,
             keyMoments: RecordingBookmarks.load(workDir: workDir, base: source)?.marks.count ?? 0,
+            wordsReplaced: GuardReport.load(workDir: workDir, base: source),
             isVariant: base != source)
     }
 
@@ -267,6 +270,14 @@ public enum NotesLibrary {
         return "\(length) · \(words)"
     }
 
+    /// The warning for a note whose transcript had words replaced, else nil (#3951).
+    public static func guardWarning(_ e: NoteEntry) -> String? {
+        guard e.wordsReplaced > 0 else { return nil }
+        let n = e.wordsReplaced
+        return "\(n) offensive-sounding word\(n == 1 ? " was" : "s were") likely mis-heard by the speech engine and replaced "
+            + "in the transcript and note (a tool name such as Nagios, or \"\(OffensiveWordGuard.placeholder)\"). Check the recording."
+    }
+
     /// What is on disk for a note, in display order: (text, present).
     public static func assets(_ e: NoteEntry) -> [(text: String, present: Bool)] {
         var speakers = "No speakers found"
@@ -286,6 +297,7 @@ public enum NotesLibrary {
         if let busy { out.append(busy.label) }
         if !e.hasCleanTranscript { out.append("no transcript") }
         else if !e.hasSegments { out.append("no timestamps") }
+        if e.wordsReplaced > 0 { out.append("words replaced") }
         if e.isVariant { out.append("variant") }
         else if e.versionCount > 1 { out.append("\(e.versionCount) versions") }
         return out

@@ -441,6 +441,7 @@ public enum Pipeline {
             // Safety net (#3951): a mis-heard slur never reaches the transcript, segments or summary prompt.
             let guarded = OffensiveWordGuard.apply(cleanedOnce)
             let clean = guarded.text
+            GuardReport.store(guarded.flagged, workDir: workDir, base: base)
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")

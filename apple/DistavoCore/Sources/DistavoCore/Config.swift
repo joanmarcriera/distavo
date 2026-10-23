@@ -357,6 +357,9 @@ public struct Config: Codable, Equatable {
     /// Calendar-aware titling and attendees (Vikunja #2946). OFF for any config
     /// predating it and for fresh installs; see `CalendarConfig`.
     public var calendar: CalendarConfig
+    /// Calendar-driven recording plans (Vikunja #4004). OFF for any config predating it
+    /// and for fresh installs; see `ScheduleConfig`.
+    public var schedule: ScheduleConfig
     /// Obsidian-friendly output (Vikunja #2954): frontmatter, auto title/tags,
     /// tracked terms, vault copy. Absent in older configs -> everything off.
     public var notes: NotesConfig
@@ -378,6 +381,7 @@ public struct Config: Codable, Equatable {
         case meetingDetection = "meeting_detection"
         case recording
         case calendar
+        case schedule
         case notes
     }
 
@@ -401,6 +405,7 @@ public struct Config: Codable, Equatable {
                 meetingDetection: MeetingDetectionConfig = .init(),
                 recording: RecordingOptions = .init(),
                 calendar: CalendarConfig = .init(),
+                schedule: ScheduleConfig = .init(),
                 notes: NotesConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
@@ -418,6 +423,7 @@ public struct Config: Codable, Equatable {
         self.meetingDetection = meetingDetection
         self.recording = recording
         self.calendar = calendar
+        self.schedule = schedule
         self.notes = notes
     }
 
@@ -462,6 +468,7 @@ public struct Config: Codable, Equatable {
         meetingDetection = (try? c.decodeIfPresent(MeetingDetectionConfig.self, forKey: .meetingDetection)).flatMap { $0 } ?? d.meetingDetection
         recording = (try? c.decodeIfPresent(RecordingOptions.self, forKey: .recording)).flatMap { $0 } ?? d.recording
         calendar = (try? c.decodeIfPresent(CalendarConfig.self, forKey: .calendar)).flatMap { $0 } ?? d.calendar
+        schedule = (try? c.decodeIfPresent(ScheduleConfig.self, forKey: .schedule)).flatMap { $0 } ?? d.schedule
     }
 
     /// Valid range for the silence-minute settings.

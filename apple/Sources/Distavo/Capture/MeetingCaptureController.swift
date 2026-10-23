@@ -653,13 +653,33 @@ final class MeetingCaptureController: ObservableObject {
             stack.alignment = .firstBaseline
             return stack
         }
+        // Recent sets of people (#3943): one pick fills "Other participants" (still editable).
+        let recentSets = SpeakerSuggestions.recentParticipantSets(
+            history: SpeakerSuggestions.recentHistory(workDir: Config.resolvePath(config.workDir)))
+        let recentPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        recentPopup.addItem(withTitle: "Recent people…")
+        for set in recentSets { recentPopup.addItem(withTitle: set.count > 60 ? String(set.prefix(57)) + "…" : set) }
+        let recentTarget = LanguagePickerActionTarget {
+            let i = recentPopup.indexOfSelectedItem - 1
+            guard recentSets.indices.contains(i) else { return }
+            others.stringValue = recentSets[i]
+            refreshCount()
+            recentPopup.selectItem(at: 0)
+        }
+        recentPopup.target = recentTarget
+        recentPopup.action = #selector(LanguagePickerActionTarget.picked)
+        let sourceNote = NSTextField(wrappingLabelWithString: suggested.sourceLine ?? "")
+        sourceNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        sourceNote.textColor = .secondaryLabelColor
         var rows = [
             row("People who spoke:", count, width: 60),
             row("", countWarning, width: 300),
             row("Your role (\(ownerLabel)):", myRole, width: 300),
             row("Other participants:", others, width: 300),
-            row("Terms for this meeting:", meetingTerms, width: 300),
         ]
+        if !recentSets.isEmpty { rows.append(row("", recentPopup, width: 300)) }
+        rows.append(row("Terms for this meeting:", meetingTerms, width: 300))
+        if suggested.sourceLine != nil { rows.append(row("", sourceNote, width: 300)) }
         if boxPolicy.visible {
             rows.append(row("", inPersonBox, width: 300))
             rows.append(row("", inPersonHelp, width: 300))
@@ -676,7 +696,7 @@ final class MeetingCaptureController: ObservableObject {
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 240 : 290)
+        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 300 : 350)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,

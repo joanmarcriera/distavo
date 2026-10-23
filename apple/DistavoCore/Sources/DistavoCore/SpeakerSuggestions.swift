@@ -77,3 +77,32 @@ public struct SpeakerSuggestions: Equatable, Sendable {
         return sheets.compactMap { try? JSONDecoder().decode(SpeakerHints.self, from: Data(contentsOf: $0.0)) }
     }
 }
+
+// MARK: - Quick-pick and source line (Vikunja #3943, points 2 and 3)
+
+extension SpeakerSuggestions {
+    /// Distinct earlier "Other participants" lists, newest first, at most `limit`. Two lists naming the
+    /// same people in another order or case count as one (the newest wording is kept).
+    public static func recentParticipantSets(history: [SpeakerHints], limit: Int = 8) -> [String] {
+        var seen: [Set<String>] = []
+        var out: [String] = []
+        for h in history {
+            let text = others(in: h.participants)
+            let names = SpeakerHints.listedNames(text)
+            guard !text.isEmpty, !names.isEmpty, !seen.contains(names) else { continue }
+            seen.append(names); out.append(text)
+            if out.count >= limit { break }
+        }
+        return out
+    }
+
+    /// One visible line saying where each prefilled value came from, nil when nothing was suggested,
+    /// so a suggestion is never mistaken for something typed (e.g. "Suggested: role (last used) · terms (same contact)").
+    public var sourceLine: String? {
+        var parts: [String] = []
+        if let o = roleOrigin, role != nil { parts.append("role (\(o.rawValue))") }
+        if let o = othersOrigin, !others.isEmpty { parts.append("participants (\(o.rawValue))") }
+        if let o = termsOrigin, !terms.isEmpty { parts.append("terms (\(o.rawValue))") }
+        return parts.isEmpty ? nil : "Suggested: " + parts.joined(separator: " · ") + ". Edit or clear any of it."
+    }
+}

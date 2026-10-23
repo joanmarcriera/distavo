@@ -64,8 +64,11 @@ scp -q "$LOCAL" "$HOST:$DOCROOT/.appcast.xml.new"
 ssh "$HOST" "chmod 644 '$DOCROOT/.appcast.xml.new' && mv -f '$DOCROOT/.appcast.xml.new' '$DOCROOT/appcast.xml'"
 
 echo "==> Verifying the published feed"
-PUBLISHED="$(curl -fsS "$URL")"
-if diff <(printf '%s' "$PUBLISHED") "$LOCAL" >/dev/null; then
+# Compare bytes on disk: command substitution would strip trailing newlines and make a correct
+# upload look like a mismatch (Codex review, task 4071).
+PUBLISHED="$WORK/published-appcast.xml"
+curl -fsS -o "$PUBLISHED" "$URL"
+if cmp -s "$PUBLISHED" "$LOCAL"; then
   echo "    ok: $URL now serves the $VERSION appcast"
 else
   echo "MISMATCH: $URL does not match the uploaded file (caching? wrong DOCROOT?)" >&2

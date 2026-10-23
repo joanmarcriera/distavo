@@ -24,7 +24,7 @@ Wait for 1.20.0 to leave review (or use `ops/submit-when-review-clears.sh 1.20.0
 | Check | Evidence / command | State |
 |---|---|---|
 | Core tests green on the drive branch | `cd apple/DistavoCore && swift test` | **1313 tests, 0 failures, exit 0** (feat/drive-2026-10-23c @ c3598c6, 2026-10-23) |
-| Branch merged to `main` | `git log --oneline main..feat/drive-2026-10-23c` lists 13 commits | **Not merged.** The app-target edits on the b/c branches were never compiled; the distavo-ui lane owns that |
+| Branch merged to `main` | `git log --oneline main..feat/drive-2026-10-23c` lists 13 commits | **Merged** (checked 2026-10-23: `main..feat/drive-2026-10-23c` is empty; the app target was built Debug before each merge). The Release builds per edition below are still to do before tagging |
 | App target compiles, all editions | `cd apple && xcodegen generate`, then `xcodebuild -project Distavo.xcodeproj -scheme <Distavo|Distavo-AppStore|Distavo-Setapp> -configuration Release CODE_SIGNING_ALLOWED=NO build`, one per edition (no `-xcconfig`: it breaks SwiftPM resource bundles, see `release.yml`) | **Not verified on this branch.** Do it before tagging |
 | Compliance gates | `distavo-native-verify` skill: no Sparkle and no donate link in the App Store build | Re-run after the build |
 | What's New | `apple/metadata/whats-new/en-GB.txt` must be non-empty (the App Store workflow fails in seconds otherwise) | Still the **1.20 text**; replace with the 1.21 draft below |

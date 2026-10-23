@@ -207,4 +207,19 @@ public enum MeetingSchedule {
         let now = Set(current.map(\.occurrenceKey))
         return previous.map(\.occurrenceKey).filter { !now.contains($0) }
     }
+    // MARK: Stop wiring (Vikunja #4007)
+
+    /// The end policy for a recording of `candidate` that started at `startedAt`. Policy times are
+    /// seconds since the recording started (the controller feeds the same clock to `observe`).
+    /// The calendar end is only the hint `MeetingEndPolicy` documents; it never stops anything by itself.
+    public static func endPolicy(for candidate: RecordCandidate, startedAt: Date) -> MeetingEndPolicy {
+        MeetingEndPolicy(scheduledEnd: candidate.scheduledEnd.timeIntervalSince(startedAt))
+    }
+
+    /// The call signal to feed `MeetingEndPolicy.observe`: with `askAtScheduledEnd` the call signal is
+    /// ignored (nil -> ask at end + 10 min); with `whenCallEnds` it passes through, and a candidate that
+    /// has no call link and no detected call (nil) keeps the in-person behaviour.
+    public static func callSignal(for behaviour: StopBehaviour, callActive: Bool?) -> Bool? {
+        behaviour == .askAtScheduledEnd ? nil : callActive
+    }
 }

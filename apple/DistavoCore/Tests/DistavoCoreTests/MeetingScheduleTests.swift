@@ -119,4 +119,22 @@ final class MeetingScheduleTests: XCTestCase {
         let round = try JSONDecoder().decode(ScheduleConfig.self, from: JSONEncoder().encode(src))
         XCTAssertEqual(round, src)
     }
+
+    func testEndPolicyWiring() {
+        // Booked 30 min from the start, call still live at +45 min: not cut; released at +46 -> stop at +47.
+        let c = cands([ev(attendees: 0, link: "https://meet.google.com/a-b-c")])[0]
+        let started = c.start
+        var p = MeetingSchedule.endPolicy(for: c, startedAt: started)
+        XCTAssertEqual(p.scheduledEnd, 1800)
+        XCTAssertNil(p.observe(now: 2700, callActive: MeetingSchedule.callSignal(for: .whenCallEnds, callActive: true)))
+        XCTAssertNil(p.observe(now: 2760, callActive: MeetingSchedule.callSignal(for: .whenCallEnds, callActive: false)))
+        XCTAssertEqual(p.observe(now: 2820, callActive: MeetingSchedule.callSignal(for: .whenCallEnds, callActive: false)), .stop)
+        // ask-at-end ignores the call signal: asks at end + 10 min even while a call is active.
+        var q = MeetingSchedule.endPolicy(for: c, startedAt: started)
+        XCTAssertNil(q.observe(now: 2399, callActive: MeetingSchedule.callSignal(for: .askAtScheduledEnd, callActive: true)))
+        XCTAssertEqual(q.observe(now: 2400, callActive: MeetingSchedule.callSignal(for: .askAtScheduledEnd, callActive: true)),
+                       .askStillInMeeting)
+        // Started late (5 min in): the scheduled end is 25 min after the recording began.
+        XCTAssertEqual(MeetingSchedule.endPolicy(for: c, startedAt: started.addingTimeInterval(-300)).scheduledEnd, 2100)
+    }
 }

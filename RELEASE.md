@@ -55,6 +55,9 @@ git checkout main && git pull origin main                     # GitHub is PRIMAR
 $EDITOR apple/metadata/whats-new/en-GB.txt                    # the draft above
 python3 scripts/bump-minor-version.py                         # 1.20.0 (23) -> 1.21.0 (24); prints NEW_MARKETING_VERSION=
 git commit -am "chore(release): bump version to 1.21.0 (build 24) [skip version bump]"
+git cliff --unreleased --tag v1.21.0                          # preview the changelog section (git-cliff, cliff.toml); creates no tag
+git cliff --tag v1.21.0 -o CHANGELOG.md                       # regenerate CHANGELOG.md with the new version on top (never hand-edit)
+git commit -am "docs(changelog): 1.21.0"
 git push origin main
 git tag v1.21.0 && git push origin v1.21.0                    # fires release.yml and release-appstore.yml
 ```

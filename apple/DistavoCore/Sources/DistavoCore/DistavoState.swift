@@ -105,6 +105,10 @@ public enum DistavoState {
         public let stateDir: URL
         public let notesDir: URL
         private let fm = FileManager.default
+        /// Called with a one-line description when a marker cannot be written (set once, before use).
+        /// Default: print, the module's convention for diagnostics that must not touch the real log
+        /// (see the comment in `Pipeline.processOne`); the app target can route it to `ActivityLog`.
+        public var onIOFailure: ((String) -> Void)?
 
         public init(stateDir: URL, notesDir: URL) throws {
             self.stateDir = stateDir
@@ -121,7 +125,13 @@ public enum DistavoState {
         }
 
         private func exists(_ url: URL) -> Bool { fm.fileExists(atPath: url.path) }
-        private func write(_ text: String, _ url: URL) { try? text.write(to: url, atomically: true, encoding: .utf8) }
+        private func write(_ text: String, _ url: URL) {
+            do { try text.write(to: url, atomically: true, encoding: .utf8) } catch {
+                // A lost marker means a finished file is processed again (or a failure forgotten): say so.
+                let line = "cannot write marker \(url.lastPathComponent): \(error.localizedDescription)"
+                if let onIOFailure { onIOFailure(line) } else { print("[Distavo] \(line)") }
+            }
+        }
         private func remove(_ url: URL) { try? fm.removeItem(at: url) }
 
         public func isDone(_ base: String) -> Bool { exists(notePath(base)) || exists(marker(base, "done")) }

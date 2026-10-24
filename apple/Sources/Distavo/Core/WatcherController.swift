@@ -105,8 +105,11 @@ final class WatcherController: ObservableObject {
         self.needsOnboarding = !UserDefaults.standard.bool(forKey: Self.onboardedKey)
         // Fresh installs default to the on-device engine sized for this Mac;
         // existing config files keep whatever backend they already use.
-        var cfg = (try? Config.load(from: Config.defaultConfigURL,
-                                    fresh: .recommendedForThisMac())) ?? Config()
+        // An unreadable config gives defaults AND a log line, with the broken file kept beside it (#4374).
+        let loaded = Config.loadReportingProblems(from: Config.defaultConfigURL,
+                                                  fresh: .recommendedForThisMac())
+        var cfg = loaded.config
+        let configProblem = loaded.problem
         // A config carried over from another Mac may say "embedded" on
         // hardware that can't run it (Intel) — fall back to the server backend
         // rather than failing every recording.
@@ -120,6 +123,7 @@ final class WatcherController: ObservableObject {
         clearStaleProcessing()
         recentActivity = activityLog.recent(12)
         log("Distavo started")
+        if let configProblem { log("Config problem: \(configProblem)") }
         // Map pipeline stage boundaries onto the icon (converting → loading;
         // transcribing/summarising → transcribing). Both backends emit these.
         self.deps.onPhase = { [weak self] phase in

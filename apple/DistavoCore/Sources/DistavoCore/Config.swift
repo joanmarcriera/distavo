@@ -564,6 +564,36 @@ public struct Config: Codable, Equatable {
         return try JSONDecoder().decode(Config.self, from: data)
     }
 
+    /// Like `load`, but never throws: a config that cannot be read or parsed gives the defaults plus a
+    /// one-line `problem` for the log. The unreadable file is copied to `<name>.broken-<yyyyMMdd-HHmmss>`
+    /// beside it (the app saves the config on the next settings change, which would otherwise destroy the
+    /// only copy of what the user had). The original is left in place. A missing file is not a problem:
+    /// it is created with `fresh()`, exactly as `load` does.
+    public static func loadReportingProblems(
+        from url: URL, fileManager: FileManager = .default, now: Date = Date(),
+        fresh: @autoclosure () -> Config = Config()
+    ) -> (config: Config, problem: String?) {
+        do {
+            return (try load(from: url, fileManager: fileManager, fresh: fresh()), nil)
+        } catch {
+            var problem = "cannot read \(url.lastPathComponent) (\(error.localizedDescription)); using defaults"
+            if fileManager.fileExists(atPath: url.path) {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "yyyyMMdd-HHmmss"
+                let copy = url.deletingLastPathComponent()
+                    .appendingPathComponent("\(url.lastPathComponent).broken-\(formatter.string(from: now))")
+                do {
+                    try fileManager.copyItem(at: url, to: copy)
+                    problem += "; the unreadable file was kept as \(copy.lastPathComponent)"
+                } catch {
+                    problem += "; could not keep a copy of it (\(error.localizedDescription))"
+                }
+            }
+            return (fresh(), problem)
+        }
+    }
+
     public static func save(_ cfg: Config, to url: URL, fileManager: FileManager = .default) throws {
         try fileManager.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true)

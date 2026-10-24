@@ -628,8 +628,7 @@ public enum Pipeline {
             // `.failed` marker; Regenerate can fill the summary in later. The rejected text stays quarantined.
             if collapsed {
                 let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
-                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                let saveError = Pipeline.quarantine(noteText, at: quarantine, workDir: workDir)
                 let reason = failures.joined(separator: "; ")
                 let fallback = composeNote(
                     body: Pipeline.transcriptOnlyNote(reason: reason, transcript: clean), footer: "", meta: nil,
@@ -639,7 +638,8 @@ public enum Pipeline {
                 try fallback.write(to: notePath, atomically: true, encoding: .utf8)
                 state.markDone(base)
                 return ProcessResult(status: .done, base: base,
-                                     message: "note written (transcript only: summary rejected twice: \(reason))",
+                                     message: "note written (transcript only: summary rejected twice: \(reason))"
+                                        + (saveError.map { "; rejected summary could not be saved: \($0)" } ?? ""),
                                      notePath: notePath, transcriptPath: transcriptPath,
                                      detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
             }
@@ -666,12 +666,12 @@ public enum Pipeline {
                 // out of scope here.) The `.failed` marker is unchanged, and
                 // `notePath` stays nil so nothing in the UI can open it.
                 let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
-                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                let saveError = Pipeline.quarantine(noteText, at: quarantine, workDir: workDir)
                 // The reason (validator text names it) is what the menu shows.
-                // Name the file so the reason in the menu/log says where the rejected text went.
+                // Name the file so the reason in the menu/log says where the rejected text went,
+                // or says it could not be kept (#4374: never claim a file that was not written).
                 let message = "summary rejected: " + failures.joined(separator: "; ")
-                    + " (kept at \(quarantine.path))"
+                    + (saveError.map { " (rejected summary could not be saved: \($0))" } ?? " (kept at \(quarantine.path))")
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
                                      transcriptPath: transcriptPath,
@@ -880,6 +880,18 @@ public enum Pipeline {
             languageUsed: transcribeResult["language_used"] as? String,
             recommendation: transcribeResult["recommendation"] as? String,
             notes: transcribeResult["footer_notes"] as? [String] ?? [])
+    }
+
+    /// Writes a rejected summary into the work dir. Returns nil on success, else why it failed, so the
+    /// caller's message never claims a file that is not there (#4374, docs/error-handling-audit.md).
+    static func quarantine(_ text: String, at url: URL, workDir: URL) -> String? {
+        do {
+            try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
     }
 
     /// Options for the one retry after a repetition collapse (#4011): firmer penalty over a longer window,

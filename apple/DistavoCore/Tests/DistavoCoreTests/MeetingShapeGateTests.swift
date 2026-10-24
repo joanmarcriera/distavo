@@ -71,7 +71,15 @@ final class MeetingShapeGateTests: XCTestCase {
 
     func testDiarisationOffIsNotLowConfidence() {
         let filler = String(repeating: "alpha beta gamma delta ", count: 12)
-        XCTAssertEqual(MeetingShapeGate.assess(segments: [seg("SPEAKER_UNKNOWN", filler)], hasParticipantsSheet: false), .soloMemo)
+        XCTAssertEqual(MeetingShapeGate.assess(segments: [seg("SPEAKER_UNKNOWN", filler)], hasParticipantsSheet: false), .meeting)
+    }
+
+    /// #4503: over-segmented diarisation (7 labels, long turns, two dominant) is still a meeting.
+    func testSevenLabelsWithTwoDominantIsStillAMeeting() {
+        let long = String(repeating: "we should review the plan ", count: 20)
+        var segs = [seg("SPEAKER_00", long), seg("SPEAKER_01", long), seg("SPEAKER_00", long), seg("SPEAKER_01", long)]
+        for i in 2..<7 { segs.append(seg("SPEAKER_0\(i)", "yes okay")) }
+        XCTAssertEqual(MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: false), .meeting)
     }
 
     func testThreeVoicesTradingEveryFewWordsIsNotAMeeting() {

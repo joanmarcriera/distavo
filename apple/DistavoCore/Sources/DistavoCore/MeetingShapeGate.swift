@@ -10,8 +10,8 @@ import Foundation
 /// - mostly non-speech tags (music/applause/...) -> `.notAMeeting`;
 /// - low speaker confidence (more than half of the spoken words have no speaker although diarisation did
 ///   label some, or 3+ voices that trade turns every few words, as in a film scene) and no sheet
-///   -> `.notAMeeting`; all-unlabelled (diarisation off) is NOT low confidence;
-/// - one speaker only -> `.soloMemo` (memo template, no candidate/role invention);
+///   -> `.notAMeeting`; all-unlabelled (diarisation off) is NOT low confidence and stays a meeting;
+/// - exactly one real speaker label -> `.soloMemo` (no labels at all = unknown = `.meeting`) (memo template, no candidate/role invention);
 /// - anything else -> `.meeting` (the normal path, unchanged).
 /// A participants sheet (the owner said who was there) always wins: then it is a meeting.
 public enum MeetingShapeGate {
@@ -32,6 +32,8 @@ public enum MeetingShapeGate {
     public static let maxUnlabelledShare = 0.5
     /// With 3+ voices, fewer words than this per turn on average is crosstalk, not a conversation.
     public static let minWordsPerTurn = 4.0
+    /// A label counts as a voice for the "cast" rule only above this share of the labelled words.
+    public static let minVoiceShare = 0.05
 
     public static func assess(segments: [Segment], hasParticipantsSheet: Bool) -> Verdict {
         if hasParticipantsSheet { return .meeting }
@@ -50,11 +52,27 @@ public enum MeetingShapeGate {
         if let why = lowSpeakerConfidence(spoken: spoken, speakers: speakers) {
             return .notAMeeting(reason: why)
         }
-        if speakers.count > maxPlausibleSpeakers {
-            return .notAMeeting(reason: "\(speakers.count) different voices and no participants list")
+        // Over-segmented diarisation spawns many labels; only those holding a real share of the speech
+        // count as voices (a cast has many substantial ones, a long meeting a few plus slivers).
+        let voices = substantialVoices(spoken: spoken)
+        if voices > maxPlausibleSpeakers {
+            return .notAMeeting(reason: "\(voices) different voices and no participants list")
         }
-        if speakers.count <= 1 { return .soloMemo }
+        // No usable label (diarisation off, failed or all SPEAKER_UNKNOWN) says nothing about the number
+        // of people: stay on the normal meeting path. Only exactly one real label is a solo memo.
+        if speakers.count == 1 { return .soloMemo }
         return .meeting
+    }
+
+    /// Labels holding at least `minVoiceShare` of the labelled words.
+    static func substantialVoices(spoken: [Segment]) -> Int {
+        var perLabel: [String: Int] = [:]
+        for seg in spoken where seg.speaker != "SPEAKER_UNKNOWN" && !seg.speaker.isEmpty {
+            perLabel[seg.speaker, default: 0] += TranscriptCleaner.normaliseSpace(seg.text).split(separator: " ").count
+        }
+        let total = perLabel.values.reduce(0, +)
+        guard total > 0 else { return 0 }
+        return perLabel.values.filter { Double($0) / Double(total) >= minVoiceShare }.count
     }
 
     /// The low-speaker-confidence signal (#4015): nil when the labels look usable.

@@ -397,6 +397,15 @@ public enum Pipeline {
         // Calendar event for this recording (#2946); nil when off / no match.
         let calendarMatch = await CalendarLookup.resolve(
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
+        // Same call captured twice (#4014): note a time record for this recording, link a twin already seen
+        // and reuse its sheet when this one has none. Needs trustworthy time evidence; nil means no record.
+        var alsoCaptured: AlsoCaptured?
+        if variant == nil, let time = await deps.recordingStart(path),
+           let seconds = await deps.audioDurationSeconds(path), seconds > 0 {
+            alsoCaptured = DuplicateCallLink.register(
+                CallRecord(base: sourceBase, time: time, durationSeconds: seconds,
+                           isLiveCapture: exactRecorderNameDate(path) != nil), workDir: workDir)
+        }
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase, source: path)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
         transcribeConfig.numSpeakers = SpeakerHints.reconciledCount(
@@ -587,7 +596,10 @@ public enum Pipeline {
                 // Note order (see `NoteAssembly`): frontmatter, body with Highlights, Key moments,
                 // Tracked terms, provenance footer. `noteBody` is the body INCLUDING Key moments.
                 let footer = NoteFooterLines.footer(
-                    provenance: provenanceFooter(from: result), summaryNotes: checked.notes)
+                    provenance: provenanceFooter(from: result),
+                    summaryNotes: checked.notes + (alsoCaptured.map {
+                        [DuplicateCallDetector.alsoCapturedLine(otherBase: $0.otherBase, isPrimary: $0.isPrimary)]
+                    } ?? []))
                 let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
                 (noteBody, noteFooter) = (withMoments, footer)
                 return (withMoments + footer, checked.failures + SummaryValidator.validate(cleaned + footer))

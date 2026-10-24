@@ -52,3 +52,17 @@ final class MeetingDigestTests: XCTestCase {
         XCTAssertEqual(r.map(\.isPast), [true, false])
     }
 }
+
+/// #4005: the digest time is a config value; absent or out of range falls back safely, and the feature stays off.
+final class ScheduleDigestConfigTests: XCTestCase {
+    func testDefaultsAndClamping() throws {
+        XCTAssertEqual(ScheduleConfig().digestAtMinute, 480)
+        XCTAssertFalse(ScheduleConfig().enabled)
+        let old = try JSONDecoder().decode(ScheduleConfig.self, from: Data("{}".utf8))
+        XCTAssertEqual(old.digestAtMinute, 480)
+        let odd = try JSONDecoder().decode(ScheduleConfig.self, from: Data(#"{"digest_at_minute": 99999}"#.utf8))
+        XCTAssertEqual(odd.digestAtMinute, 1439)
+        let nine = try JSONDecoder().decode(ScheduleConfig.self, from: Data(#"{"digest_at_minute": 540}"#.utf8))
+        XCTAssertEqual(nine.digestAtMinute, 540)
+    }
+}

@@ -32,10 +32,14 @@ public struct ScheduleConfig: Codable, Equatable, Sendable {
     public var seriesRules: [String: RecordPlan]
     /// Per-occurrence choices keyed `<eventID>@<yyyy-MM-dd>` (see `MeetingSchedule.occurrenceKey`).
     public var occurrenceChoices: [String: RecordPlan]
+    /// Minutes since local midnight at which the morning digest (#4005, `MeetingDigest`) may show; default 08:00.
+    public var digestAtMinute: Int
 
     public init(enabled: Bool = false, defaultPlan: RecordPlan = .remind,
                 stopBehaviour: StopBehaviour = .whenCallEnds,
-                seriesRules: [String: RecordPlan] = [:], occurrenceChoices: [String: RecordPlan] = [:]) {
+                seriesRules: [String: RecordPlan] = [:], occurrenceChoices: [String: RecordPlan] = [:],
+                digestAtMinute: Int = 8 * 60) {
+        self.digestAtMinute = min(max(digestAtMinute, 0), 24 * 60 - 1)
         self.enabled = enabled; self.defaultPlan = defaultPlan; self.stopBehaviour = stopBehaviour
         self.seriesRules = seriesRules; self.occurrenceChoices = occurrenceChoices
     }
@@ -46,6 +50,7 @@ public struct ScheduleConfig: Codable, Equatable, Sendable {
         case stopBehaviour = "stop_behaviour"
         case seriesRules = "series_rules"
         case occurrenceChoices = "occurrence_choices"
+        case digestAtMinute = "digest_at_minute"
     }
 
     public init(from decoder: Decoder) throws {
@@ -55,6 +60,7 @@ public struct ScheduleConfig: Codable, Equatable, Sendable {
         defaultPlan = (try? c.decodeIfPresent(RecordPlan.self, forKey: .defaultPlan)).flatMap { $0 } ?? d.defaultPlan
         stopBehaviour = (try? c.decodeIfPresent(StopBehaviour.self, forKey: .stopBehaviour)).flatMap { $0 } ?? d.stopBehaviour
         // Decode through raw strings so one unknown plan value drops that entry, not the whole map.
+        digestAtMinute = min(max((try? c.decodeIfPresent(Int.self, forKey: .digestAtMinute)).flatMap { $0 } ?? d.digestAtMinute, 0), 24 * 60 - 1)
         seriesRules = ScheduleConfig.plans((try? c.decodeIfPresent([String: String].self, forKey: .seriesRules)).flatMap { $0 })
         occurrenceChoices = ScheduleConfig.plans((try? c.decodeIfPresent([String: String].self, forKey: .occurrenceChoices)).flatMap { $0 })
     }

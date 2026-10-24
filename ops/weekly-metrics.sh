@@ -9,10 +9,11 @@
 #                                              prints only, writes no file
 # Env: COUNTRY (default gb) store front; GH_REPO (default joanmarcriera/distavo).
 # No secrets, no App Store Connect login, no telemetry; every call is a public GET.
-# Output lines: "ratings:" (count, average per app), "review:" (latest 50 titles),
+# Output lines: "ratings:" (count, average, price per app), "status:" (HTTP code of distavo.com and
+# /appcast.xml; fixture files status-site.txt / status-appcast.txt), "review:" (latest 50 titles),
 # "downloads:" (GitHub release asset download_count). Not scheduled on purpose (no cron/launchd).
 set -u
-APPS="6785437932 6768724888"   # Distavo, Trace
+APPS="6785437932 6768724888 6447090616"   # Distavo, Trace, Whisper Notes (rival price/rating watch, #4666)
 COUNTRY="${COUNTRY:-gb}"
 GH_REPO="${GH_REPO:-joanmarcriera/distavo}"
 FIX=""
@@ -32,10 +33,10 @@ report() {
 import sys, json
 try:
     r = json.load(sys.stdin)["results"][0]
-    print("ratings: %s (%s) count=%s avg=%s version=%s version-count=%s version-avg=%s" % (
+    print("ratings: %s (%s) count=%s avg=%s version=%s version-count=%s version-avg=%s price=%s" % (
         r.get("trackName"), sys.argv[1], r.get("userRatingCount", 0),
         r.get("averageUserRating"), r.get("version"), r.get("userRatingCountForCurrentVersion", 0),
-        r.get("averageUserRatingForCurrentVersion")))
+        r.get("averageUserRatingForCurrentVersion"), r.get("formattedPrice", r.get("price", "unknown"))))
 except Exception:
     print("ratings: %s unavailable" % sys.argv[1])
 ' "$id"
@@ -54,6 +55,12 @@ try:
 except Exception:
     print("review: feed unavailable for %s" % sys.argv[1])
 ' "$id"
+  done
+  for pair in "site https://distavo.com/" "appcast https://distavo.com/appcast.xml"; do
+    set -- $pair
+    if [ -n "$FIX" ]; then code="$(cat "$FIX/status-$1.txt" 2>/dev/null)"
+    else code="$(curl -sI -o /dev/null -w '%{http_code}' --max-time 20 "$2" 2>/dev/null)"; fi
+    echo "status: $2 http=${code:-unavailable}"
   done
   fetch releases.json "https://api.github.com/repos/$GH_REPO/releases?per_page=30" |
     python3 -I -c '

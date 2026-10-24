@@ -567,7 +567,10 @@ public struct Config: Codable, Equatable {
     /// Like `load`, but never throws: a config that cannot be read or parsed gives the defaults plus a
     /// one-line `problem` for the log. The unreadable file is copied to `<name>.broken-<yyyyMMdd-HHmmss>`
     /// beside it (the app saves the config on the next settings change, which would otherwise destroy the
-    /// only copy of what the user had). The original is left in place. A missing file is not a problem:
+    /// only copy of what the user had; an identical earlier copy is reused, so a file that stays broken does
+    /// not pile up one copy per launch). The original is left in place. The error path returns plain
+    /// `Config()`, never `fresh()`: fresh-install defaults (compaction on, embedded backend) must not reach a
+    /// user who already had a config (#4504). A missing file is not a problem:
     /// it is created with `fresh()`, exactly as `load` does.
     public static func loadReportingProblems(
         from url: URL, fileManager: FileManager = .default, now: Date = Date(),
@@ -584,13 +587,28 @@ public struct Config: Codable, Equatable {
                 let copy = url.deletingLastPathComponent()
                     .appendingPathComponent("\(url.lastPathComponent).broken-\(formatter.string(from: now))")
                 do {
-                    try fileManager.copyItem(at: url, to: copy)
-                    problem += "; the unreadable file was kept as \(copy.lastPathComponent)"
+                    if let same = identicalBrokenCopy(of: url, fileManager: fileManager) {
+                        problem += "; the unreadable file was already kept as \(same)"
+                    } else {
+                        try fileManager.copyItem(at: url, to: copy)
+                        problem += "; the unreadable file was kept as \(copy.lastPathComponent)"
+                    }
                 } catch {
                     problem += "; could not keep a copy of it (\(error.localizedDescription))"
                 }
             }
-            return (fresh(), problem)
+            return (Config(), problem)
+        }
+    }
+
+    /// Name of an existing `<name>.broken-*` beside `url` with the same bytes, if any.
+    private static func identicalBrokenCopy(of url: URL, fileManager: FileManager) -> String? {
+        let dir = url.deletingLastPathComponent()
+        guard let original = try? Data(contentsOf: url),
+              let names = try? fileManager.contentsOfDirectory(atPath: dir.path) else { return nil }
+        return names.sorted().first {
+            $0.hasPrefix(url.lastPathComponent + ".broken-")
+                && (try? Data(contentsOf: dir.appendingPathComponent($0))) == original
         }
     }
 

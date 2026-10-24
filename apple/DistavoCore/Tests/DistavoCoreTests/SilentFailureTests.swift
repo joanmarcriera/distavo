@@ -142,6 +142,36 @@ final class SilentFailureTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: url), broken, "the original must not be overwritten here")
     }
 
+    /// #4504: a corrupt config must not get fresh-install defaults (compaction replaces the original WAV),
+    /// and repeated launches on the same broken file keep a single copy.
+    func testCorruptConfigDoesNotGetFreshInstallDefaultsAndKeepsOneCopy() throws {
+        let dir = tempDir()
+        let url = dir.appendingPathComponent("watcher-config.json")
+        try Data("{ broken".utf8).write(to: url)
+        let fresh = Config.recommendedForThisMac()
+        for i in 0..<3 {
+            let (cfg, problem) = Config.loadReportingProblems(
+                from: url, now: Date(timeIntervalSince1970: 1_000_000 + Double(i) * 10), fresh: fresh)
+            XCTAssertEqual(cfg, Config())
+            XCTAssertFalse(cfg.compactRecordingsAfterNote)
+            XCTAssertNotNil(problem)
+        }
+        let copies = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+            .filter { $0.hasPrefix("watcher-config.json.broken-") }
+        XCTAssertEqual(copies.count, 1, "\(copies)")
+    }
+
+    /// #4504: a missing file still gets the fresh-install defaults written, with no problem.
+    func testMissingConfigStillGetsFreshDefaults() throws {
+        let dir = tempDir()
+        let url = dir.appendingPathComponent("watcher-config.json")
+        var fresh = Config(); fresh.compactRecordingsAfterNote = true
+        let (cfg, problem) = Config.loadReportingProblems(from: url, fresh: fresh)
+        XCTAssertNil(problem)
+        XCTAssertTrue(cfg.compactRecordingsAfterNote)
+        XCTAssertTrue(try Data(contentsOf: url).count > 0)
+    }
+
     func testValidAndMissingConfigReportNoProblem() throws {
         let dir = tempDir()
         let url = dir.appendingPathComponent("watcher-config.json")

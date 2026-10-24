@@ -22,6 +22,9 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://distavo.com/"/>
   </url>
   <url>
+    <loc>https://distavo.com/setup/</loc>
+  </url>
+  <url>
     <loc>https://distavo.com/support/</loc>
   </url>
   <url>

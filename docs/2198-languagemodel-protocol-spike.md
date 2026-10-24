@@ -81,3 +81,16 @@ majority of installs, and then as an additive provider behind `PipelineDeps.summ
 
 Gate for Marc: items 2-4 need a signed or at least locally run macOS 27 build and Marc's reference transcripts; they
 are not doable unattended.
+
+## Addendum 2026-10-24: MLX versus CoreAI runner (docs only)
+
+The side-by-side table (package, weight format, constructor) is in
+`docs/superpowers/specs/2026-09-17-local-gemma-via-languagemodel-design.md`; not repeated here. One new fact **[SDK]**:
+`MacOSX27.0.sdk` ships a system `CoreAI.framework`, but its Swift interface has no `CoreAILanguageModel` (and no
+language-model type at all: one case-insensitive hit for "language|llm"). So `CoreAILanguageModel` comes from the
+`apple/coreai-models` package, exactly like `MLXLanguageModel` comes from `mlx-swift-lm`: both are third-party SwiftPM
+dependencies, neither is free with the OS. Consequences:
+* Both need a `NOTICES.md` entry and the `NoticesCoverageTests` check before adoption.
+* MLX accepts the `mlx-community` Gemma 4 weights we already evaluate; CoreAI needs an `.aimodel` export of Gemma
+  that is **[unverified]** to exist. MLX stays first, CoreAI only for a later Neural-Engine pass (memory/thermals on 16 GB Macs).
+* No decision changes: recommendation above stands (keep A, additive provider later).

@@ -58,4 +58,33 @@ final class MeetingShapeGateTests: XCTestCase {
         XCTAssertFalse(old.summarise.nonMeetingGuard)
         XCTAssertFalse(Config.recommendedForThisMac().summarise.nonMeetingGuard)
     }
+
+    // Low speaker confidence (#4015), synthetic text only.
+    func testMostlyUnlabelledWordsWithSomeLabelsIsNotAMeeting() {
+        let filler = String(repeating: "alpha beta gamma delta ", count: 12)
+        let segs = [seg("SPEAKER_00", "one two three"), seg("SPEAKER_UNKNOWN", filler), seg("SPEAKER_01", "four five six")]
+        guard case .notAMeeting = MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: false) else {
+            return XCTFail("expected notAMeeting")
+        }
+        XCTAssertEqual(MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: true), .meeting)
+    }
+
+    func testDiarisationOffIsNotLowConfidence() {
+        let filler = String(repeating: "alpha beta gamma delta ", count: 12)
+        XCTAssertEqual(MeetingShapeGate.assess(segments: [seg("SPEAKER_UNKNOWN", filler)], hasParticipantsSheet: false), .soloMemo)
+    }
+
+    func testThreeVoicesTradingEveryFewWordsIsNotAMeeting() {
+        var segs: [Segment] = []
+        for i in 0..<30 { segs.append(seg("SPEAKER_0\(i % 3)", "well then yes")) }
+        guard case .notAMeeting = MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: false) else {
+            return XCTFail("expected notAMeeting")
+        }
+    }
+
+    func testRealisticTurnsAreStillAMeeting() {
+        let turn = String(repeating: "we should review the plan ", count: 3)
+        let segs = (0..<6).map { seg("SPEAKER_0\($0 % 3)", turn) }
+        XCTAssertEqual(MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: false), .meeting)
+    }
 }

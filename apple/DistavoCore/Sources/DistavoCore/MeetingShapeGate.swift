@@ -8,6 +8,9 @@ import Foundation
 /// Signals (all read from the diarised segments, never from audio):
 /// - many distinct speakers and no participants sheet -> `.notAMeeting` (a scene with a cast);
 /// - mostly non-speech tags (music/applause/...) -> `.notAMeeting`;
+/// - low speaker confidence (more than half of the spoken words have no speaker although diarisation did
+///   label some, or 3+ voices that trade turns every few words, as in a film scene) and no sheet
+///   -> `.notAMeeting`; all-unlabelled (diarisation off) is NOT low confidence;
 /// - one speaker only -> `.soloMemo` (memo template, no candidate/role invention);
 /// - anything else -> `.meeting` (the normal path, unchanged).
 /// A participants sheet (the owner said who was there) always wins: then it is a meeting.
@@ -25,6 +28,11 @@ public enum MeetingShapeGate {
     /// Below this many words in total there is nothing to judge: stay on the normal path.
     public static let minWords = 40
 
+    /// Share of spoken words without a speaker label above which the labels cannot be trusted.
+    public static let maxUnlabelledShare = 0.5
+    /// With 3+ voices, fewer words than this per turn on average is crosstalk, not a conversation.
+    public static let minWordsPerTurn = 4.0
+
     public static func assess(segments: [Segment], hasParticipantsSheet: Bool) -> Verdict {
         if hasParticipantsSheet { return .meeting }
         let spoken = segments.filter {
@@ -39,11 +47,33 @@ public enum MeetingShapeGate {
         }
         guard words >= minWords else { return .meeting }
         let speakers = Set(spoken.map(\.speaker).filter { $0 != "SPEAKER_UNKNOWN" })
+        if let why = lowSpeakerConfidence(spoken: spoken, speakers: speakers) {
+            return .notAMeeting(reason: why)
+        }
         if speakers.count > maxPlausibleSpeakers {
             return .notAMeeting(reason: "\(speakers.count) different voices and no participants list")
         }
         if speakers.count <= 1 { return .soloMemo }
         return .meeting
+    }
+
+    /// The low-speaker-confidence signal (#4015): nil when the labels look usable.
+    static func lowSpeakerConfidence(spoken: [Segment], speakers: Set<String>) -> String? {
+        func words(_ seg: Segment) -> Int { TranscriptCleaner.normaliseSpace(seg.text).split(separator: " ").count }
+        let isLabelled: (Segment) -> Bool = { $0.speaker != "SPEAKER_UNKNOWN" && !$0.speaker.isEmpty }
+        let total = spoken.reduce(0) { $0 + words($1) }
+        let unlabelled = spoken.filter { !isLabelled($0) }.reduce(0) { $0 + words($1) }
+        if total > 0, !speakers.isEmpty, Double(unlabelled) / Double(total) > maxUnlabelledShare {
+            return "the speakers could not be told apart"
+        }
+        if speakers.count >= 3 {
+            var turns = 0, last: String?
+            for seg in spoken where isLabelled(seg) { if seg.speaker != last { turns += 1; last = seg.speaker } }
+            if turns > 0, Double(total - unlabelled) / Double(turns) < minWordsPerTurn {
+                return "the voices change every few words"
+            }
+        }
+        return nil
     }
 
     /// Body of the short note written for `.notAMeeting` (transcript only, nothing invented).

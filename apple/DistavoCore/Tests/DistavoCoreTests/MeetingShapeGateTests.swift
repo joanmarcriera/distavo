@@ -30,7 +30,7 @@ final class MeetingShapeGateTests: XCTestCase {
     }
 
     func testOneVoiceIsAMemo() {
-        let segs = [seg("SPEAKER_00", filler), seg("SPEAKER_00", filler)]
+        let segs = [seg("SPEAKER_00", filler), seg("SPEAKER_00", filler), seg("SPEAKER_00", filler)]
         XCTAssertEqual(MeetingShapeGate.assess(segments: segs, hasParticipantsSheet: false), .soloMemo)
     }
 

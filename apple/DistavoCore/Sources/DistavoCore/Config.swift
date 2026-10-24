@@ -225,8 +225,13 @@ public struct SummariseConfig: Codable, Equatable {
     /// #2941, see `ActionItemsPrompt`). **false for any config predating the key**
     /// and never turned on by `recommendedForThisMac()`.
     public var actionItems: Bool
+    /// Skip the interview-style summary for recordings that are not meetings (film/TV audio, a solo memo):
+    /// see `MeetingShapeGate` (Vikunja #4015). **false for any config predating the key**, never set by
+    /// `recommendedForThisMac()`.
+    public var nonMeetingGuard: Bool
 
     enum CodingKeys: String, CodingKey {
+        case nonMeetingGuard = "non_meeting_guard"
         case actionItems = "action_items"
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
@@ -246,8 +251,8 @@ public struct SummariseConfig: Codable, Equatable {
                 biggerModel: String? = nil,
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
-                actionItems: Bool = false) {
-        self.actionItems = actionItems
+                actionItems: Bool = false, nonMeetingGuard: Bool = false) {
+        self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -282,6 +287,7 @@ public struct SummariseConfig: Codable, Equatable {
         folderTemplates = ((try? c.decodeIfPresent([String: String].self, forKey: .folderTemplates)) ?? nil)
             ?? d.folderTemplates
         actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
+        nonMeetingGuard = ((try? c.decodeIfPresent(Bool.self, forKey: .nonMeetingGuard)) ?? nil) ?? d.nonMeetingGuard
     }
 }
 

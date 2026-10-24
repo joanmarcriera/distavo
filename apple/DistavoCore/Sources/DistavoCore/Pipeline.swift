@@ -519,6 +519,30 @@ public enum Pipeline {
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            // #4015 (opt-in): film/TV audio or a solo memo is not a meeting. Not-a-meeting gets a short transcript-only
+            // note; one voice gets the memo template. A participants sheet always means "meeting".
+            if config.summarise.nonMeetingGuard {
+                let sheet = !(participants ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                switch MeetingShapeGate.assess(segments: TranscriptCleaner.segments(from: result), hasParticipantsSheet: sheet) {
+                case .meeting: break
+                case .soloMemo:
+                    context.template = ActionItemsPrompt.effectiveTemplate(
+                        MeetingShapeGate.memoTemplate, style: config.summarise.promptStyle,
+                        enabled: config.summarise.actionItems)
+                case .notAMeeting(let reason):
+                    let note = composeNote(
+                        body: MeetingShapeGate.notAMeetingNote(reason: reason, transcript: clean), footer: "", meta: nil,
+                        config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
+                        cleanTranscript: clean, dominantCode: dominantCode,
+                        existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                    try note.write(to: notePath, atomically: true, encoding: .utf8)
+                    state.markDone(base)
+                    return ProcessResult(status: .done, base: base,
+                                         message: "note written (transcript only: does not look like a meeting: \(reason))",
+                                         notePath: notePath, transcriptPath: transcriptPath,
+                                         detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+                }
+            }
             // #4013: a recording that stops mid-conversation is flagged, not summarised as complete.
             if let timed = timedForNote, let audio = await deps.audioDurationSeconds(path),
                TruncationCheck.isTruncated(segments: timed.segments, audioSeconds: audio) {

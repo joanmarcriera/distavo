@@ -5,7 +5,7 @@
   --muted: #5d6878;
   --line: #dce3eb;
   --blue: #295cff;
-  --green: #0f8b72;
+  --green: #0b7a63;
   --rust: #b65733;
   --navy: #111827;
   --shadow: 0 18px 55px rgba(24, 32, 42, 0.14);
@@ -794,5 +794,44 @@ h1 {
 
   .lang-line {
     font-size: 0.82rem;
+  }
+}
+
+/* Accessibility ---------------------------------------------------------
+   Skip link (first focusable element), a visible keyboard focus ring on
+   everything interactive, and no smooth scrolling for people who ask for
+   reduced motion. */
+
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 100;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background: var(--navy);
+  color: #ffffff;
+  font-weight: 700;
+  transform: translateY(-200%);
+}
+
+.skip-link:focus {
+  transform: none;
+}
+
+:focus-visible {
+  outline: 3px solid var(--blue);
+  outline-offset: 3px;
+}
+
+.hero :focus-visible,
+.status-band :focus-visible,
+.skip-link:focus-visible {
+  outline-color: #ffffff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }

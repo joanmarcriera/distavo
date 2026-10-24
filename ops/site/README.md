@@ -20,3 +20,10 @@ Routes:
 A push to `main` does **not** deploy this site. Only `appcast.xml` is published automatically
 (`ops/publish-appcast.sh`). Changing the pages means copying `ops/site/` to `/opt/stacks/core/distavo`
 on the Hetzner host by hand, which is a gated, human step (Codex release review, task 4071).
+
+## Checks (run before every deploy)
+
+- `ops/site/check-site.sh` - links, third-party loads, hreflang.
+- `python3 -I ops/site/check-a11y.py` - WCAG 2.2 AA basics and the contrast table (`A11Y OK (N pages)`).
+- `python3 -I ops/site/check-seo.py` - titles, descriptions, canonicals, JSON-LD, sitemap.xml, robots.txt and the weight budget (`SEO OK`).
+- `ops/tests/test-check-a11y.sh`, `ops/tests/test-check-seo.sh` - prove the checkers fail on bad input.

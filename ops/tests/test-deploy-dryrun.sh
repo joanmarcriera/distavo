@@ -25,6 +25,18 @@ for f in index.html ca/index.html es/index.html sitemap.xml robots.txt; do
 done
 [ ! -e "$tmp/deploy.sh" ] && [ ! -e "$tmp/check-seo.py" ] || { echo "FAIL checkers were copied"; fail=1; }
 
+# A failing check-seo.py must stop the deploy before any copy (Vikunja #5025). Run a copy of
+# deploy.sh beside stub checkers so the real site is not needed.
+stub="$(mktemp -d)"; dest="$(mktemp -d)"
+cp "$DEPLOY" "$stub/deploy.sh"
+printf '#!/usr/bin/env bash\nexit 0\n' > "$stub/check-site.sh"; chmod +x "$stub/check-site.sh"
+printf 'import sys\nsys.exit(1)\n' > "$stub/check-seo.py"
+echo page > "$stub/index.html"
+DISTAVO_SITE_TARGET="$dest" "$stub/deploy.sh" --go >/dev/null 2>&1; rc=$?
+[ "$rc" -ne 0 ] && echo "PASS failing check-seo -> non-zero ($rc)" || { echo "FAIL failing check-seo did not stop deploy"; fail=1; }
+[ -z "$(ls -A "$dest")" ] && echo "PASS failing check-seo copied nothing" || { echo "FAIL files copied despite check-seo failure"; fail=1; }
+rm -rf "$stub" "$dest"
+
 bash -n "$DEPLOY" && echo "PASS bash -n"
 if command -v shellcheck >/dev/null; then shellcheck -S warning "$DEPLOY" && echo "PASS shellcheck"; fi
 [ "$fail" -eq 0 ] && echo "PASS test-deploy-dryrun"

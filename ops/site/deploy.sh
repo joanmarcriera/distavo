@@ -30,7 +30,14 @@ fi
 URL="${DISTAVO_SITE_URL:-https://distavo.com}"
 
 "$HERE/check-site.sh"
-if [ -f "$HERE/check-seo.py" ]; then python3 -I "$HERE/check-seo.py" >/dev/null && echo "check-seo: OK"; fi
+if [ -f "$HERE/check-seo.py" ]; then
+  # Not `cmd && echo` inside the if: set -e ignores a failure in an && list, so the deploy went on.
+  if ! python3 -I "$HERE/check-seo.py" >/dev/null; then
+    echo "check-seo: FAILED, deploy stopped" >&2
+    exit 1
+  fi
+  echo "check-seo: OK"
+fi
 
 # Source-only files never go to the web root.
 EXCLUDES=(--exclude='*.sh' --exclude='*.py' --exclude='*.md' --exclude='.DS_Store' --exclude='__pycache__')

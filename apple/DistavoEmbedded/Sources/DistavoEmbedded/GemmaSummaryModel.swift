@@ -459,6 +459,23 @@ public enum GemmaSummariser {
         }
     }
 
+    /// What a driver error means on the Gemma path. A context that cannot hold the prompt is this
+    /// model's configured limit, not a transient state, so it fails visibly instead of deferring
+    /// forever (Vikunja #5405; only the Apple model's size-0-while-not-ready case defers, in
+    /// `EmbeddedSummariser`).
+    static func mapDriverError(_ error: SummaryDriverError) -> LocalSummaryError {
+        switch error {
+        case .contextTooSmall:
+            return LocalSummaryError("The local summary model's context is too small to summarise anything.")
+        case .emptyResult:
+            return LocalSummaryError(LocalSummaryFailurePolicy.decideMessage(for: .emptyOutput))
+        case .promptTooLong(let measured, let contextSize):
+            return LocalSummaryError("A section of the recording was too long for the local model (\(measured) tokens vs \(contextSize)).")
+        case .outputBudgetTooSmall(let available, let wanted):
+            return LocalSummaryError("A section of the recording left room for only \(available) of the \(wanted) tokens the note needs.")
+        }
+    }
+
     private static func run(
         transcript: String, modelID: String,
         noteOwner: String, userSpeaker: String, participants: String?,
@@ -501,17 +518,7 @@ public enum GemmaSummariser {
                 raw, style: style, transcript: transcript, alwaysKeep: [noteOwner],
                 extraHaystack: [participants, noteOwner].compactMap { $0 }, template: template)
         } catch let error as SummaryDriverError {
-            switch error {
-            case .contextTooSmall:
-                if let deferral = error.deferral { throw deferral }
-                throw LocalSummaryError("The local summary model's context is too small to summarise anything.")
-            case .emptyResult:
-                throw LocalSummaryError(LocalSummaryFailurePolicy.decideMessage(for: .emptyOutput))
-            case .promptTooLong(let measured, let contextSize):
-                throw LocalSummaryError("A section of the recording was too long for the local model (\(measured) tokens vs \(contextSize)).")
-            case .outputBudgetTooSmall(let available, let wanted):
-                throw LocalSummaryError("A section of the recording left room for only \(available) of the \(wanted) tokens the note needs.")
-            }
+            throw mapDriverError(error)
         } catch is CancellationError {
             throw CancellationError()
         } catch {

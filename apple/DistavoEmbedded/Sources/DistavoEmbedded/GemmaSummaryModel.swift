@@ -503,6 +503,7 @@ public enum GemmaSummariser {
         } catch let error as SummaryDriverError {
             switch error {
             case .contextTooSmall:
+                if let deferral = error.deferral { throw deferral }
                 throw LocalSummaryError("The local summary model's context is too small to summarise anything.")
             case .emptyResult:
                 throw LocalSummaryError(LocalSummaryFailurePolicy.decideMessage(for: .emptyOutput))

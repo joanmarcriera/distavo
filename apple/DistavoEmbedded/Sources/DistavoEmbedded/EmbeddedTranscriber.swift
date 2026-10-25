@@ -427,3 +427,11 @@ public actor EmbeddedTranscriber {
         return typed
     }
 }
+
+/// #5284: lets `TranscribeFallback` tell "heard nothing" from a real failure.
+extension EmbeddedTranscriberError: EmptyTranscriptSignal {
+    public var isEmptyTranscript: Bool {
+        if case .emptyResult = self { return true }
+        return false
+    }
+}

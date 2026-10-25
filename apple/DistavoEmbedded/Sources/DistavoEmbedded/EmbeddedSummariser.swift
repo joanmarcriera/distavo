@@ -168,6 +168,8 @@ public enum EmbeddedSummariser {
         } catch let error as SummaryDriverError {
             switch error {
             case .contextTooSmall:
+                // #5284: a window that cannot hold anything is the model's state, not the recording's: defer.
+                if let deferral = error.deferral { throw deferral }
                 throw EmbeddedSummariserError.contextTooSmall
             case .emptyResult:
                 throw EmbeddedSummariserError.emptyResult

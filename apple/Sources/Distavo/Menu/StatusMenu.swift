@@ -48,6 +48,20 @@ struct StatusMenu: View {
             }
         }
 
+        // Unreadable after two identical conversion failures (Vikunja #5283/#5404): Retry or Bin.
+        if !controller.unreadableRecordings.isEmpty {
+            let count = controller.unreadableRecordings.count
+            Text("⚠︎ \(count) recording\(count == 1 ? "" : "s") could not be read")
+            Button("Retry \(count) unreadable recording\(count == 1 ? "" : "s")") {
+                controller.retryUnreadableRecordings()
+            }
+            ForEach(controller.unreadableRecordings.prefix(5), id: \.base) { entry in
+                Button("Move “\(entry.base)” to the Bin (\(entry.reason))") {
+                    controller.trashUnreadableRecording(entry.base)
+                }
+            }
+        }
+
         Divider()
 
         if MeetingCaptureController.isSupported {

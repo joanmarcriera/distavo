@@ -70,6 +70,27 @@ final class UnreadableRecordingTests: XCTestCase {
         XCTAssertEqual(pending(cfg, store), ["broken.opus"])
     }
 
+    /// Vikunja #5404: "Process now" must revive a terminal file whose size did not change
+    /// (iCloud placeholder that finished downloading), while a launch-time `retryFailed` must not.
+    func testRetryUnreadableReleasesTerminalFileAtSameSize() async throws {
+        let (cfg, input, store) = try makeEnv()
+        let d = deps(convertError: "broken.opus: could not start reading (Cannot Open).")
+        for _ in 0..<2 {
+            _ = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+            store.retryFailed()
+        }
+        XCTAssertEqual(store.unreadableBases().map(\.base), ["broken"])
+        XCTAssertTrue(pending(cfg, store).isEmpty)
+
+        store.retryUnreadable()
+        XCTAssertTrue(store.unreadableBases().isEmpty)
+        XCTAssertEqual(pending(cfg, store), ["broken.opus"])
+
+        // The failure count restarted: one more identical failure is not yet terminal.
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertTrue(store.unreadableBases().isEmpty)
+    }
+
     func testDifferentFailuresDoNotAccumulateIntoATerminalState() async throws {
         let (cfg, input, store) = try makeEnv()
         _ = await Pipeline.processOne(path: input, config: cfg, deps: deps(convertError: "disk busy"),

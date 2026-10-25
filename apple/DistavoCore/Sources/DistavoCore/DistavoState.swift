@@ -210,6 +210,14 @@ public enum DistavoState {
             remove(marker(base, "unreadable")); remove(marker(base, "convertfail"))
         }
 
+        /// Release every terminal recording ("Process now" and the menu's Retry, Vikunja #5404). Not part
+        /// of `retryFailed`, which also runs at launch and must keep a terminal file skipped (#5283); the
+        /// `.convertfail` count goes too, so a still-broken file needs two fresh identical failures again.
+        public func retryUnreadable() {
+            removeMarkers(suffix: "unreadable")
+            removeMarkers(suffix: "convertfail")
+        }
+
         /// Terminal recordings with their reason: the menu's one line each, with a Move to Bin action.
         public func unreadableBases() -> [(base: String, reason: String)] { markers(suffix: "unreadable") }
 

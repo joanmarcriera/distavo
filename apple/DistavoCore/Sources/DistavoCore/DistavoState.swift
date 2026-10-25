@@ -173,6 +173,46 @@ public enum DistavoState {
 
         public func clearTooShort(_ base: String) { remove(marker(base, "tooshort")) }
 
+        // MARK: Unreadable recordings (Vikunja #5283)
+        //
+        // A file whose conversion fails with the same message twice in a row will not start working by
+        // being retried at every launch (two 7 Jul recordings logged "could not start reading" ~15 times).
+        // `.convertfail` ("<message>\n<size>\n<count>") survives `retryFailed`; at the second identical
+        // failure the base gets a terminal `.unreadable` marker ("<message>\n<size>"), which `iterPending`
+        // skips while the file keeps its size and which only `clearUnreadable` (the menu's action) removes.
+
+        /// Record a conversion failure; returns true when it was the second identical one in a row and the
+        /// base is now terminal. A different message or file size restarts the count.
+        @discardableResult
+        public func recordConvertFailure(_ base: String, message: String, fileSize: Int?) -> Bool {
+            let size = fileSize.map(String.init) ?? ""
+            var count = 1
+            if let old = try? String(contentsOf: marker(base, "convertfail"), encoding: .utf8) {
+                let l = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                if l.count >= 3, l[0] == message, l[1] == size, let n = Int(l[2]) { count = n + 1 }
+            }
+            write("\(message)\n\(size)\n\(count)\n", marker(base, "convertfail"))
+            guard count >= 2 else { return false }
+            write("\(message)\n\(size)\n", marker(base, "unreadable"))
+            return true
+        }
+
+        /// True when `base` is terminal for the file as it is now (same size rule as `isTooShort`).
+        public func isUnreadable(_ base: String, currentSize: Int? = nil) -> Bool {
+            guard let content = try? String(contentsOf: marker(base, "unreadable"), encoding: .utf8) else { return false }
+            guard let currentSize else { return true }
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            guard lines.count >= 2, let recorded = Int(lines[1].trimmingCharacters(in: .whitespaces)) else { return true }
+            return recorded == currentSize
+        }
+
+        public func clearUnreadable(_ base: String) {
+            remove(marker(base, "unreadable")); remove(marker(base, "convertfail"))
+        }
+
+        /// Terminal recordings with their reason: the menu's one line each, with a Move to Bin action.
+        public func unreadableBases() -> [(base: String, reason: String)] { markers(suffix: "unreadable") }
+
         /// Every recording currently set aside as too short, with its reason,
         /// sorted by base name — the menu's "delete it?" list.
         public func tooShortBases() -> [(base: String, reason: String)] {
@@ -214,6 +254,7 @@ public enum DistavoState {
             clearFailed(base)
             clearDeferred(base)
             clearTooShort(base)
+            clearUnreadable(base)
         }
 
         public func markFailed(_ base: String, _ error: String) {
@@ -344,6 +385,7 @@ public enum DistavoState {
             let base = baseFor(recordingsDir: recordingsDir, path: url)
             if state.isDone(base) || state.isProcessing(base) || state.isFailed(base) { continue }
             if state.isTooShort(base, currentSize: fileSize(url)) { continue }
+            if state.isUnreadable(base, currentSize: fileSize(url)) { continue }
 
             if let until = state.deferredUntil(base), until > now() { continue }
             pending.append(url)

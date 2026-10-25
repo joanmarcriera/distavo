@@ -437,7 +437,17 @@ public enum Pipeline {
             // than the source recording, so an edited/re-recorded file still
             // gets a fresh conversion.
             if !wavIsFresh(wavPath: wavPath, sourcePath: path) {
-                try await deps.convertToWav(path, wavPath)
+                do { try await deps.convertToWav(path, wavPath) } catch {
+                    // #5283: the same conversion failure twice is terminal, not a retry per launch.
+                    let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
+                    let message = cleanMessage(error)
+                    if state.recordConvertFailure(base, message: message, fileSize: size) {
+                        state.markFailed(base, message)
+                        return ProcessResult(status: .failed, base: base,
+                                             message: message + " (not retried again; Move to Bin or replace the file)")
+                    }
+                    throw error
+                }
             }
             // Second chance for the length check: containers AVFoundation
             // could not measure directly (video files) are measurable now.

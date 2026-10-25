@@ -1,0 +1,347 @@
+{
+ "schema_version": 1,
+ "diagram_type": "architecture",
+ "meta": {
+  "title": "Distavo: recording to meeting note",
+  "output": "docs/architecture/distavo.architecture.html",
+  "quality_profile": "showcase",
+  "repository": {
+   "url": "git@github.com:joanmarcriera/distavo.git",
+   "link_mode": "local-only",
+   "revision": "70494c5b0d1606976c5368e4db37f6135b85ff35"
+  }
+ },
+ "components": [
+  {
+   "id": "recordings",
+   "type": "external",
+   "label": "Recordings folder",
+   "sublabel": "audio / video files",
+   "pos": [
+    40,
+    200
+   ],
+   "size": [
+    140,
+    60
+   ]
+  },
+  {
+   "id": "watcher",
+   "type": "frontend",
+   "label": "WatcherController",
+   "sublabel": "menu bar + scan timer",
+   "pos": [
+    280,
+    200
+   ],
+   "size": [
+    150,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/Sources/Distavo/Core/WatcherController.swift",
+     "line": 455,
+     "end_line": 486,
+     "label": "scanOnce, single-flight"
+    },
+    {
+     "path": "apple/Sources/Distavo/DistavoApp.swift",
+     "line": 20,
+     "end_line": 24,
+     "label": "MenuBarExtra"
+    }
+   ]
+  },
+  {
+   "id": "pipeline",
+   "type": "backend",
+   "label": "Pipeline.processOne",
+   "sublabel": "DistavoCore, per recording",
+   "pos": [
+    560,
+    200
+   ],
+   "size": [
+    150,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/Pipeline.swift",
+     "line": 326,
+     "end_line": 330,
+     "label": "processOne"
+    }
+   ]
+  },
+  {
+   "id": "assembly",
+   "type": "backend",
+   "label": "Validate + assemble",
+   "sublabel": "SummaryValidator, NoteAssembly",
+   "pos": [
+    790,
+    200
+   ],
+   "size": [
+    160,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/NoteAssembly.swift",
+     "line": 51,
+     "label": "assemble"
+    },
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/Pipeline.swift",
+     "line": 605,
+     "label": "validate summary"
+    }
+   ]
+  },
+  {
+   "id": "notes",
+   "type": "external",
+   "label": "Markdown note",
+   "sublabel": "notes folder",
+   "pos": [
+    1030,
+    200
+   ],
+   "size": [
+    130,
+    60
+   ]
+  },
+  {
+   "id": "state",
+   "type": "database",
+   "label": "State markers",
+   "sublabel": ".processing / .done / .failed",
+   "pos": [
+    560,
+    360
+   ],
+   "size": [
+    150,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/DistavoState.swift",
+     "line": 103,
+     "end_line": 103,
+     "label": "marker model"
+    },
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/DistavoState.swift",
+     "line": 197,
+     "end_line": 198,
+     "label": "markProcessing"
+    }
+   ]
+  },
+  {
+   "id": "converter",
+   "type": "backend",
+   "label": "AudioConverter",
+   "sublabel": "AVFoundation to WAV",
+   "pos": [
+    790,
+    360
+   ],
+   "size": [
+    160,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/AudioConverter.swift",
+     "line": 37,
+     "label": "convertToWav"
+    }
+   ]
+  },
+  {
+   "id": "deps",
+   "type": "backend",
+   "label": "AppPipelineDeps",
+   "sublabel": "routes engines (DI seam)",
+   "pos": [
+    560,
+    40
+   ],
+   "size": [
+    150,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/Sources/Distavo/Core/AppPipelineDeps.swift",
+     "line": 12,
+     "label": "appLive"
+    },
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/Pipeline.swift",
+     "line": 169,
+     "end_line": 185,
+     "label": "PipelineDeps"
+    }
+   ]
+  },
+  {
+   "id": "servers",
+   "type": "external",
+   "label": "WhisperX / Ollama",
+   "sublabel": "user's own servers",
+   "pos": [
+    250,
+    40
+   ],
+   "size": [
+    150,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/WhisperXClient.swift",
+     "line": 32,
+     "label": "transcribe"
+    },
+    {
+     "path": "apple/DistavoCore/Sources/DistavoCore/OllamaClient.swift",
+     "line": 35,
+     "label": "generate"
+    }
+   ]
+  },
+  {
+   "id": "embedded",
+   "type": "backend",
+   "label": "DistavoEmbedded",
+   "sublabel": "WhisperKit, Parakeet, Foundation Models",
+   "pos": [
+    840,
+    40
+   ],
+   "size": [
+    190,
+    60
+   ],
+   "sources": [
+    {
+     "path": "apple/DistavoEmbedded/Sources/DistavoEmbedded/EmbeddedTranscriber.swift",
+     "line": 163,
+     "label": "EmbeddedTranscriber"
+    },
+    {
+     "path": "apple/DistavoEmbedded/Sources/DistavoEmbedded/EmbeddedSummariser.swift",
+     "line": 64,
+     "label": "EmbeddedSummariser"
+    }
+   ]
+  }
+ ],
+ "boundaries": [
+  {
+   "kind": "region",
+   "label": "DistavoCore (UI-free, swift test)",
+   "wraps": [
+    "pipeline",
+    "assembly",
+    "state",
+    "converter"
+   ]
+  }
+ ],
+ "connections": [
+  {
+   "id": "r-w",
+   "from": "recordings",
+   "to": "watcher",
+   "label": "timer scan",
+   "variant": "emphasis"
+  },
+  {
+   "id": "w-p",
+   "from": "watcher",
+   "to": "pipeline",
+   "label": "process pending",
+   "variant": "emphasis"
+  },
+  {
+   "id": "p-s",
+   "from": "pipeline",
+   "to": "state",
+   "label": "mark / skip"
+  },
+  {
+   "id": "p-c",
+   "from": "pipeline",
+   "to": "converter",
+   "label": "convertToWav"
+  },
+  {
+   "id": "p-d",
+   "from": "pipeline",
+   "to": "deps",
+   "label": "transcribe, summarise"
+  },
+  {
+   "id": "d-srv",
+   "from": "deps",
+   "to": "servers",
+   "label": "HTTP, backend=server",
+   "variant": "dashed"
+  },
+  {
+   "id": "d-emb",
+   "from": "deps",
+   "to": "embedded",
+   "label": "backend=embedded"
+  },
+  {
+   "id": "p-a",
+   "from": "pipeline",
+   "to": "assembly",
+   "label": "summary",
+   "variant": "emphasis"
+  },
+  {
+   "id": "a-n",
+   "from": "assembly",
+   "to": "notes",
+   "label": "write",
+   "variant": "emphasis"
+  }
+ ],
+ "cards": [
+  {
+   "dot": "cyan",
+   "title": "Local-first",
+   "items": [
+    "Conversion is AVFoundation, no ffmpeg",
+    "Engines are on-device or the user's own servers"
+   ]
+  },
+  {
+   "dot": "emerald",
+   "title": "Durable",
+   "items": [
+    "Marker files make a rerun idempotent",
+    "A missing dependency defers, never fails"
+   ]
+  },
+  {
+   "dot": "amber",
+   "title": "Editions",
+   "items": [
+    "Direct, App Store and Setapp share this code",
+    "Sparkle links into Direct only"
+   ]
+  }
+ ]
+}

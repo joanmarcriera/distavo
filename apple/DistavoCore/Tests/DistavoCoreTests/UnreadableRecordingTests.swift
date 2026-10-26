@@ -100,4 +100,18 @@ final class UnreadableRecordingTests: XCTestCase {
                                       stableChecks: 1, stableDelay: 0)
         XCTAssertTrue(store.unreadableBases().isEmpty, "only an identical repeat is terminal")
     }
+
+    /// Vikunja #5477: a terminal file lives in the unreadable list only. If it also sat in the failed list,
+    /// "Retry N failed recordings" (`retryFailed`) would clear that entry yet leave the file skipped.
+    func testTerminalFileIsNotAlsoListedAsFailed() async throws {
+        let (cfg, input, store) = try makeEnv()
+        let d = deps(convertError: "broken.opus: could not start reading (Cannot Open).")
+        for _ in 0..<2 {
+            _ = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+            if store.unreadableBases().isEmpty { store.retryFailed() }
+        }
+        XCTAssertEqual(store.unreadableBases().map(\.base), ["broken"])
+        XCTAssertTrue(store.failedBases().isEmpty, "terminal file must not also appear in the failed list")
+        XCTAssertFalse(store.isProcessing("broken"))
+    }
 }

@@ -442,7 +442,9 @@ public enum Pipeline {
                     let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
                     let message = cleanMessage(error)
                     if state.recordConvertFailure(base, message: message, fileSize: size) {
-                        state.markFailed(base, message)
+                        // #5477: the unreadable list is the single home of a terminal file. A `.failed` marker too
+                        // would show it in both menu lists, and "Retry failed" would clear only that one.
+                        state.clearProcessing(base); state.clearDeferred(base)
                         return ProcessResult(status: .failed, base: base,
                                              message: message + " (not retried again; Move to Bin or replace the file)")
                     }

@@ -90,6 +90,29 @@ final class ConfigMigrationTests: XCTestCase {
         XCTAssertTrue(json.contains(#""language_packs":["thai","bogus","hebrew"]"#), json)
     }
 
+    // MARK: summarise.server.model (Vikunja #3952)
+
+    /// Fresh and empty configs, and a server target without a model, all get the server
+    /// default gemma4:26b (#2063); the local target keeps llama3.1:8b.
+    func testServerModelDefaultsToGemma() throws {
+        XCTAssertEqual(Config().summarise.server.model, "gemma4:26b")
+        XCTAssertEqual(try decode("{}").summarise.server.model, "gemma4:26b")
+        XCTAssertEqual(try decode(#"{"summarise": {"backend": "server"}}"#).summarise.server.model, "gemma4:26b")
+        let noModel = try decode(#"{"summarise": {"server": {"url": "http://nas:11434"}}}"#)
+        XCTAssertEqual(noModel.summarise.server.model, "gemma4:26b")
+        XCTAssertEqual(noModel.summarise.server.url, "http://nas:11434")
+        XCTAssertEqual(noModel.summarise.local.model, "llama3.1:8b")
+    }
+
+    /// A model the user (or an old save) stored is never replaced by the default, and survives
+    /// an encode/decode round trip.
+    func testStoredServerModelIsKept() throws {
+        let cfg = try decode(#"{"summarise": {"server": {"url": "http://nas:11434", "model": "llama3.1:8b"}}}"#)
+        XCTAssertEqual(cfg.summarise.server.model, "llama3.1:8b")
+        let again = try JSONDecoder().decode(Config.self, from: try JSONEncoder().encode(cfg))
+        XCTAssertEqual(again.summarise.server.model, "llama3.1:8b")
+    }
+
     // MARK: Note language (Vikunja #2147) — same migration rule as `transcribe.backend`.
 
     /// A config predating `summarise.note_language` decodes to "en": no

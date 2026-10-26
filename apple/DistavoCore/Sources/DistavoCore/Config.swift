@@ -264,11 +264,17 @@ public struct SummariseConfig: Codable, Equatable {
         self.folderTemplates = folderTemplates
     }
 
+    private struct PartialTarget: Decodable { var url: String?; var model: String? }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = SummariseConfig()
         backend = try c.decodeIfPresent(String.self, forKey: .backend) ?? d.backend
-        server = try c.decodeIfPresent(OllamaTarget.self, forKey: .server) ?? d.server
+        // A server target that names no model gets the server default (gemma4:26b, #3952), not
+        // OllamaTarget's generic llama3.1:8b; a stored `model` is always kept as written.
+        if let partial = try c.decodeIfPresent(PartialTarget.self, forKey: .server) {
+            server = OllamaTarget(url: partial.url ?? d.server.url, model: partial.model ?? d.server.model)
+        } else { server = d.server }
         local = try c.decodeIfPresent(OllamaTarget.self, forKey: .local) ?? d.local
         allowLocalFallback = try c.decodeIfPresent(Bool.self, forKey: .allowLocalFallback) ?? d.allowLocalFallback
         embeddedEnabled = try c.decodeIfPresent(Bool.self, forKey: .embeddedEnabled) ?? d.embeddedEnabled

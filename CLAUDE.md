@@ -47,7 +47,8 @@ of the original Python module (noted in its header).
 
 - **`Pipeline.swift`** — `Pipeline.processOne(path:config:deps:)` orchestrates one recording and
   returns a `ProcessResult(status, base, message, ...)`. Statuses (`ProcessStatus`): `done`,
-  `skipped`, `deferredNeedLocal`, `failed`. `Scanner.scanOnce(...)` processes all pending once.
+  `skipped`, `deferredNeedLocal`, `deferred` (a dependency temporarily unavailable; stays pending, never failed),
+  `failed`, `tooShort` (under `min_recording_seconds`; `.tooshort` marker). `Scanner.scanOnce(...)` processes all pending once.
   **Dependency injection:** all external effects (convert/transcribe/summarise/reachability) are
   passed in via `PipelineDeps` (with `.live()` wiring AVFoundation + the HTTP clients), preserving
   the test seam — **do not remove this**.
@@ -156,6 +157,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.segments.json` — timed transcript; `Pipeline`. `.segments.orig.json`, `.transcript.clean.orig.txt`, `.segments.orig.speakers.json` — pristine copies made before the first transcript-editor save.
 - `.speakers.json` — participants/speaker count from the recorder question (`SpeakerHints`).
 - `.language.json` — `LanguageOverride`: spoken language `code`, plus `note_language` and `summary_template` for that recording; written by the recorder's confirm controls.
+- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
 - `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
@@ -250,7 +252,7 @@ Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never comm
 
 `swift test` in `apple/DistavoCore`, macOS runner in CI (`.github/workflows/ci.yml`). Tests inject
 fakes through the pipeline's `PipelineDeps` seam and use a WhisperX fixture / `MockURLProtocol` for
-the HTTP clients. `LiveE2ETests` is skipped unless `DISTAVO_LIVE=1` (see `apple/README.md`). CI also
+the HTTP clients. `LiveE2ETests` is skipped unless `DISTAVO_LIVE=1` (see `apple/README.md`). CI (`ci.yml`) and `version-bump.yml` are `workflow_dispatch` only: nothing runs on push, so run the tests locally. A manual CI run also
 regenerates the Xcode project and builds the Direct edition unsigned to catch app-target breakage.
 The suite is ~1100 tests (one file per feature in `Tests/DistavoCoreTests`); anything needing audio, a model, a server or a TCC
 permission is gated behind an env var (`DISTAVO_LIVE`, `DISTAVO_EMBEDDED_LIVE`, `DISTAVO_DETECTOR_LIVE`, `DISTAVO_SUMMARY_LIVE`, …) and skips by default,

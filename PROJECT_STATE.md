@@ -52,8 +52,8 @@ replacement for rejected version 1.9.0 build 10.
 - `ops/site` is deployed and live at `https://distavo.com/`.
 - Homepage now includes recording-law nuance and a free/open recorder tools
   section, including Notely Voice from F-Droid.
-- Added `version-bump.yml` so every non-bot push to `main` gets a follow-up
-  commit that increments the marketing minor version and build number.
+- Added `version-bump.yml` to increment the marketing minor version and build
+  number in a follow-up commit. It is `workflow_dispatch` only (run by hand, not on push); `ci.yml` is too.
 - Remote branch hygiene was checked after `git fetch --prune`; only `main` and
   the active unmerged `fix/appstore-signing` branch remain.
 - App Store release workflow now requires an explicit Mac App Store

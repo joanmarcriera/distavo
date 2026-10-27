@@ -754,7 +754,7 @@ final class MeetingCaptureController: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = myRole
         // NSControl.target is weak: keep both popup targets alive for the modal run.
-        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget)) { alert.runModal() }
+        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget, recentTarget)) { alert.runModal() }
         let inPerson = inPersonBox.state == .on
         guard response == .alertFirstButtonReturn else { return false }
 

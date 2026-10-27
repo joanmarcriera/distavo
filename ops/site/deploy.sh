@@ -40,7 +40,7 @@ if [ -f "$HERE/check-seo.py" ]; then
 fi
 
 # Source-only files never go to the web root.
-EXCLUDES=(--exclude='*.sh' --exclude='*.py' --exclude='*.md' --exclude='.DS_Store' --exclude='__pycache__')
+EXCLUDES=(--include='assets/example-note.md' --exclude='*.sh' --exclude='*.py' --exclude='*.md' --exclude='.DS_Store' --exclude='__pycache__')
 
 if [ "$GO" -eq 1 ]; then
   echo "== copying ops/site to the target (--go)"

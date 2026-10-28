@@ -135,6 +135,19 @@ final class WordSpeakerAlignerHandoffTests: XCTestCase {
         XCTAssertEqual(s[0].0, "SPEAKER_00")
     }
 
+    /// #5934: words before the first turn must not become their own group (which would
+    /// inherit the previous speaker through carryGap).
+    func testLeadingUncoveredWordsStayWithFirstTurn() {
+        let earlier = [TimedWord(text: "okay.", start: 0, end: 0.4)]
+        // Gap of 0.3 s after "okay." (> betweenWordGap, < carryGap): a separate group.
+        let w = earlier + words(["so", "how", "old", "are", "they", "five"], from: 0.7)
+        let turns = [SpeakerTurn(speaker: 1, start: 0, end: 0.4), SpeakerTurn(speaker: 0, start: 1.3, end: 2.6)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: turns))
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s[0].0, "SPEAKER_01"); XCTAssertEqual(s[0].1, "okay.")
+        XCTAssertEqual(s[1].0, "SPEAKER_00"); XCTAssertEqual(s[1].1, "so how old are they five")
+    }
+
     func testSingleTurnUnchanged() {
         let w = words(["a", "b", "c", "d"])
         let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: [SpeakerTurn(speaker: 1, start: 0, end: 2)]))

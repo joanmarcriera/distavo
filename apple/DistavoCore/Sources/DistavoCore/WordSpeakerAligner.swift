@@ -56,7 +56,13 @@ public enum WordSpeakerAligner {
     /// another's, keeping runs of at least `minSplitWords` words.
     static func splitAtTurnBoundaries(_ group: [TimedWord], turns: [SpeakerTurn]) -> [[TimedWord]] {
         guard group.count >= 2 * minSplitWords else { return [group] }
-        let per = group.map { speakerOf($0, in: turns) }
+        var per = group.map { speakerOf($0, in: turns) }
+        // Words before the first covered one take its label (#5934): a leading
+        // uncovered run must never become a group of its own, or it would inherit
+        // the previous group's speaker through `carryGap`.
+        if let first = per.firstIndex(where: { $0 != nil }), first > 0 {
+            for k in 0..<first { per[k] = per[first] }
+        }
         // Runs of identical (non-nil) labels; nil words join the preceding run.
         var runs: [(speaker: Int?, range: Range<Int>)] = []
         var i = 0

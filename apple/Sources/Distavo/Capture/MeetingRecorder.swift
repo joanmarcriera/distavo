@@ -53,6 +53,9 @@ final class MeetingRecorder {
     private var levelFrames = 0
 
     private(set) var isRecording = false
+    /// Recording AND audio is reaching the file. False after a failed `switchInput` whose
+    /// restore of the previous input also failed: the take is still open but nothing is recorded.
+    var isCapturing: Bool { isRecording && ioProcID != nil }
     private(set) var fileURL: URL?
     /// When the device was started, i.e. when audio began going into the file: the
     /// zero of the recording offsets that key-moment markers use (#2950).
@@ -217,11 +220,15 @@ final class MeetingRecorder {
         } catch {
             stopIOAndAggregate()
             // Try to get the old input back so the recording continues.
+            var restored = false
             if let previous, let old = AudioInputDevices.deviceID(forUID: previous),
                (try? buildAggregate(inputDevice: old, tapUUID: tapUUIDString)) != nil,
                (try? installIOProc()) != nil, let proc = ioProcID {
-                AudioDeviceStart(aggregateID, proc)
+                restored = AudioDeviceStart(aggregateID, proc) == noErr
             }
+            // Not restored: leave no half-built device behind; `isCapturing` is now false and the
+            // caller must end the take instead of letting it run on with nothing going into the file.
+            if !restored { stopIOAndAggregate() }
             throw error
         }
         return inputName ?? uid

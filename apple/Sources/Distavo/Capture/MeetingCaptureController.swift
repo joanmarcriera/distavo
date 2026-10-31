@@ -471,7 +471,7 @@ final class MeetingCaptureController: ObservableObject {
                    + "Check it is not muted, the right input is selected, and Distavo has microphone access.")
         }
 
-        applyMicFallback(levels: levels, recorder: recorder)
+        if applyMicFallback(levels: levels, recorder: recorder) { return }   // take ended
 
         switch event {
         case .autoStop(let silentFor):
@@ -498,9 +498,11 @@ final class MeetingCaptureController: ObservableObject {
     /// #4039: feed the shared silence signal to the fallback policy and carry out what it says.
     /// Every switch is announced (notification, activity log, menu label); all-silent is announced
     /// even when the call side is silent too, the case #3930 skips.
+    /// Returns true when the recording was stopped because a failed switch left nothing recording.
     @available(macOS 14.4, *)
-    private func applyMicFallback(levels: (mic: Float, system: Float), recorder: MeetingRecorder) {
-        guard var fb = micFallback else { return }
+    @discardableResult
+    private func applyMicFallback(levels: (mic: Float, system: Float), recorder: MeetingRecorder) -> Bool {
+        guard var fb = micFallback else { return false }
         let available = Set(AudioInputDevices.inputs().map(\.id))
         let action = fb.ingest(mic: levels.mic, available: available)
         micFallback = fb.finished ? nil : fb
@@ -508,6 +510,17 @@ final class MeetingCaptureController: ObservableObject {
         func move(to uid: String) -> String? {
             do { return try recorder.switchInput(toUID: uid) }
             catch { log("Microphone switch failed: \(error.localizedDescription)"); return nil }
+        }
+        // A failed switch whose restore also failed leaves the take open with no device: stop it
+        // (saving what was recorded) and say so, instead of recording nothing in silence.
+        func endIfCaptureLost() -> Bool {
+            guard !recorder.isCapturing else { return false }
+            log("Recording stopped: the microphone could not be switched and \(before) could not be restored")
+            notify("Recording stopped — microphone lost",
+                   "Distavo could not switch away from \(before) or go back to it. "
+                   + "What was recorded so far has been saved; start a new recording to continue.")
+            stop(reason: .manual)
+            return true
         }
         switch action {
         case .none:
@@ -519,9 +532,12 @@ final class MeetingCaptureController: ObservableObject {
                 notify("Microphone switched", "\(before) was silent, now using \(now).")
             } else {
                 micFallback = nil   // could not move: stop trying rather than loop on a broken device
+                if endIfCaptureLost() { return true }
             }
         case .allSilent(let back):
-            if let back, let now = move(to: back) { liveInputName = now }
+            if let back {
+                if let now = move(to: back) { liveInputName = now } else if endIfCaptureLost() { return true }
+            }
             allInputsSilent = true
             log("No microphone is picking up sound; staying on \(recorder.inputName ?? "the first input")")
             notify("No microphone is picking up sound",
@@ -529,6 +545,7 @@ final class MeetingCaptureController: ObservableObject {
             silenceNotice = "mic silent"
         }
         if levels.mic >= StereoBalancer.noiseGate { allInputsSilent = false }
+        return false
     }
 
     /// Vikunja #2060: a denied permission (or a call that isn't actually

@@ -166,6 +166,29 @@ final class RegenerateTests: XCTestCase {
         XCTAssertEqual(calls.targets.first, .ollama(url: cfg.summarise.server.url, model: "big-model:1b"))
     }
 
+    /// #4013: a regenerate recomputes the "recording stops mid-conversation" flag from the
+    /// saved timed transcript and the source audio length, like `processOne`.
+    func testRegenerateFlagsATruncatedRecording() async throws {
+        let (cfg, _, work) = try makeEnv()
+        let cut = TranscriptSegments.Segment(start: 1850, end: 1859.5, text: "and the rate is what we will not accept averages", speaker: "SPEAKER_00")
+        try TranscriptSegments(segments: [cut]).save(workDir: work, base: "demo")
+        let source = work.appendingPathComponent("demo.wav")
+        try Data().write(to: source)
+        func run(duration: Double) async -> NoteContext? {
+            let calls = Calls()
+            var d = deps(calls)
+            d.audioDurationSeconds = { _ in duration }
+            let r = await Pipeline.regenerate(base: "demo", options: RegenerateOptions(), config: cfg, deps: d, sourcePath: source)
+            XCTAssertEqual(r.status, .done, r.message)
+            return calls.contexts.first
+        }
+        let flagged = await run(duration: 1860)
+        XCTAssertEqual(flagged?.recordingMayBeTruncated, true)
+        XCTAssertTrue(flagged?.summaryNotes.contains(TruncationCheck.banner) ?? false)
+        let silent = await run(duration: 1900)   // trailing silence: the speaker stopped first
+        XCTAssertEqual(silent?.recordingMayBeTruncated, false)
+    }
+
     /// Kill switch: "embedded" with on-device summaries off means Ollama, and a
     /// typed model name lands on the Ollama server target (never `embeddedModel`).
     func testOnDeviceBackendOffFallsBackToOllama() async throws {

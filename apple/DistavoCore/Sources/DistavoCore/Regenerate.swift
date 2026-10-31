@@ -229,6 +229,16 @@ extension Pipeline {
             scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
             calendarAttendees: calendarAttendees)   // #2946
         if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+        // #4013: recompute the "stops mid-conversation" flag as processOne does. It needs the
+        // source audio length; without the source (moved, compacted away) nothing is judged.
+        if let source = sourcePath, FileManager.default.fileExists(atPath: source.path),
+           let timed = TranscriptSegments.load(workDir: workDir, base: base)
+                ?? TranscriptSegments.load(workDir: workDir, base: sourceBase),
+           let audio = await deps.audioDurationSeconds(source),
+           TruncationCheck.isTruncated(segments: timed.segments, audioSeconds: audio) {
+            context.recordingMayBeTruncated = true
+            context.summaryNotes.append(TruncationCheck.banner)
+        }
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.

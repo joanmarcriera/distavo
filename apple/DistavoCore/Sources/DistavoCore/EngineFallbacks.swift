@@ -8,6 +8,8 @@ extension SummaryDriverError {
     /// current state (Apple's model reports a size of 0 while it is not ready, #1793), not of the recording:
     /// it DEFERS, like any absent dependency, instead of being failed for good (8 Oct log line).
     /// nil for every other driver error, which stay hard failures.
+    /// Sole production caller: the Apple Foundation Models path (`EmbeddedSummariser`). The Gemma path
+    /// treats the same error as a hard failure on purpose (`GemmaSummariser.mapDriverError`, #5405).
     public var deferral: RetryableDependencyError? {
         guard case .contextTooSmall = self else { return nil }
         return RetryableDependencyError(

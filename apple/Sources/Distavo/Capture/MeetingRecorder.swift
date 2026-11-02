@@ -336,11 +336,17 @@ final class MeetingRecorder {
         for name in names where name.hasSuffix(".wav.part") {
             let part = folder.appendingPathComponent(name)
             let url = part.deletingPathExtension()
-            if fm.fileExists(atPath: url.path) {
-                // Finalise had already produced the .wav; the .part is a
-                // leftover duplicate.
+            // Never delete the larger file: a crash mid-finalise can leave a
+            // truncated .wav beside the complete .part (OrphanPartRecovery).
+            switch OrphanPartRecovery.decide(wavSize: DistavoState.fileSize(url),
+                                             partSize: DistavoState.fileSize(part)) {
+            case .keepBoth:
+                continue
+            case .discardPart:
                 try? fm.removeItem(at: part)
                 continue
+            case .promotePart:
+                try? fm.removeItem(at: url)   // the smaller, truncated .wav (if any)
             }
             finalize(part: part, to: url)
             if fm.fileExists(atPath: url.path) { recovered.append(url) }

@@ -380,7 +380,34 @@ public enum SummaryTemplateCatalog {
 
         ## Risks and open questions
         """),
+        bundled(adviceCallID, "Advice call", "Accountant, lawyer or financial adviser: the advice, the figures, who does what.", """
+        This is a call where a professional (accountant, lawyer, financial adviser) advises the note owner. The advice and numbers are the point, not only the tasks: keep every rule, rate, amount and condition exactly as said. Never credit the note owner with a figure the adviser gave. Do not invent figures.
+
+        ## Advice given
+        One bullet per piece of advice: the rule, the number, the condition, who said it and the timestamp. Include tips and warnings.
+
+        ## Figures and thresholds
+        Every rate, limit, amount and date stated:
+
+        | Figure | What it applies to | Condition | Said by | Evidence |
+        |---|---|---|---|---|
+
+        ## Actions by party
+        Group by who has to act (the note owner, the adviser, a third party such as a tax authority or bank). Use this table:
+
+        | Action | Party | Deadline | Evidence | Confidence |
+        |---|---|---|---|---|
+
+        ## Questions to take back
+        Points the note owner must check, decide or ask someone else before acting on the advice.
+
+        ## Next meeting
+        The agreed follow-up call or meeting: when, who and the topic. Write "none stated" if nothing was agreed.
+        """),
     ] + [ukContracting]
+
+    /// Id of the advice-call template (accountant, lawyer, financial adviser; Vikunja #6355).
+    public static let adviceCallID = "advice_call"
 
     /// Id of the opt-in UK contracting template (the rules the default prompt used to carry, #3578).
     public static let ukContractingID = "uk_contracting"
@@ -552,6 +579,13 @@ public enum TemplateAutoPick {
          ["consultant", "consultor", "consultora", "consultancy", "consultoria", "consultoría", "fractional",
           "advisor", "adviser", "assessor", "asesor", "discovery"],
          ["ceo", "cto", "cio", "cfo", "client", "cliente", "founder", "director"]),
+        // Professions that advise: stronger than the bare "adviser" of consultancy, so "tax adviser and
+        // accountant" is an advice call (Vikunja #6355).
+        ("advice_call",
+         ["accountant", "solicitor", "lawyer", "attorney", "barrister", "ifa", "financial adviser",
+          "financial advisor", "tax adviser", "tax advisor", "mortgage adviser", "contable", "advocat",
+          "abogado", "abogada", "gestor", "gestoria", "gestoría", "comptable"],
+         ["hmrc", "dividend", "legal advice", "financial", "tax"]),
         ("standup", ["stand-up", "standup", "stand up", "scrum", "daily sync"], ["sprint", "blocker"]),
         ("one_on_one", ["1:1", "one-to-one", "one to one", "one on one"], ["mentor", "mentee"]),
         ("sales_call", ["sales call", "demo", "prospect"], ["pricing", "quote", "proposal"]),

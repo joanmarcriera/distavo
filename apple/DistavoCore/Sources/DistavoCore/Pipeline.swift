@@ -197,6 +197,9 @@ public struct PipelineDeps {
     /// The container's embedded creation date (when the recording ENDED, usually UTC), for dating a
     /// dropped file's note when its name carries no stamp (Vikunja #4018). Defaults to AVAsset metadata.
     public var containerCreationDate: (URL) async -> Date?
+    /// The source's left/right samples for `transcribe.channel_speakers` (#6353); nil when it is not stereo or
+    /// unreadable. Only consulted when that flag is on.
+    public var stereoChannels: (URL) async -> StereoChannels?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -208,8 +211,10 @@ public struct PipelineDeps {
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
         calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
         recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) },
-        containerCreationDate: @escaping (URL) async -> Date? = { await Pipeline.containerCreation($0) }
+        containerCreationDate: @escaping (URL) async -> Date? = { await Pipeline.containerCreation($0) },
+        stereoChannels: @escaping (URL) async -> StereoChannels? = { StereoChannels.read(from: $0) }
     ) {
+        self.stereoChannels = stereoChannels
         self.containerCreationDate = containerCreationDate
         self.calendarLookup = calendarLookup
         self.recordingStart = recordingStart
@@ -458,7 +463,13 @@ public enum Pipeline {
             }
 
             deps.onPhase?(.transcribing)
-            let result = try await deps.transcribe(wavPath, transcribeConfig)
+            var result = try await deps.transcribe(wavPath, transcribeConfig)
+            // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
+            // other case (mono source, a silent channel, no word timings) keeps the engine's own labels.
+            if transcribeConfig.channelSpeakers, let ch = await deps.stereoChannels(path),
+               let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
+                result = relabelled
+            }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
             if transcribeConfig.fuzzyVocabulary, !transcribeConfig.vocabulary.isEmpty {

@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 /// Labels words by which side of the call spoke them, from the recorder's stereo layout
 /// (left = the owner's microphone, right = system audio, i.e. the remote side) — Vikunja #6353.
@@ -63,10 +64,53 @@ public enum ChannelSpeakerLabeller {
         return turns
     }
 
+    /// Re-labels an engine result (WhisperX shape with per-segment `words`) from the channels: words -> sides ->
+    /// two turns -> `WordSpeakerAligner`. nil (keep the engine's labels) when a channel is silent, the result has
+    /// no word timings, or no word could be decided. Remote stays one speaker; owner = SPEAKER_00.
+    public static func relabel(result: [String: Any], channels: StereoChannels) -> [String: Any]? {
+        guard bothChannelsLive(left: channels.left, right: channels.right) else { return nil }
+        var words: [TimedWord] = []
+        for seg in (result["segments"] as? [[String: Any]]) ?? [] {
+            for w in (seg["words"] as? [[String: Any]]) ?? [] {
+                if let t = w["word"] as? String, let s = w["start"] as? Double, let e = w["end"] as? Double {
+                    words.append(TimedWord(text: t, start: s, end: e))
+                }
+            }
+        }
+        guard !words.isEmpty else { return nil }
+        let labels = label(words: words, left: channels.left, right: channels.right, sampleRate: channels.sampleRate)
+        let t = turns(words: words, labels: labels)
+        guard !t.isEmpty else { return nil }
+        return WordSpeakerAligner.whisperXDictionary(words: words, turns: t)
+    }
+
     private static func rms(_ s: ArraySlice<Float>) -> Float {
         guard !s.isEmpty else { return 0 }
         var acc: Float = 0
         for v in s { acc += v * v }
         return (acc / Float(s.count)).squareRoot()
+    }
+}
+
+
+/// Left/right samples of a stereo source (left = owner's mic, right = system audio) for `ChannelSpeakerLabeller`.
+public struct StereoChannels: Sendable {
+    public var left: [Float]
+    public var right: [Float]
+    public var sampleRate: Double
+    public init(left: [Float], right: [Float], sampleRate: Double) {
+        self.left = left; self.right = right; self.sampleRate = sampleRate
+    }
+
+    /// Decodes a file with exactly two channels; nil for mono, other layouts or unreadable files.
+    public static func read(from url: URL) -> StereoChannels? {
+        guard let file = try? AVAudioFile(forReading: url), file.processingFormat.channelCount == 2,
+              file.length > 0, file.length < 1 << 31,
+              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
+              (try? file.read(into: buf)) != nil, let data = buf.floatChannelData else { return nil }
+        let n = Int(buf.frameLength)
+        return StereoChannels(left: Array(UnsafeBufferPointer(start: data[0], count: n)),
+                              right: Array(UnsafeBufferPointer(start: data[1], count: n)),
+                              sampleRate: file.processingFormat.sampleRate)
     }
 }

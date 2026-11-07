@@ -80,7 +80,7 @@ final class TranscriptionCorrectionsTests: XCTestCase {
 
     /// The section is found whatever the heading level, trailing colon or bold the model used.
     func testHeadingVariantsAreRecognised() {
-        for h in ["### Possible transcription corrections", "## Possible transcription corrections:", "## **Possible transcription corrections**", "# POSSIBLE TRANSCRIPTION CORRECTIONS"] {
+        for h in ["### Possible transcription corrections", "## Possible transcription corrections:", "## **Possible transcription corrections**", "# POSSIBLE TRANSCRIPTION CORRECTIONS", "  ## Possible transcription corrections", "## Possible transcription corrections ##"] {
             let n = "## Summary\nPOYE due.\n\n\(h)\n- heard \"POYE\", probably \"PAYE\"\n"
             XCTAssertTrue(TranscriptionCorrections.apply(n, transcript: "the POYE form").text.contains("PAYE due."), h)
         }

@@ -8,8 +8,11 @@ tag="${1:-}"
 yml="${2:-$(cd "$(dirname "$0")/.." && pwd)/apple/project.yml}"
 [ -n "$tag" ] || { echo "usage: $0 <tag> [project.yml]" >&2; exit 2; }
 [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "refusing: '$tag' is not a vX.Y.Z tag" >&2; exit 1; }
-ver="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\{0,1\}\([0-9][0-9.]*\)"\{0,1\}.*/\1/p' "$yml" | head -1)"
-[ -n "$ver" ] || { echo "refusing: no MARKETING_VERSION in $yml" >&2; exit 1; }
+# Anchored: a suffixed value ("1.20.0-beta", "1.20.0.1") must not be truncated to a passing "1.20.0".
+vers="$(sed -n 's/^[[:space:]]*MARKETING_VERSION:[[:space:]]*"\{0,1\}\([^"[:space:]#]*\)"\{0,1\}[[:space:]]*\(#.*\)\{0,1\}$/\1/p' "$yml" | sort -u)"
+[ "$(printf '%s\n' "$vers" | grep -c .)" -le 1 ] || { echo "refusing: several MARKETING_VERSION values in $yml" >&2; exit 1; }
+ver="$vers"
+[[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "refusing: MARKETING_VERSION '${ver:-<none>}' missing or not X.Y.Z in $yml" >&2; exit 1; }
 if [ "v$ver" != "$tag" ]; then
   echo "refusing: tag $tag does not match MARKETING_VERSION $ver in $yml" >&2
   exit 1

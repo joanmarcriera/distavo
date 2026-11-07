@@ -44,6 +44,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Preflight — tag matches MARKETING_VERSION
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: ./scripts/check-tag-version.sh "$TAG_NAME"
+
       # The submit job needs release notes; fail here, before 20+ minutes of
       # building, rather than after the upload.
       - name: Preflight — What's New release notes present

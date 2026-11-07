@@ -413,3 +413,17 @@ AppKit/SwiftUI wiring and a real recording. Use invented names only (Anna, Joan,
     once and the footer says so (#3585).
 12. On-device summaries (macOS 26, Settings > Summaries > Built-in): the note has its last section and speaker labels read
     SPEAKER_NN; a Mac whose model is still getting ready defers the recording instead of failing it (#1793).
+
+## Advice call template (#6355)
+
+Headless tests cover the sections and the Auto pick (`AdviceTemplateTests`, `SummaryTemplateTests`); this checks the pickers
+and one real note. Use invented names only (Anna, Joan, Pere, Laia).
+
+1. Settings > Notes > Note template: "Advice call" is in the list, and the help text under it names Advice call.
+2. Stop dialog and Regenerate: the same popup offers "Advice call" too.
+3. Pick "Auto" with participants `Anna (accountant), Joan`: the note uses the Advice call sections ("Advice given" first) and the
+   footer names the template and the matched word. With `Anna (financial adviser), Joan (CEO), Pere` as a consultancy meeting the
+   Consultancy sections still win where the adviser tie says so (see `AdviceTemplateTests`).
+4. Regenerate a recorded accountant call with "Advice call": every rate, amount and condition appears as said, with the speaker and
+   timestamp, and no figure the adviser gave is credited to the note owner.
+

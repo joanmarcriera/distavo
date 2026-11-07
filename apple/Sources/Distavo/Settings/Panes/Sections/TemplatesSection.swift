@@ -2,7 +2,7 @@ import SwiftUI
 import DistavoCore
 
 /// Notes pane > Templates (Vikunja #2940): the summary template that decides which
-/// sections the note has (stand-up, 1:1, interview, sales call, lecture, or your own),
+/// sections the note has (stand-up, 1:1, interview, sales call, lecture, advice call, or your own),
 /// plus a per-subfolder override list. Per recording, the "Who was in this meeting?"
 /// window after recording can pick another one. All logic (resolution order, parsing,
 /// the bundled list) lives in DistavoCore's `SummaryTemplateCatalog`; this is a thin editor
@@ -35,7 +35,7 @@ struct TemplatesSection: View {
                         .tag(model.draft.summarise.template)
                 }
             }
-            .withHelp("A template changes which sections the note has, to suit the kind of meeting: Stand-up (updates, plans, blockers), 1:1, Interview, Sales call or Lecture — or your own. The rest of the prompt (note owner, speakers, language, facts ledger) is unchanged, and section headings stay in English whatever language the note is written in. Choose ‘Auto’ to let Distavo pick from who was in the meeting (consultancy, interview, stand-up…) and say so in the note footer, or ‘None’ for the standard 16-section note. You can pick a different template for one recording in the “Who was in this meeting?” window after you stop recording, and per folder below. Works with Ollama, the downloaded Gemma model and Apple Intelligence.")
+            .withHelp("A template changes which sections the note has, to suit the kind of meeting: Stand-up (updates, plans, blockers), 1:1, Interview, Sales call, Lecture or Advice call (an accountant, lawyer or financial adviser: the advice, the figures, who does what) — or your own. The rest of the prompt (note owner, speakers, language, facts ledger) is unchanged, and section headings stay in English whatever language the note is written in. Choose ‘Auto’ to let Distavo pick from who was in the meeting (consultancy, interview, stand-up…) and say so in the note footer, or ‘None’ for the standard 16-section note. You can pick a different template for one recording in the “Who was in this meeting?” window after you stop recording, and per folder below. Works with Ollama, the downloaded Gemma model and Apple Intelligence.")
             SettingCaption("Which sections the note has. None keeps the standard note.")
 
             DisclosureGroup("Custom template") {

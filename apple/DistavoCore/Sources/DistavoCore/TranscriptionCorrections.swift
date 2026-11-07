@@ -78,11 +78,17 @@ public enum TranscriptionCorrections {
         return re.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
+    /// Replaces `term` outside existing occurrences of `new`, so `heard "Starling"` -> `"Starling Bank"` does not
+    /// turn an already-correct "Starling Bank" into "Starling Bank Bank". Idempotent on its own output.
     private static func replace(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
         guard let re = regex(term) else { return (text, false) }
-        let r = NSRange(location: 0, length: (text as NSString).length)
-        guard re.firstMatch(in: text, range: r) != nil else { return (text, false) }
-        let out = re.stringByReplacingMatches(in: text, range: r, withTemplate: NSRegularExpression.escapedTemplate(for: new))
-        return (out, true)
+        var changed = false
+        let pieces = text.components(separatedBy: new).map { piece -> String in
+            let r = NSRange(location: 0, length: (piece as NSString).length)
+            guard re.firstMatch(in: piece, range: r) != nil else { return piece }
+            changed = true
+            return re.stringByReplacingMatches(in: piece, range: r, withTemplate: NSRegularExpression.escapedTemplate(for: new))
+        }
+        return (pieces.joined(separator: new), changed)
     }
 }

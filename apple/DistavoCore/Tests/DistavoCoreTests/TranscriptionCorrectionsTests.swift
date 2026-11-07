@@ -37,6 +37,17 @@ final class TranscriptionCorrectionsTests: XCTestCase {
         XCTAssertEqual(r.applied.map(\.corrected), ["Acme Banc", "PAYE", "Starling"])
     }
 
+    /// Review 2026-11-07: a corrected form that contains the heard term must not be extended twice, and a second
+    /// pass over the output must change nothing.
+    func testCorrectedFormContainingHeardTermIsNotDoubled() {
+        let n = "## Summary\nStarling and Starling Bank agreed.\n\n## Possible transcription corrections\n- heard \"Starling\", probably \"Starling Bank\"\n"
+        let t = "We met Starling about it."
+        let r = TranscriptionCorrections.apply(n, transcript: t)
+        XCTAssertTrue(r.text.contains("Starling Bank and Starling Bank agreed."), r.text)
+        XCTAssertFalse(r.text.contains("Bank Bank"))
+        XCTAssertEqual(TranscriptionCorrections.apply(r.text, transcript: t).text, r.text)
+    }
+
     func testTermAbsentFromTranscriptOrBodyIsNotApplied() {
         let r = TranscriptionCorrections.apply(note, transcript: transcript)
         XCTAssertFalse(r.applied.contains { $0.heard == "Missing" })

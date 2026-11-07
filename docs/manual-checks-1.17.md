@@ -422,8 +422,8 @@ and one real note. Use invented names only (Anna, Joan, Pere, Laia).
 1. Settings > Notes > Note template: "Advice call" is in the list, and the help text under it names Advice call.
 2. Stop dialog and Regenerate: the same popup offers "Advice call" too.
 3. Pick "Auto" with participants `Anna (accountant), Joan`: the note uses the Advice call sections ("Advice given" first) and the
-   footer names the template and the matched word. With `Anna (financial adviser), Joan (CEO), Pere` as a consultancy meeting the
-   Consultancy sections still win where the adviser tie says so (see `AdviceTemplateTests`).
+   footer names the template and the matched word. With both an adviser word and a consultancy word listed (for example
+   `Anna (accountant), Joan (external consultant)`) Advice call wins the tie (`testAdviceCallBeatsConsultancyWhenBothWordsAppear`).
 4. Regenerate a recorded accountant call with "Advice call": every rate, amount and condition appears as said, with the speaker and
    timestamp, and no figure the adviser gave is credited to the note owner.
 

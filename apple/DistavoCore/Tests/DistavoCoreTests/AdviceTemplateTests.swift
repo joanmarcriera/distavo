@@ -73,6 +73,20 @@ final class AdviceTemplateTests: XCTestCase {
         XCTAssertEqual(TemplateAutoPick.pick(participants: "tax adviser and accountant", transcript: "")?.id, id)
     }
 
+    /// Review 2026-11-07: the profession wins a would-be tie with "adviser", plurals count, and generic
+    /// finance words alone pick nothing.
+    func testMortgageAdviserAloneAndPluralsPickAdviceCall() {
+        for who in ["Other participants: Pat, mortgage adviser", "accountant; adviser", "our solicitors"] {
+            XCTAssertEqual(TemplateAutoPick.pick(participants: who, transcript: "")?.id, id, who)
+        }
+    }
+
+    func testGenericFinanceWordsAloneDoNotPickAdviceCall() {
+        for who in ["Head of Financial Planning", "Tax Office", "Dana, financial"] {
+            XCTAssertNotEqual(TemplateAutoPick.pick(participants: who, transcript: "")?.id, id, who)
+        }
+    }
+
     func testConsultancyAndRecruiterPicksAreUnchanged() {
         XCTAssertEqual(TemplateAutoPick.pick(participants: "consultor; client CEO", transcript: "")?.id, "consultancy")
         XCTAssertEqual(TemplateAutoPick.pick(participants: "a recruiter", transcript: "")?.id, "interview")

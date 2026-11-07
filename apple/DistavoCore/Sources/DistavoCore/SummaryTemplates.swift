@@ -582,10 +582,12 @@ public enum TemplateAutoPick {
         // Professions that advise: stronger than the bare "adviser" of consultancy, so "tax adviser and
         // accountant" is an advice call (Vikunja #6355).
         ("advice_call",
-         ["accountant", "solicitor", "lawyer", "attorney", "barrister", "ifa", "financial adviser",
-          "financial advisor", "tax adviser", "tax advisor", "mortgage adviser", "contable", "advocat",
-          "abogado", "abogada", "gestor", "gestoria", "gestoría", "comptable"],
-         ["hmrc", "dividend", "legal advice", "financial", "tax"]),
+         ["accountant", "accountants", "solicitor", "solicitors", "lawyer", "lawyers", "attorney", "barrister", "ifa",
+          "financial adviser", "financial advisor", "tax adviser", "tax advisor", "mortgage adviser",
+          "contable", "contables", "advocat", "abogado", "abogada", "abogados", "gestor fiscal", "gestoria",
+          "gestoría", "comptable"],
+         // No bare "financial"/"tax": a "Head of Financial Planning" or a tax-themed sales call must not score.
+         ["hmrc", "dividend", "legal advice", "tax return"]),
         ("standup", ["stand-up", "standup", "stand up", "scrum", "daily sync"], ["sprint", "blocker"]),
         ("one_on_one", ["1:1", "one-to-one", "one to one", "one on one"], ["mentor", "mentee"]),
         ("sales_call", ["sales call", "demo", "prospect"], ["pricing", "quote", "proposal"]),
@@ -607,6 +609,9 @@ public enum TemplateAutoPick {
             var score = 0
             var hits: [String] = []
             for w in rule.strong where contains(who, w) { score += 3; hits.append(w) }
+            // A profession named in the participants is more specific than consultancy's bare "adviser", so
+            // "mortgage adviser" alone must not tie with it.
+            if rule.id == SummaryTemplateCatalog.adviceCallID, !hits.isEmpty { score += 1 }
             for w in rule.weak where contains(who, w) { score += 2; hits.append(w) }
             var transcriptScore = 0
             for w in rule.strong + rule.weak where contains(start, w) { transcriptScore += 1 }

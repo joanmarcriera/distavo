@@ -27,16 +27,26 @@ public enum SummaryChecks {
     ///   - summary: the cleaned model output (no Key moments, no footer).
     ///   - transcript: the clean transcript the model was given.
     ///   - context: the note context the prompt was built from.
-    public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
+    ///   - applyCorrections: `summarise.apply_corrections`; false leaves the corrections list as advice only.
+    public static func apply(summary: String, transcript: String, context: NoteContext,
+                             applyCorrections: Bool = true) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
         // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
-        let relabelled = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
-        // Facts-ledger rows the transcript does not support are dropped or flagged (#3581).
-        guard context.promptStyle == .factsFirst else {
-            return SummaryCheckOutcome(text: relabelled, notes: context.summaryNotes)
+        let scrubbed = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
+        // Facts-ledger rows the transcript does not support are dropped or flagged (#3581). This runs BEFORE the
+        // corrections: a correction rewrites words inside quotes, which would make verbatim quotes fail the match.
+        var text = scrubbed
+        var ledgerNotes: [String] = []
+        if context.promptStyle == .factsFirst {
+            let ledger = LedgerVerifier.verify(scrubbed, transcript: transcript)
+            text = ledger.text
+            ledgerNotes = LedgerVerifier.notes(for: ledger)
         }
-        let ledger = LedgerVerifier.verify(relabelled, transcript: transcript)
-        return SummaryCheckOutcome(text: ledger.text, notes: context.summaryNotes + LedgerVerifier.notes(for: ledger))
+        // The note's own "Possible transcription corrections" applied to the body (#6354); every style.
+        let fixed = applyCorrections ? TranscriptionCorrections.apply(text, transcript: transcript)
+                                     : TranscriptionCorrections.Result(text: text, applied: [])
+        let correctionNotes = TranscriptionCorrections.note(for: fixed).map { [$0] } ?? []
+        return SummaryCheckOutcome(text: fixed.text, notes: context.summaryNotes + correctionNotes + ledgerNotes)
     }
 }
 

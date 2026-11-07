@@ -236,10 +236,14 @@ public struct SummariseConfig: Codable, Equatable {
     /// see `MeetingShapeGate` (Vikunja #4015). **false for any config predating the key**, never set by
     /// `recommendedForThisMac()`.
     public var nonMeetingGuard: Bool
+    /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). On by default;
+    /// false keeps the list as advice only.
+    public var applyCorrections: Bool
 
     enum CodingKeys: String, CodingKey {
         case nonMeetingGuard = "non_meeting_guard"
         case actionItems = "action_items"
+        case applyCorrections = "apply_corrections"
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
         case promptStyle = "prompt_style"
@@ -258,8 +262,10 @@ public struct SummariseConfig: Codable, Equatable {
                 biggerModel: String? = nil,
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
-                actionItems: Bool = false, nonMeetingGuard: Bool = false) {
+                actionItems: Bool = false, nonMeetingGuard: Bool = false,
+                applyCorrections: Bool = true) {
         self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
+        self.applyCorrections = applyCorrections
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -301,6 +307,7 @@ public struct SummariseConfig: Codable, Equatable {
             ?? d.folderTemplates
         actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
         nonMeetingGuard = ((try? c.decodeIfPresent(Bool.self, forKey: .nonMeetingGuard)) ?? nil) ?? d.nonMeetingGuard
+        applyCorrections = ((try? c.decodeIfPresent(Bool.self, forKey: .applyCorrections)) ?? nil) ?? d.applyCorrections
     }
 }
 

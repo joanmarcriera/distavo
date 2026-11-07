@@ -36,6 +36,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Same rule as release.yml / release-appstore.yml: a version that disagrees with MARKETING_VERSION in the
+      # checked-out apple/project.yml (or with a tag this run was started on) must not reach App Review.
+      - name: Preflight — version matches MARKETING_VERSION
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+          REF_IS_TAG: ${{ startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          set -euo pipefail
+          if [ -n "${INPUT_VERSION:-}" ]; then ./scripts/check-tag-version.sh "v${INPUT_VERSION#v}"; fi
+          if [ "$REF_IS_TAG" = "true" ]; then ./scripts/check-tag-version.sh "$REF_NAME"; fi
+
       - name: Install dependencies
         run: pip install --quiet 'PyJWT[crypto]==2.10.1' 'requests==2.32.4'
 

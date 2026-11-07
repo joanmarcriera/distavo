@@ -89,6 +89,19 @@ Never commit these; never paste them in chat — add them yourself in the GitHub
 (e.g. `v1.15.0`). When set, it checks out that tag and builds, notarizes and publishes the GitHub
 Release (and appcast) for it, without re-firing `release-appstore.yml` (that fires only on the tag push).
 
+## The tag rule
+
+A release tag is `vX.Y.Z` and **must equal `MARKETING_VERSION` in `apple/project.yml` at that tag**. `scripts/check-tag-version.sh <tag>`
+enforces it (exit 0 match; 1 mismatch, not `vX.Y.Z`, several or suffixed values such as `1.20.0-beta`; 2 usage) and runs first in:
+
+- `release.yml`: on a tag push, and on a `workflow_dispatch` that sets `release_tag` (checked against that tag's `project.yml`);
+- `release-appstore.yml`: on a tag push, before anything is built;
+- `submit-appstore.yml`: when the `version` input is set (checked as `v<version>` against the checked-out `project.yml`) or the run
+  started on a tag. A blank `version` reads `project.yml`, so there is nothing to disagree with.
+
+A refused run changes nothing outside the runner. Fix forward: bump `MARKETING_VERSION` (or tag the right commit), never delete or
+move a published tag. Tests: `scripts/tests/check-tag-version.test.sh`.
+
 ## How `release-appstore.yml` works
 1. Imports **both** signing certs (Apple Distribution + 3rd Party Mac Developer
    Installer) into a throwaway keychain, installs the Mac App Store provisioning

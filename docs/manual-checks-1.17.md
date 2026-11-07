@@ -423,7 +423,7 @@ and one real note. Use invented names only (Anna, Joan, Pere, Laia).
 2. Stop dialog and Regenerate: the same popup offers "Advice call" too.
 3. Pick "Auto" with participants `Anna (accountant), Joan`: the note uses the Advice call sections ("Advice given" first) and the
    footer names the template and the matched word. With both an adviser word and a consultancy word listed (for example
-   `Anna (accountant), Joan (external consultant)`) Advice call wins the tie (`testAdviceCallBeatsConsultancyWhenBothWordsAppear`).
+   `Anna (tax adviser), Joan (accountant)`) Advice call wins the tie (`testAdviceCallBeatsConsultancyWhenBothWordsAppear`).
 4. Regenerate a recorded accountant call with "Advice call": every rate, amount and condition appears as said, with the speaker and
    timestamp, and no figure the adviser gave is credited to the note owner.
 

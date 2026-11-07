@@ -25,12 +25,16 @@ public enum TranscriptionCorrections {
     static func isCorrectionsHeading(_ line: String) -> Bool {
         guard isHeading(line) else { return false }
         let title = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "#" })
-            .trimmingCharacters(in: CharacterSet(charactersIn: " \t*_:"))
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \t*_:#"))
         return title.lowercased() == headingTitle
     }
 
     /// A markdown ATX heading: 1-6 '#', then a space and text. "#hashtag" and "#2 item" are not headings.
     static func isHeading(_ line: String) -> Bool {
+        // Up to three leading spaces are allowed by markdown; four or more is an indented code block.
+        let spaces = line.prefix(while: { $0 == " " }).count
+        guard spaces <= 3 else { return false }
+        let line = line.dropFirst(spaces)
         var n = 0
         for c in line { if c == "#" { n += 1 } else { break } }
         guard (1...6).contains(n) else { return false }

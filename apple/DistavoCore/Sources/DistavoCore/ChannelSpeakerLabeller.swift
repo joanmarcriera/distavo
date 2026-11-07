@@ -81,7 +81,11 @@ public enum ChannelSpeakerLabeller {
         let labels = label(words: words, left: channels.left, right: channels.right, sampleRate: channels.sampleRate)
         let t = turns(words: words, labels: labels)
         guard !t.isEmpty else { return nil }
-        return WordSpeakerAligner.whisperXDictionary(words: words, turns: t)
+        // The aligner emits only `segments`; keep every other engine key (`detections`, `engine`, ...) because the
+        // pipeline reads the detected language and the provenance footer from them.
+        var out = WordSpeakerAligner.whisperXDictionary(words: words, turns: t)
+        for (k, v) in result where k != "segments" { out[k] = v }
+        return out
     }
 
     private static func rms(_ s: ArraySlice<Float>) -> Float {

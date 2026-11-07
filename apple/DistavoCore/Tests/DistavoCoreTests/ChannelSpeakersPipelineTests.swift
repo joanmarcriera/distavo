@@ -33,6 +33,16 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
     }
 
+    /// Review 2026-11-07: the relabel must not drop `detections` / `engine` (language + provenance footer read them).
+    func testRelabelKeepsNonSegmentKeys() throws {
+        var r = engineResult()
+        r["engine"] = "whisperkit"
+        r["detections"] = [["language": "ca", "confidence": 0.9]]
+        let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+        XCTAssertEqual(out["engine"] as? String, "whisperkit")
+        XCTAssertNotNil(out["detections"])
+    }
+
     func testRelabelNilWhenOneChannelSilent() {
         var s = stereo(); s.right = [Float](repeating: 0, count: s.right.count)
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: s))

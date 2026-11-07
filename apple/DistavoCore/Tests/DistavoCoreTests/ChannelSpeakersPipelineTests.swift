@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import DistavoCore
 
 /// #6353 pass 2: the channel labeller wired behind `transcribe.channel_speakers`.
@@ -43,6 +44,37 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertNotNil(out["detections"])
     }
 
+    /// Review 2026-11-07 (HIGH): a numeral comes back from the engine without start/end. It must survive the relabel.
+    func testRelabelKeepsUntimedWords() throws {
+        let timed: [[String: Any]] = [
+            ["word": "call", "start": 0.1, "end": 0.5], ["word": "42", "speaker": "SPEAKER_00"],
+            ["word": "me", "start": 1.1, "end": 1.8], ["word": "then", "start": 2.1, "end": 2.5],
+            ["word": "7", "speaker": "SPEAKER_00"], ["word": "ok", "start": 3.1, "end": 3.8]]
+        let r: [String: Any] = ["segments": [["speaker": "SPEAKER_00", "text": "x", "words": timed]]]
+        let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+        let text = ((out["segments"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: " ")
+        XCTAssertTrue(text.contains("42"), text)
+        XCTAssertTrue(text.contains("7"), text)
+        XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
+    }
+
+    /// Review 2026-11-07: reading a file must not hold every sample; the stereo file reads as a compact envelope that
+    /// still labels correctly.
+    func testReadStreamsAnEnvelopeNotEverySample() throws {
+        let s = stereo()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ch-\(UUID().uuidString).wav")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fmt = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr, channels: 2, interleaved: false))
+        let buf = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(s.left.count)))
+        buf.frameLength = AVAudioFrameCount(s.left.count)
+        for i in 0..<s.left.count { buf.floatChannelData![0][i] = s.left[i]; buf.floatChannelData![1][i] = s.right[i] }
+        do { let f = try AVAudioFile(forWriting: url, settings: fmt.settings); try f.write(from: buf) }
+        let got = try XCTUnwrap(StereoChannels.read(from: url))
+        XCTAssertLessThan(got.left.count, s.left.count / 50, "an envelope, not the samples")
+        let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: got))
+        XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
+    }
+
     func testRelabelNilWhenOneChannelSilent() {
         var s = stereo(); s.right = [Float](repeating: 0, count: s.right.count)
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: s))
@@ -61,7 +93,7 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertTrue(on.channelSpeakers)
     }
 
-    private func run(flag: Bool, channels: StereoChannels?) async throws -> [String] {
+    private func run(flag: Bool, channels: StereoChannels?, numSpeakers: Int = 0) async throws -> [String] {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-ch-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
@@ -72,6 +104,7 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         cfg.notesDir = root.appendingPathComponent("notes").path
         cfg.workDir = root.appendingPathComponent("work").path
         cfg.transcribe.channelSpeakers = flag
+        cfg.transcribe.numSpeakers = numSpeakers
         let result = engineResult()
         let deps = PipelineDeps(
             convertToWav: { _, dest in
@@ -101,6 +134,12 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
 
     func testPipelineUntouchedWhenSourceIsNotStereo() async throws {
         let s = try await run(flag: true, channels: nil)
+        XCTAssertEqual(Set(s), ["SPEAKER_00"])
+    }
+
+    /// Review 2026-11-07: the flag forced two speakers on a call known to have three or more people.
+    func testPipelineKeepsEngineLabelsWhenThreeOrMorePeopleAreExpected() async throws {
+        let s = try await run(flag: true, channels: stereo(), numSpeakers: 3)
         XCTAssertEqual(Set(s), ["SPEAKER_00"])
     }
 }

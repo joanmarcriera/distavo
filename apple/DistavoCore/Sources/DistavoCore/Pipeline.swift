@@ -466,7 +466,9 @@ public enum Pipeline {
             var result = try await deps.transcribe(wavPath, transcribeConfig)
             // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
             // other case (mono source, a silent channel, no word timings) keeps the engine's own labels.
-            if transcribeConfig.channelSpeakers, let ch = await deps.stereoChannels(path),
+            // Two sides cannot describe a call of three or more people (the remote side is several voices): then the
+            // diariser's labels stay. Auto (0) cannot know, so it still uses the channels.
+            if transcribeConfig.channelSpeakers, transcribeConfig.numSpeakers <= 2, let ch = await deps.stereoChannels(path),
                let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
                 result = relabelled
             }

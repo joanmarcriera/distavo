@@ -30,7 +30,8 @@ public enum ChannelSpeakerLabeller {
     public static func label(words: [TimedWord], left: [Float], right: [Float], sampleRate: Double) -> [Side?] {
         let diffs: [Double] = words.map { w in
             let a = max(0, min(left.count, Int(w.start * sampleRate)))
-            let b = max(a, min(left.count, right.count, Int(w.end * sampleRate)))
+            var b = max(a, min(left.count, right.count, Int(w.end * sampleRate)))
+            if b == a { b = min(left.count, right.count, a + 1) }   // a word shorter than one sample/hop still reads one
             guard b > a else { return 0 }
             let l = Double(rms(left[a..<b])), r = Double(rms(right[a..<b]))
             return 20 * log10((l + 1e-6) / (r + 1e-6))
@@ -69,14 +70,17 @@ public enum ChannelSpeakerLabeller {
     /// no word timings, or no word could be decided. Remote stays one speaker; owner = SPEAKER_00.
     public static func relabel(result: [String: Any], channels: StereoChannels) -> [String: Any]? {
         guard bothChannelsLive(left: channels.left, right: channels.right) else { return nil }
-        var words: [TimedWord] = []
+        // Words the engine could not time (numerals: "42") carry no start/end. They are kept, timed to the gap
+        // between their neighbours, so the relabel never drops text; only words with real timings count as evidence.
+        var raw: [(text: String, start: Double?, end: Double?)] = []
         for seg in (result["segments"] as? [[String: Any]]) ?? [] {
             for w in (seg["words"] as? [[String: Any]]) ?? [] {
-                if let t = w["word"] as? String, let s = w["start"] as? Double, let e = w["end"] as? Double {
-                    words.append(TimedWord(text: t, start: s, end: e))
-                }
+                guard let t = w["word"] as? String else { continue }
+                raw.append((t, w["start"] as? Double, w["end"] as? Double))
             }
         }
+        guard raw.contains(where: { $0.start != nil && $0.end != nil }) else { return nil }
+        let words = fillUntimed(raw)
         guard !words.isEmpty else { return nil }
         let labels = label(words: words, left: channels.left, right: channels.right, sampleRate: channels.sampleRate)
         let t = turns(words: words, labels: labels)
@@ -85,6 +89,20 @@ public enum ChannelSpeakerLabeller {
         // pipeline reads the detected language and the provenance footer from them.
         var out = WordSpeakerAligner.whisperXDictionary(words: words, turns: t)
         for (k, v) in result where k != "segments" { out[k] = v }
+        return out
+    }
+
+    /// Gives each untimed word the span between the previous word's end and the next timed word's start
+    /// (zero-length at the previous end when that gap is negative); leading untimed words take the first start.
+    static func fillUntimed(_ raw: [(text: String, start: Double?, end: Double?)]) -> [TimedWord] {
+        var out: [TimedWord] = []
+        for (i, w) in raw.enumerated() {
+            if let s = w.start, let e = w.end { out.append(TimedWord(text: w.text, start: s, end: e)); continue }
+            let prevEnd = out.last?.end
+            let nextStart = raw[(i + 1)...].lazy.compactMap { $0.start }.first
+            let s = prevEnd ?? nextStart ?? 0
+            out.append(TimedWord(text: w.text, start: s, end: max(s, nextStart ?? s)))
+        }
         return out
     }
 
@@ -106,15 +124,38 @@ public struct StereoChannels: Sendable {
         self.left = left; self.right = right; self.sampleRate = sampleRate
     }
 
-    /// Decodes a file with exactly two channels; nil for mono, other layouts or unreadable files.
+    /// Seconds of audio per envelope value.
+    public static let hopSeconds = 0.01
+
+    /// Streams a file with exactly two channels and returns its loudness envelope: one RMS value per 10 ms hop, so
+    /// `sampleRate` is hops per second. RMS over a span of the envelope equals RMS over the samples (equal hops), so
+    /// `ChannelSpeakerLabeller` reads it unchanged, while an hour-long call costs ~720 kB instead of ~900 MB of
+    /// samples. nil for mono, other layouts or unreadable files.
     public static func read(from url: URL) -> StereoChannels? {
         guard let file = try? AVAudioFile(forReading: url), file.processingFormat.channelCount == 2,
-              file.length > 0, file.length < 1 << 31,
-              let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)),
-              (try? file.read(into: buf)) != nil, let data = buf.floatChannelData else { return nil }
-        let n = Int(buf.frameLength)
-        return StereoChannels(left: Array(UnsafeBufferPointer(start: data[0], count: n)),
-                              right: Array(UnsafeBufferPointer(start: data[1], count: n)),
-                              sampleRate: file.processingFormat.sampleRate)
+              file.length > 0 else { return nil }
+        let rate = file.processingFormat.sampleRate
+        let hop = max(1, Int(rate * hopSeconds))
+        let chunk: AVAudioFrameCount = 1 << 16
+        guard let buf = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: chunk) else { return nil }
+        var left: [Float] = [], right: [Float] = []
+        left.reserveCapacity(Int(file.length) / hop + 1); right.reserveCapacity(left.capacity)
+        var accL: Float = 0, accR: Float = 0, inHop = 0
+        func flush() {
+            guard inHop > 0 else { return }
+            left.append((accL / Float(inHop)).squareRoot()); right.append((accR / Float(inHop)).squareRoot())
+            accL = 0; accR = 0; inHop = 0
+        }
+        while file.framePosition < file.length {
+            guard (try? file.read(into: buf, frameCount: chunk)) != nil, buf.frameLength > 0,
+                  let data = buf.floatChannelData else { return nil }
+            for i in 0..<Int(buf.frameLength) {
+                let l = data[0][i], r = data[1][i]
+                accL += l * l; accR += r * r; inHop += 1
+                if inHop == hop { flush() }
+            }
+        }
+        flush()
+        return StereoChannels(left: left, right: right, sampleRate: 1 / hopSeconds)
     }
 }

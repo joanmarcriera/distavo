@@ -49,7 +49,8 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         let timed: [[String: Any]] = [
             ["word": "call", "start": 0.1, "end": 0.5], ["word": "42", "speaker": "SPEAKER_00"],
             ["word": "me", "start": 1.1, "end": 1.8], ["word": "then", "start": 2.1, "end": 2.5],
-            ["word": "7", "speaker": "SPEAKER_00"], ["word": "ok", "start": 3.1, "end": 3.8]]
+            ["word": "7", "speaker": "SPEAKER_00"], ["word": "ok", "start": 2.6, "end": 3.0],
+            ["word": "fine", "start": 3.1, "end": 3.4], ["word": "good", "start": 3.5, "end": 3.9]]
         let r: [String: Any] = ["segments": [["speaker": "SPEAKER_00", "text": "x", "words": timed]]]
         let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
         let text = ((out["segments"] as? [[String: Any]]) ?? []).compactMap { $0["text"] as? String }.joined(separator: " ")
@@ -72,6 +73,19 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         let got = try XCTUnwrap(StereoChannels.read(from: url))
         XCTAssertLessThan(got.left.count, s.left.count / 50, "an envelope, not the samples")
         let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: got))
+        XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
+    }
+
+    /// A run of numerals must not outvote the words around it (review): they inherit the previous word's side.
+    func testRunOfUntimedWordsInheritsPreviousSide() throws {
+        var words: [[String: Any]] = [["word": "hello", "start": 0.1, "end": 0.5], ["word": "there", "start": 0.6, "end": 1.0]]
+        for d in ["2", "0", "2", "6"] { words.append(["word": d]) }
+        words.append(["word": "yes", "start": 2.1, "end": 2.5]); words.append(["word": "ok", "start": 2.6, "end": 3.0])
+        words.append(["word": "fine", "start": 3.1, "end": 3.4]); words.append(["word": "good", "start": 3.5, "end": 3.9])
+        let r: [String: Any] = ["segments": [["speaker": "SPEAKER_00", "text": "x", "words": words]]]
+        let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+        let segs = (out["segments"] as? [[String: Any]]) ?? []
+        XCTAssertTrue((segs.first?["text"] as? String ?? "").contains("2 0 2 6"), "digits stay with the owner turn")
         XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
     }
 

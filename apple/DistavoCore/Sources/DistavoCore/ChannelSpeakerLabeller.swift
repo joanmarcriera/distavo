@@ -81,8 +81,20 @@ public enum ChannelSpeakerLabeller {
         }
         guard raw.contains(where: { $0.start != nil && $0.end != nil }) else { return nil }
         let words = fillUntimed(raw)
+        let isTimed = raw.map { $0.start != nil && $0.end != nil }
         guard !words.isEmpty else { return nil }
-        let labels = label(words: words, left: channels.left, right: channels.right, sampleRate: channels.sampleRate)
+        // Only words with real timings are evidence; an untimed word (its span is just the gap) takes the side of
+        // the word before it, so a run of numerals cannot outvote the words around it.
+        let timedIdx = words.indices.filter { isTimed[$0] }
+        let timedLabels = label(words: timedIdx.map { words[$0] }, left: channels.left, right: channels.right,
+                                sampleRate: channels.sampleRate)
+        var labels = [Side?](repeating: nil, count: words.count)
+        var last: Side? = nil
+        var next = 0
+        for i in words.indices {
+            if isTimed[i] { last = timedLabels[next]; next += 1 }
+            labels[i] = last
+        }
         let t = turns(words: words, labels: labels)
         guard !t.isEmpty else { return nil }
         // The aligner emits only `segments`; keep every other engine key (`detections`, `engine`, ...) because the
@@ -147,8 +159,10 @@ public struct StereoChannels: Sendable {
             accL = 0; accR = 0; inHop = 0
         }
         while file.framePosition < file.length {
+            // A short or failed read (a compressed file whose length was an estimate) ends the scan; what was
+            // read is still a usable envelope.
             guard (try? file.read(into: buf, frameCount: chunk)) != nil, buf.frameLength > 0,
-                  let data = buf.floatChannelData else { return nil }
+                  let data = buf.floatChannelData else { break }
             for i in 0..<Int(buf.frameLength) {
                 let l = data[0][i], r = data[1][i]
                 accL += l * l; accR += r * r; inHop += 1
@@ -156,6 +170,8 @@ public struct StereoChannels: Sendable {
             }
         }
         flush()
-        return StereoChannels(left: left, right: right, sampleRate: 1 / hopSeconds)
+        guard !left.isEmpty else { return nil }
+        // The hop is a whole number of samples, so the true rate is rate / hop (not exactly 100 Hz at 22.05 kHz).
+        return StereoChannels(left: left, right: right, sampleRate: rate / Double(hop))
     }
 }

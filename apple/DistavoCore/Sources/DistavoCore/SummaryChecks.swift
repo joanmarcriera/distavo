@@ -30,13 +30,17 @@ public enum SummaryChecks {
     public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
         // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
-        let relabelled = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
+        let scrubbed = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
+        // The note's own "Possible transcription corrections" applied to the body (#6354); every style.
+        let fixed = TranscriptionCorrections.apply(scrubbed, transcript: transcript)
+        let relabelled = fixed.text
+        let correctionNotes = TranscriptionCorrections.note(for: fixed).map { [$0] } ?? []
         // Facts-ledger rows the transcript does not support are dropped or flagged (#3581).
         guard context.promptStyle == .factsFirst else {
-            return SummaryCheckOutcome(text: relabelled, notes: context.summaryNotes)
+            return SummaryCheckOutcome(text: relabelled, notes: context.summaryNotes + correctionNotes)
         }
         let ledger = LedgerVerifier.verify(relabelled, transcript: transcript)
-        return SummaryCheckOutcome(text: ledger.text, notes: context.summaryNotes + LedgerVerifier.notes(for: ledger))
+        return SummaryCheckOutcome(text: ledger.text, notes: context.summaryNotes + correctionNotes + LedgerVerifier.notes(for: ledger))
     }
 }
 

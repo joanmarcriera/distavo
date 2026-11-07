@@ -551,7 +551,8 @@ public enum Pipeline {
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 // Post-summary checks shared with regenerate (1.19): may rewrite the text and add footer notes.
-                var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context,
+                                                applyCorrections: config.summarise.applyCorrections)
                 cleaned = checked.text
                 // A retry that still came back in the wrong language says so in the footer (#3585).
                 if languageRetried, let requested = context.noteLanguage,

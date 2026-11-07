@@ -225,9 +225,13 @@ public struct SummariseConfig: Codable, Equatable {
     /// #2941, see `ActionItemsPrompt`). **false for any config predating the key**
     /// and never turned on by `recommendedForThisMac()`.
     public var actionItems: Bool
+    /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). On by default;
+    /// false keeps the list as advice only.
+    public var applyCorrections: Bool
 
     enum CodingKeys: String, CodingKey {
         case actionItems = "action_items"
+        case applyCorrections = "apply_corrections"
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
         case promptStyle = "prompt_style"
@@ -246,8 +250,10 @@ public struct SummariseConfig: Codable, Equatable {
                 biggerModel: String? = nil,
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
-                actionItems: Bool = false) {
+                actionItems: Bool = false,
+                applyCorrections: Bool = true) {
         self.actionItems = actionItems
+        self.applyCorrections = applyCorrections
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -282,6 +288,7 @@ public struct SummariseConfig: Codable, Equatable {
         folderTemplates = ((try? c.decodeIfPresent([String: String].self, forKey: .folderTemplates)) ?? nil)
             ?? d.folderTemplates
         actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
+        applyCorrections = ((try? c.decodeIfPresent(Bool.self, forKey: .applyCorrections)) ?? nil) ?? d.applyCorrections
     }
 }
 

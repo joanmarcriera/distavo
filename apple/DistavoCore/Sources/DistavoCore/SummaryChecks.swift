@@ -27,7 +27,9 @@ public enum SummaryChecks {
     ///   - summary: the cleaned model output (no Key moments, no footer).
     ///   - transcript: the clean transcript the model was given.
     ///   - context: the note context the prompt was built from.
-    public static func apply(summary: String, transcript: String, context: NoteContext) -> SummaryCheckOutcome {
+    ///   - applyCorrections: `summarise.apply_corrections`; false leaves the corrections list as advice only.
+    public static func apply(summary: String, transcript: String, context: NoteContext,
+                             applyCorrections: Bool = true) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
         // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
         let scrubbed = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
@@ -41,7 +43,8 @@ public enum SummaryChecks {
             ledgerNotes = LedgerVerifier.notes(for: ledger)
         }
         // The note's own "Possible transcription corrections" applied to the body (#6354); every style.
-        let fixed = TranscriptionCorrections.apply(text, transcript: transcript)
+        let fixed = applyCorrections ? TranscriptionCorrections.apply(text, transcript: transcript)
+                                     : TranscriptionCorrections.Result(text: text, applied: [])
         let correctionNotes = TranscriptionCorrections.note(for: fixed).map { [$0] } ?? []
         return SummaryCheckOutcome(text: fixed.text, notes: context.summaryNotes + correctionNotes + ledgerNotes)
     }

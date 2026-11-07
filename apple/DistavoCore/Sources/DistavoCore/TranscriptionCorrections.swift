@@ -19,15 +19,32 @@ public enum TranscriptionCorrections {
         public let applied: [Correction]
     }
 
-    static let heading = "## possible transcription corrections"
+    static let headingTitle = "possible transcription corrections"
+
+    /// "## Title", "### Title:", "# **Title**" ... -> true. Any level, optional bold and trailing colon, any case.
+    static func isCorrectionsHeading(_ line: String) -> Bool {
+        guard isHeading(line) else { return false }
+        let title = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "#" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \t*_:"))
+        return title.lowercased() == headingTitle
+    }
+
+    /// A markdown ATX heading: 1-6 '#', then a space and text. "#hashtag" and "#2 item" are not headings.
+    static func isHeading(_ line: String) -> Bool {
+        var n = 0
+        for c in line { if c == "#" { n += 1 } else { break } }
+        guard (1...6).contains(n) else { return false }
+        let rest = line.dropFirst(n)
+        return rest.first == " " && !rest.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     public static func apply(_ summary: String, transcript: String) -> Result {
         let lines = summary.components(separatedBy: "\n")
-        guard let start = lines.firstIndex(where: { $0.trimmingCharacters(in: .whitespaces).lowercased() == heading }) else {
+        guard let start = lines.firstIndex(where: isCorrectionsHeading) else {
             return Result(text: summary, applied: [])
         }
         var end = lines.count
-        for i in (start + 1)..<lines.count where lines[i].hasPrefix("#") { end = i; break }
+        for i in (start + 1)..<lines.count where isHeading(lines[i]) { end = i; break }
         let section = Array(lines[start..<end])
         var head = lines[..<start].joined(separator: "\n")
         var tail = lines[end...].joined(separator: "\n")
@@ -78,17 +95,42 @@ public enum TranscriptionCorrections {
         return re.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)) != nil
     }
 
-    /// Replaces `term` outside existing occurrences of `new`, so `heard "Starling"` -> `"Starling Bank"` does not
-    /// turn an already-correct "Starling Bank" into "Starling Bank Bank". Idempotent on its own output.
+    /// Fenced blocks, inline code, markdown link targets and bare URLs: text a correction must never rewrite.
+    private static let protected = try? NSRegularExpression(
+        pattern: "```[\\s\\S]*?(```|\\z)|`[^`\\n]*`|\\]\\([^)\\n]*\\)|https?://[^\\s)>\\]]+",
+        options: [])
+
+    /// Splits text into (segment, isProtected) runs.
+    private static func runs(_ text: String) -> [(String, Bool)] {
+        guard let re = protected else { return [(text, false)] }
+        let ns = text as NSString
+        var out: [(String, Bool)] = []
+        var at = 0
+        for m in re.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            if m.range.location > at { out.append((ns.substring(with: NSRange(location: at, length: m.range.location - at)), false)) }
+            out.append((ns.substring(with: m.range), true))
+            at = m.range.location + m.range.length
+        }
+        if at < ns.length { out.append((ns.substring(from: at), false)) }
+        return out
+    }
+
+    /// Replaces `term` outside protected spans and outside existing occurrences of `new`, so `heard "Starling"` ->
+    /// `"Starling Bank"` does not turn an already-correct "Starling Bank" into "Starling Bank Bank".
+    /// Idempotent on its own output.
     private static func replace(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
         guard let re = regex(term) else { return (text, false) }
         var changed = false
-        let pieces = text.components(separatedBy: new).map { piece -> String in
-            let r = NSRange(location: 0, length: (piece as NSString).length)
-            guard re.firstMatch(in: piece, range: r) != nil else { return piece }
-            changed = true
-            return re.stringByReplacingMatches(in: piece, range: r, withTemplate: NSRegularExpression.escapedTemplate(for: new))
+        let out = runs(text).map { (run, isProtected) -> String in
+            if isProtected { return run }
+            let pieces = run.components(separatedBy: new).map { piece -> String in
+                let r = NSRange(location: 0, length: (piece as NSString).length)
+                guard re.firstMatch(in: piece, range: r) != nil else { return piece }
+                changed = true
+                return re.stringByReplacingMatches(in: piece, range: r, withTemplate: NSRegularExpression.escapedTemplate(for: new))
+            }
+            return pieces.joined(separator: new)
         }
-        return (pieces.joined(separator: new), changed)
+        return (out.joined(), changed)
     }
 }

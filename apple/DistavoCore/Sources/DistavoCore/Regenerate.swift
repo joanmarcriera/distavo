@@ -256,7 +256,8 @@ extension Pipeline {
                 }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 // Same post-summary checks as processOne (1.19).
-                var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context,
+                                                applyCorrections: cfg.summarise.applyCorrections)
                 cleaned = checked.text
                 if languageRetried, let requested = context.noteLanguage,
                    let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {

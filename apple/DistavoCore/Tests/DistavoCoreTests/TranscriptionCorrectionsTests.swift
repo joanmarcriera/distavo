@@ -66,4 +66,45 @@ final class TranscriptionCorrectionsTests: XCTestCase {
         XCTAssertTrue(out.text.contains("Acme Banc card"))
         XCTAssertTrue(out.notes.contains { $0.contains("3 transcription corrections applied") })
     }
+
+    // MARK: review 2026-11-07 follow-ups
+
+    /// Links, bare URLs and code spans are not prose: a heard word inside them stays.
+    func testNothingIsRewrittenInsideUrlsOrCode() {
+        let n = "## Summary\nStarlin said so: [Starlin](https://starlin.example/Starlin) and https://starlin.example/x, `Starlin --help`.\n\n```\nStarlin run\n```\n\n## Possible transcription corrections\n- heard \"Starlin\", probably \"Starling\"\n"
+        let r = TranscriptionCorrections.apply(n, transcript: "ask Starlin")
+        XCTAssertTrue(r.text.contains("Starling said so: [Starling](https://starlin.example/Starlin)"), r.text)
+        XCTAssertTrue(r.text.contains("https://starlin.example/x, `Starlin --help`."), r.text)
+        XCTAssertTrue(r.text.contains("```\nStarlin run\n```"), r.text)
+    }
+
+    /// The section is found whatever the heading level, trailing colon or bold the model used.
+    func testHeadingVariantsAreRecognised() {
+        for h in ["### Possible transcription corrections", "## Possible transcription corrections:", "## **Possible transcription corrections**", "# POSSIBLE TRANSCRIPTION CORRECTIONS"] {
+            let n = "## Summary\nPOYE due.\n\n\(h)\n- heard \"POYE\", probably \"PAYE\"\n"
+            XCTAssertTrue(TranscriptionCorrections.apply(n, transcript: "the POYE form").text.contains("PAYE due."), h)
+        }
+    }
+
+    /// A line that merely starts with '#' (a hashtag, "#2 item") is not a heading and does not end the section.
+    func testHashLineInsideSectionDoesNotEndIt() {
+        let n = "## Summary\nPOYE and Starlin.\n\n## Possible transcription corrections\n- heard \"POYE\", probably \"PAYE\"\n#2 also\n- heard \"Starlin\", probably \"Starling\"\n"
+        let r = TranscriptionCorrections.apply(n, transcript: "POYE Starlin")
+        XCTAssertEqual(r.applied.map(\.heard), ["POYE", "Starlin"])
+    }
+
+    func testOptOutLeavesTheBodyAlone() {
+        let ctx = NoteContext(noteOwner: "A", userSpeaker: "S")
+        let out = SummaryChecks.apply(summary: note, transcript: transcript, context: ctx, applyCorrections: false)
+        XCTAssertTrue(out.text.contains("Acme Bank"))
+        XCTAssertFalse(out.notes.contains { $0.contains("correction") })
+    }
+
+    func testApplyCorrectionsFlagDefaultsOnAndRoundTrips() throws {
+        XCTAssertTrue(SummariseConfig().applyCorrections)
+        let old = try JSONDecoder().decode(SummariseConfig.self, from: Data("{}".utf8))
+        XCTAssertTrue(old.applyCorrections)
+        let off = try JSONDecoder().decode(SummariseConfig.self, from: Data("{\"apply_corrections\":false}".utf8))
+        XCTAssertFalse(off.applyCorrections)
+    }
 }

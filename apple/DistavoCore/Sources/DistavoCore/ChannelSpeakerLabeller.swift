@@ -18,6 +18,12 @@ public enum ChannelSpeakerLabeller {
     public static let marginDB = 3.0
     /// Median window in words (odd).
     public static let medianWords = 5
+    /// Each side must own at least this share of the decided timed words, else the file is not a two-sided call
+    /// (a panned non-Distavo stereo file reads as one side throughout) and the engine's labels stay.
+    public static let minSideShare = 0.05
+    /// An engine result that already separates this many speakers is the diariser's work; two channels cannot
+    /// describe it.
+    public static let diariserSpeakerCeiling = 3
     /// A channel below this RMS (about -60 dBFS) counts as silent.
     public static let liveRMS: Float = 0.001
 
@@ -70,6 +76,8 @@ public enum ChannelSpeakerLabeller {
     /// no word timings, or no word could be decided. Remote stays one speaker; owner = SPEAKER_00.
     public static func relabel(result: [String: Any], channels: StereoChannels) -> [String: Any]? {
         guard bothChannelsLive(left: channels.left, right: channels.right) else { return nil }
+        let engineSpeakers = Set(((result["segments"] as? [[String: Any]]) ?? []).compactMap { $0["speaker"] as? String })
+        if engineSpeakers.count >= diariserSpeakerCeiling { return nil }
         // Words the engine could not time (numerals: "42") carry no start/end. They are kept, timed to the gap
         // between their neighbours, so the relabel never drops text; only words with real timings count as evidence.
         var raw: [(text: String, start: Double?, end: Double?)] = []
@@ -100,6 +108,14 @@ public enum ChannelSpeakerLabeller {
             if isTimed[i] { last = timedLabels[next]; next += 1 }
             labels[i] = last
         }
+        // Leading words before the first decided side join it (else they come out as SPEAKER_UNKNOWN).
+        if let first = labels.firstIndex(where: { $0 != nil }), first > 0 {
+            for i in 0..<first { labels[i] = labels[first] }
+        }
+        let decided = timedLabels.compactMap { $0 }
+        guard !decided.isEmpty else { return nil }
+        let ownerShare = Double(decided.filter { $0 == .owner }.count) / Double(decided.count)
+        guard ownerShare >= minSideShare, 1 - ownerShare >= minSideShare else { return nil }
         let t = turns(words: words, labels: labels)
         guard !t.isEmpty else { return nil }
         // The aligner emits only `segments`; keep every other engine key (`detections`, `engine`, ...) because the

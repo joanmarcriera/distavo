@@ -98,6 +98,45 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
     }
 
+    private func timedWords(_ spans: [(Double, Double)]) -> [TimedWord] {
+        spans.enumerated().map { TimedWord(text: "w" + String($0.offset), start: $0.element.0, end: $0.element.1) }
+    }
+
+    /// Drive 1246 (MEDIUM): an engine result that already separates 3+ voices is the diariser's work; two channels
+    /// cannot describe it, so the relabel steps aside.
+    func testRelabelNilWhenEngineAlreadyHasThreeSpeakers() {
+        func seg(_ spk: String, _ ws: [TimedWord]) -> [String: Any] {
+            ["speaker": spk, "text": ws.map { $0.text }.joined(separator: " "),
+             "words": ws.map { ["word": $0.text, "start": $0.start, "end": $0.end] as [String: Any] }]
+        }
+        let w = timedWords([(0.1, 0.5), (0.6, 1.0), (1.1, 1.8), (2.1, 2.5), (2.6, 3.0), (3.1, 3.8)])
+        let r: [String: Any] = ["segments": [seg("SPEAKER_00", Array(w[0..<2])), seg("SPEAKER_01", Array(w[2..<4])),
+                                             seg("SPEAKER_02", Array(w[4..<6]))]]
+        XCTAssertNil(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+    }
+
+    /// Drive 1246 (MEDIUM): when every word reads one side (a panned non-Distavo stereo file) it is not a two-sided
+    /// call; each side needs a minimum share of the timed words.
+    func testRelabelNilWhenOneSideHasNegligibleShare() {
+        var s = stereo()
+        for i in s.right.indices { s.right[i] = s.left[i] * 0.05 }
+        XCTAssertNil(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: s))
+    }
+
+    /// Drive 1246 (LOW): leading words before the first decided side join that side, not SPEAKER_UNKNOWN.
+    func testLeadingUndecidedWordsJoinTheFirstDecidedSide() throws {
+        var s = stereo()
+        for i in 0..<Int(0.8 * sr) { s.right[i] = s.left[i] }   // 0-0.8 s equal level: undecided
+        let words = timedWords([(0.05, 0.2), (0.25, 0.4), (0.45, 0.6), (0.62, 0.75),
+                                (0.9, 1.0), (1.05, 1.2), (1.25, 1.4), (1.5, 1.8), (1.85, 1.95),
+                                (2.1, 2.5), (2.6, 3.0), (3.1, 3.4), (3.5, 3.9)])
+        let r = WordSpeakerAligner.whisperXDictionary(words: words, turns: [SpeakerTurn(speaker: 0, start: 0, end: 4)])
+        let out = try XCTUnwrap(ChannelSpeakerLabeller.relabel(result: r, channels: s))
+        let segs = (out["segments"] as? [[String: Any]]) ?? []
+        XCTAssertTrue(segs.allSatisfy { $0["speaker"] != nil }, "a segment without a speaker reads as SPEAKER_UNKNOWN")
+        XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
+    }
+
     func testRelabelNilWhenOneChannelSilent() {
         var s = stereo(); s.right = [Float](repeating: 0, count: s.right.count)
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: s))

@@ -74,7 +74,12 @@ public enum ChannelSpeakerLabeller {
         // between their neighbours, so the relabel never drops text; only words with real timings count as evidence.
         var raw: [(text: String, start: Double?, end: Double?)] = []
         for seg in (result["segments"] as? [[String: Any]]) ?? [] {
-            for w in (seg["words"] as? [[String: Any]]) ?? [] {
+            let segWords = (seg["words"] as? [[String: Any]]) ?? []
+            // The relabel rebuilds the transcript from words alone: a segment with text but no words would vanish.
+            // Keep the engine's labels instead of losing text.
+            let segText = (seg["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if segWords.isEmpty && !segText.isEmpty { return nil }
+            for w in segWords {
                 guard let t = w["word"] as? String else { continue }
                 raw.append((t, w["start"] as? Double, w["end"] as? Double))
             }

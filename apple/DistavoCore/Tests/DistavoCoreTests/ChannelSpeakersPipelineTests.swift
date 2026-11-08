@@ -89,6 +89,15 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertEqual(speakers(out), ["SPEAKER_00", "SPEAKER_01"])
     }
 
+    /// Review 2026-11-08 (MEDIUM-HIGH): a segment with text but no words must not vanish; keep the engine labels.
+    func testRelabelNilWhenASegmentHasTextButNoWords() {
+        var r = engineResult()
+        var segs = (r["segments"] as? [[String: Any]]) ?? []
+        segs.append(["speaker": "SPEAKER_00", "text": "2025."])
+        r["segments"] = segs
+        XCTAssertNil(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+    }
+
     func testRelabelNilWhenOneChannelSilent() {
         var s = stereo(); s.right = [Float](repeating: 0, count: s.right.count)
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: engineResult(), channels: s))
@@ -107,7 +116,7 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertTrue(on.channelSpeakers)
     }
 
-    private func run(flag: Bool, channels: StereoChannels?, numSpeakers: Int = 0) async throws -> [String] {
+    private func run(flag: Bool, channels: StereoChannels?, numSpeakers: Int = 0, participants: String? = nil) async throws -> [String] {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-ch-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
@@ -119,6 +128,11 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         cfg.workDir = root.appendingPathComponent("work").path
         cfg.transcribe.channelSpeakers = flag
         cfg.transcribe.numSpeakers = numSpeakers
+        if let participants {
+            try FileManager.default.createDirectory(at: root.appendingPathComponent("work"), withIntermediateDirectories: true)
+            try SpeakerHints(participants: participants).save(workDir: root.appendingPathComponent("work"),
+                                                              base: DistavoState.baseFor(recordingsDir: rec, path: input))
+        }
         let result = engineResult()
         let deps = PipelineDeps(
             convertToWav: { _, dest in
@@ -148,6 +162,12 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
 
     func testPipelineUntouchedWhenSourceIsNotStereo() async throws {
         let s = try await run(flag: true, channels: nil)
+        XCTAssertEqual(Set(s), ["SPEAKER_00"])
+    }
+
+    /// Review 2026-11-08: auto speaker count + a participants sheet naming three remote people must not use the channels.
+    func testPipelineKeepsEngineLabelsWhenParticipantsNameManyPeopleOnAuto() async throws {
+        let s = try await run(flag: true, channels: stereo(), participants: "Other participants: Anna, Ben, Carla")
         XCTAssertEqual(Set(s), ["SPEAKER_00"])
     }
 

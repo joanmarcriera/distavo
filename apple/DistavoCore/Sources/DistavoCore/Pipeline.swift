@@ -447,6 +447,9 @@ public enum Pipeline {
                     // Drive d (#1793): a transient one (never a cancellation) is terminal after a run of five.
                     let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
                     let message = cleanMessage(error)
+                    // A half-written WAV is newer than the source: `wavIsFresh` would trust it on the retry and
+                    // transcribe truncated audio (and no second failure would ever be counted).
+                    try? FileManager.default.removeItem(at: wavPath)
                     let terminal: Bool
                     if error is CancellationError {
                         terminal = false
@@ -681,7 +684,10 @@ public enum Pipeline {
                 let saveError = Pipeline.quarantine(noteText, at: quarantine, workDir: workDir)
                 let reason = failures.joined(separator: "; ")
                 let fallback = composeNote(
-                    body: Pipeline.transcriptOnlyNote(reason: reason, transcript: clean), footer: "", meta: nil,
+                    body: Self.keepingLiveCapture(   // Quick Notes and Key moments survive a rejected summary too
+                        Pipeline.transcriptOnlyNote(reason: reason, transcript: clean),
+                        scratchpad: context.scratchpad, keyMoments: keyMoments),
+                    footer: "", meta: nil,
                     config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
                     cleanTranscript: clean, dominantCode: dominantCode,
                     existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
@@ -759,6 +765,10 @@ public enum Pipeline {
             state.clearProcessing(base)
             state.markDeferred(base, retryAfter: backoff)
             return ProcessResult(status: .deferred, base: base, message: retry.message)
+        } catch is CancellationError {
+            // A pause or quit is not a verdict on the file: leave it pending, never `.failed`.
+            state.clearProcessing(base)
+            return ProcessResult(status: .skipped, base: base, message: "cancelled; will be picked up again")
         } catch {
             let message = cleanMessage(error)
             state.markFailed(base, message)

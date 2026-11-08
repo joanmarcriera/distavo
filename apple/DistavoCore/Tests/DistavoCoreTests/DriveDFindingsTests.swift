@@ -148,6 +148,72 @@ final class DriveDFindingsTests: XCTestCase {
         XCTAssertTrue(try store(cfg).unreadableBases().isEmpty)
     }
 
+    // MARK: reviewer findings (drive d)
+
+    private final class Counter: @unchecked Sendable {
+        private let lock = NSLock(); private var n = 0
+        func bump() { lock.lock(); n += 1; lock.unlock() }
+        var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+    }
+
+    /// A conversion that wrote part of the WAV and then failed must not leave a "fresh" WAV: the retry would skip
+    /// conversion and transcribe truncated audio, and the failure caps could never see a second failure.
+    func testFailedConversionDoesNotLeaveAPartialWavThatCountsAsFresh() async throws {
+        let (input, cfg) = try env()
+        let calls = Counter(), transcribed = Counter()
+        var d = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        d.convertToWav = { _, dest in
+            calls.bump()
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data(count: 100).write(to: dest)
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        d.transcribe = { _, _ in transcribed.bump(); return [:] }
+        for _ in 0..<2 {
+            let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+            XCTAssertEqual(r.status, .failed)
+            try store(cfg).retryFailed()
+        }
+        XCTAssertEqual(calls.value, 2, "the second attempt must convert again, not trust the partial WAV")
+        XCTAssertEqual(transcribed.value, 0)
+    }
+
+    /// The transcript-only fallback (summary rejected twice) keeps Quick Notes and Key moments like the
+    /// not-a-meeting note does.
+    func testRejectedTwiceFallbackKeepsKeyMomentsAndQuickNotes() async throws {
+        let (input, cfg) = try env()
+        let work = URL(fileURLWithPath: cfg.workDir)
+        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
+        let base = DistavoState.baseFor(recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), path: input)
+        var marks = RecordingBookmarks(); _ = marks.add(offsetSeconds: 6, label: "pricing decision")
+        try marks.save(workDir: work, base: base)
+        try ScratchpadNotes(lines: [.init(offsetSeconds: 12, text: "remember the landlord call")]).save(workDir: work, base: base)
+        let segs: [[String: Any]] = [["speaker": "SPEAKER_00", "text": "hello there everyone", "start": 0.0, "end": 4.0]]
+        var d = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        d.convertToWav = { _, dest in
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0]).write(to: dest)
+        }
+        d.transcribe = { _, _ in ["segments": segs] }
+        d.summarise = { _, _, _, _ in String(repeating: "same line again\n", count: 200) }
+        let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done, r.message)
+        XCTAssertTrue(r.message.contains("transcript only"), r.message)
+        let note = try String(contentsOf: try XCTUnwrap(r.notePath), encoding: .utf8)
+        XCTAssertTrue(note.contains("## Key moments") && note.contains("pricing decision"), note)
+        XCTAssertTrue(note.contains("remember the landlord call"), note)
+    }
+
+    /// A cancelled conversion (pause/quit) is not a failure: no `.failed` marker, the recording stays pending.
+    func testCancelledConversionIsNotMarkedFailed() async throws {
+        let (input, cfg) = try env()
+        let r = await Pipeline.processOne(path: input, config: cfg, deps: failingDeps(CancellationError()),
+                                          stableChecks: 1, stableDelay: 0)
+        XCTAssertNotEqual(r.status, .failed)
+        let base = DistavoState.baseFor(recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), path: input)
+        XCTAssertFalse(try store(cfg).isFailed(base))
+    }
+
     /// A replaced file (different size) starts a fresh count, and the menu's retry clears it.
     func testTransientCountRestartsOnANewFileAndRetryClearsIt() throws {
         let (_, cfg) = try env()

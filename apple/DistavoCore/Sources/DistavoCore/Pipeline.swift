@@ -442,12 +442,20 @@ public enum Pipeline {
             // than the source recording, so an edited/re-recorded file still
             // gets a fresh conversion.
             if !wavIsFresh(wavPath: wavPath, sourcePath: path) {
-                do { try await deps.convertToWav(path, wavPath) } catch {
+                do { try await deps.convertToWav(path, wavPath); state.clearTransientConvertFailures(base) } catch {
                     // #5283: the same conversion failure twice is terminal, not a retry per launch.
+                    // Drive d (#1793): a transient one (never a cancellation) is terminal after a run of five.
                     let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
                     let message = cleanMessage(error)
-                    if !Self.isTransientConvertFailure(error),
-                       state.recordConvertFailure(base, message: message, fileSize: size) {
+                    let terminal: Bool
+                    if error is CancellationError {
+                        terminal = false
+                    } else if Self.isTransientConvertFailure(error) {
+                        terminal = state.recordTransientConvertFailure(base, message: message, fileSize: size)
+                    } else {
+                        terminal = state.recordConvertFailure(base, message: message, fileSize: size)
+                    }
+                    if terminal {
                         // #5477: the unreadable list is the single home of a terminal file. A `.failed` marker too
                         // would show it in both menu lists, and "Retry failed" would clear only that one.
                         state.clearProcessing(base); state.clearDeferred(base)

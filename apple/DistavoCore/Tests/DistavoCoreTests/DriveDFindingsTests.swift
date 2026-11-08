@@ -96,4 +96,68 @@ final class DriveDFindingsTests: XCTestCase {
         TranscriptMeta.store(dominant: nil, ownerSpeaker: nil, workDir: work, base: "b")
         XCTAssertNil(TranscriptMeta.load(workDir: work, base: "b"))
     }
+
+    // MARK: transient convert failures get a terminal cap
+
+    private func store(_ cfg: Config) throws -> DistavoState.Store {
+        try DistavoState.Store(stateDir: URL(fileURLWithPath: cfg.workDir).appendingPathComponent(".state"),
+                               notesDir: URL(fileURLWithPath: cfg.notesDir))
+    }
+
+    private func failingDeps(_ err: Error) -> PipelineDeps {
+        PipelineDeps(convertToWav: { _, _ in throw err }, transcribe: { _, _ in [:] }, ollamaReachable: { _ in true },
+                     summarise: { _, _, _, _ in PipelineTests.validNote }, audioDurationSeconds: { _ in nil })
+    }
+
+    /// A transient failure is retried per launch, but not for ever: the fifth in a row is terminal.
+    func testTransientConvertFailureBecomesTerminalAtTheCap() async throws {
+        let (input, cfg) = try env()
+        let d = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        for n in 1...4 {
+            let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+            XCTAssertEqual(r.status, .failed)
+            XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "failure \(n) must stay retryable")
+        }
+        let fifth = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(fifth.status, .failed)
+        XCTAssertEqual(try store(cfg).unreadableBases().count, 1, "five transient failures in a row are terminal")
+        XCTAssertTrue(fifth.message.contains("not retried again"), fifth.message)
+    }
+
+    /// A successful conversion in between resets the run, so scattered hiccups never add up.
+    func testSuccessfulConversionResetsTheTransientCount() async throws {
+        let (input, cfg) = try env()
+        let bad = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        var good = bad
+        good.convertToWav = { _, dest in
+            try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try Data([0]).write(to: dest)
+        }
+        good.transcribe = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }   // convert succeeds, a later stage fails
+        for _ in 0..<4 { _ = await Pipeline.processOne(path: input, config: cfg, deps: bad, stableChecks: 1, stableDelay: 0) }
+        _ = await Pipeline.processOne(path: input, config: cfg, deps: good, stableChecks: 1, stableDelay: 0)
+        for _ in 0..<4 { _ = await Pipeline.processOne(path: input, config: cfg, deps: bad, stableChecks: 1, stableDelay: 0) }
+        XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "4 + success + 4 is not 5 in a row")
+    }
+
+    /// Cancellation is the user's pause or quit, never a verdict on the file, however often it happens.
+    func testCancellationNeverCountsTowardsTheCap() async throws {
+        let (input, cfg) = try env()
+        let d = failingDeps(CancellationError())
+        for _ in 0..<8 { _ = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0) }
+        XCTAssertTrue(try store(cfg).unreadableBases().isEmpty)
+    }
+
+    /// A replaced file (different size) starts a fresh count, and the menu's retry clears it.
+    func testTransientCountRestartsOnANewFileAndRetryClearsIt() throws {
+        let (_, cfg) = try env()
+        let st = try store(cfg)
+        for _ in 0..<4 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 10)) }
+        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11), "new size restarts")
+        for _ in 0..<3 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11)) }
+        XCTAssertTrue(st.recordTransientConvertFailure("b", message: "full", fileSize: 11))
+        st.retryUnreadable()
+        XCTAssertTrue(st.unreadableBases().isEmpty)
+        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11), "count cleared by retry")
+    }
 }

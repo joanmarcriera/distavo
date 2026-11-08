@@ -197,6 +197,32 @@ public enum DistavoState {
             return true
         }
 
+        /// Consecutive transient conversion failures (disk full, permission, offline volume) that end a
+        /// recording's retries (drive d, #1793): without a cap a file that never converts for such a reason is
+        /// retried at every launch for ever. The caller never counts a cancellation.
+        public static let transientFailureCap = 5
+
+        /// `.transientfail` ("<size>\n<count>"): the run of transient failures for the file at this size. Returns
+        /// true when it reached `cap` and the base is now terminal (`.unreadable`, the #5283 state). A new file
+        /// size restarts the run; a successful conversion (`clearTransientConvertFailures`) ends it.
+        @discardableResult
+        public func recordTransientConvertFailure(_ base: String, message: String, fileSize: Int?,
+                                                  cap: Int = Store.transientFailureCap) -> Bool {
+            let size = fileSize.map(String.init) ?? ""
+            var count = 1
+            if let old = try? String(contentsOf: marker(base, "transientfail"), encoding: .utf8) {
+                let l = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                if l.count >= 2, l[0] == size, let n = Int(l[1]) { count = n + 1 }
+            }
+            write("\(size)\n\(count)\n", marker(base, "transientfail"))
+            guard count >= cap else { return false }
+            write("\(message) (failed \(count) times in a row)\n\(size)\n", marker(base, "unreadable"))
+            return true
+        }
+
+        /// The conversion worked: the run of transient failures is over.
+        public func clearTransientConvertFailures(_ base: String) { remove(marker(base, "transientfail")) }
+
         /// True when `base` is terminal for the file as it is now (same size rule as `isTooShort`).
         public func isUnreadable(_ base: String, currentSize: Int? = nil) -> Bool {
             guard let content = try? String(contentsOf: marker(base, "unreadable"), encoding: .utf8) else { return false }
@@ -207,7 +233,7 @@ public enum DistavoState {
         }
 
         public func clearUnreadable(_ base: String) {
-            remove(marker(base, "unreadable")); remove(marker(base, "convertfail"))
+            remove(marker(base, "unreadable")); remove(marker(base, "convertfail")); remove(marker(base, "transientfail"))
         }
 
         /// Release every terminal recording ("Process now" and the menu's Retry, Vikunja #5404). Not part
@@ -216,6 +242,7 @@ public enum DistavoState {
         public func retryUnreadable() {
             removeMarkers(suffix: "unreadable")
             removeMarkers(suffix: "convertfail")
+            removeMarkers(suffix: "transientfail")
         }
 
         /// Terminal recordings with their reason: the menu's one line each, with a Move to Bin action.

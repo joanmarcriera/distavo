@@ -119,15 +119,16 @@ public enum TranscriptionCorrections {
         return out
     }
 
-    /// Replaces `term` outside protected spans and outside existing occurrences of `new`, so `heard "Starling"` ->
-    /// `"Starling Bank"` does not turn an already-correct "Starling Bank" into "Starling Bank Bank".
-    /// Idempotent on its own output.
-    /// `replace` over a body, skipping any "Highlights" section: those lines are the owner's own typed Quick Notes
-    /// (`ScratchpadNotes`) and are never rewritten. A section runs from its heading to the next heading.
+    /// `replace` over a body, skipping any section whose heading contains "highlight": those lines are the typed
+    /// Quick Notes of the owner (`ScratchpadNotes`) and are never rewritten. A section runs from its heading to the
+    /// next heading outside a code fence (so a sub-heading ends it). Known limit: a heading the model translated
+    /// (e.g. "Destacats") is not recognised, and the model commentary under Highlights is protected too.
     private static func replaceOutsideHighlights(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
         var chunks: [(lines: [String], isProtected: Bool)] = [([], false)]
+        var inFence = false
         for line in text.components(separatedBy: "\n") {
-            if isHeading(line) {
+            if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inFence.toggle() }
+            if !inFence, isHeading(line) {
                 chunks.append(([line], line.lowercased().contains("highlight")))
             } else {
                 chunks[chunks.count - 1].lines.append(line)
@@ -144,6 +145,9 @@ public enum TranscriptionCorrections {
         return (parts.joined(separator: "\n"), changed)
     }
 
+    /// Replaces `term` outside protected spans and outside existing occurrences of `new`, so `heard "Starling"` ->
+    /// `"Starling Bank"` does not turn an already-correct "Starling Bank" into "Starling Bank Bank".
+    /// Idempotent on its own output.
     private static func replace(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
         guard let re = regex(term) else { return (text, false) }
         var changed = false

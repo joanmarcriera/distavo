@@ -59,6 +59,25 @@ final class TranscriptionCorrectionsTests: XCTestCase {
         XCTAssertFalse(r.text.contains("- Open Acme Bank first."), r.text)
     }
 
+    /// Reviewer: a heading-like line inside a code fence must not split the body (it would unbalance the fence).
+    func testHashLineInsideFenceDoesNotSplitTheBody() {
+        let fenced = """
+        ## Summary
+        Run this:
+        ```
+        # Acme Bank comment
+        echo Acme Bank
+        ```
+        Then open Acme Bank.
+
+        ## Possible transcription corrections
+        - heard "Acme Bank", probably "Acme Banc"
+        """
+        let r = TranscriptionCorrections.apply(fenced, transcript: transcript)
+        XCTAssertTrue(r.text.contains("# Acme Bank comment\necho Acme Bank"), "code stays untouched: " + r.text)
+        XCTAssertTrue(r.text.contains("Then open Acme Banc."), r.text)
+    }
+
     /// Review 2026-11-07: a corrected form that contains the heard term must not be extended twice, and a second
     /// pass over the output must change nothing.
     func testCorrectedFormContainingHeardTermIsNotDoubled() {

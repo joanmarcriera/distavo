@@ -21,6 +21,8 @@ public enum ChannelSpeakerLabeller {
     /// Each side must own at least this share of the decided timed words, else the file is not a two-sided call
     /// (a panned non-Distavo stereo file reads as one side throughout) and the engine's labels stay.
     public static let minSideShare = 0.05
+    /// ...and at least this many decided words (a handful of stray words is not a side).
+    public static let minSideWords = 2
     /// An engine result that already separates this many speakers is the diariser's work; two channels cannot
     /// describe it.
     public static let diariserSpeakerCeiling = 3
@@ -114,8 +116,10 @@ public enum ChannelSpeakerLabeller {
         }
         let decided = timedLabels.compactMap { $0 }
         guard !decided.isEmpty else { return nil }
-        let ownerShare = Double(decided.filter { $0 == .owner }.count) / Double(decided.count)
-        guard ownerShare >= minSideShare, 1 - ownerShare >= minSideShare else { return nil }
+        // Integer counts (no float edge at the boundary): each side needs the share AND a few words in absolute terms.
+        let ownerCount = decided.filter { $0 == .owner }.count
+        let smaller = min(ownerCount, decided.count - ownerCount)
+        guard smaller >= minSideWords, Double(smaller) >= minSideShare * Double(decided.count) - 1e-9 else { return nil }
         let t = turns(words: words, labels: labels)
         guard !t.isEmpty else { return nil }
         // The aligner emits only `segments`; keep every other engine key (`detections`, `engine`, ...) because the

@@ -115,6 +115,17 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
         XCTAssertNil(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
     }
 
+    /// Positive control: exactly two engine speakers still relabel.
+    func testRelabelStillWorksWithTwoEngineSpeakers() {
+        let w = timedWords([(0.1, 0.5), (0.6, 1.0), (1.1, 1.8), (2.1, 2.5), (2.6, 3.0), (3.1, 3.8)])
+        func seg(_ spk: String, _ ws: [TimedWord]) -> [String: Any] {
+            ["speaker": spk, "text": ws.map { $0.text }.joined(separator: " "),
+             "words": ws.map { ["word": $0.text, "start": $0.start, "end": $0.end] as [String: Any] }]
+        }
+        let r: [String: Any] = ["segments": [seg("SPEAKER_00", Array(w[0..<3])), seg("SPEAKER_01", Array(w[3..<6]))]]
+        XCTAssertNotNil(ChannelSpeakerLabeller.relabel(result: r, channels: stereo()))
+    }
+
     /// Drive 1246 (MEDIUM): when every word reads one side (a panned non-Distavo stereo file) it is not a two-sided
     /// call; each side needs a minimum share of the timed words.
     func testRelabelNilWhenOneSideHasNegligibleShare() {

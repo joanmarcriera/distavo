@@ -998,8 +998,9 @@ public enum Pipeline {
         return RecordingBookmarks.appending(keyMoments, to: out)
     }
 
-    /// True for a conversion failure that says nothing about the file itself (cancelled, offline volume, disk full,
-    /// permission): it must stay retryable and never count towards the terminal `.unreadable` state (#5283).
+    /// True for a conversion failure that says nothing about the file itself (cancelled, offline volume, busy file,
+    /// disk full, permission): it stays retryable. Machine-level ones (`isMachineLevelConvertFailure`) never count;
+    /// the rest are capped at `Store.transientFailureCap` in a row (#5283).
     static func isTransientConvertFailure(_ error: Error) -> Bool {
         if error is CancellationError { return true }
         let ns = error as NSError

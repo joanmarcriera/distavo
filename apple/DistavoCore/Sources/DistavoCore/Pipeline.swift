@@ -446,7 +446,8 @@ public enum Pipeline {
                     // #5283: the same conversion failure twice is terminal, not a retry per launch.
                     let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
                     let message = cleanMessage(error)
-                    if state.recordConvertFailure(base, message: message, fileSize: size) {
+                    if !Self.isTransientConvertFailure(error),
+                       state.recordConvertFailure(base, message: message, fileSize: size) {
                         // #5477: the unreadable list is the single home of a terminal file. A `.failed` marker too
                         // would show it in both menu lists, and "Retry failed" would clear only that one.
                         state.clearProcessing(base); state.clearDeferred(base)
@@ -464,6 +465,7 @@ public enum Pipeline {
 
             deps.onPhase?(.transcribing)
             var result = try await deps.transcribe(wavPath, transcribeConfig)
+            var channelLabelled = false   // owner is SPEAKER_00 by construction (ChannelSpeakerLabeller)
             // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
             // other case (mono source, a silent channel, no word timings) keeps the engine's own labels.
             // Two sides cannot describe a call of three or more people (the remote side is several voices): then the
@@ -472,6 +474,7 @@ public enum Pipeline {
             if transcribeConfig.channelSpeakers, expectedPeople <= 2, let ch = await deps.stereoChannels(path),
                let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
                 result = relabelled
+                channelLabelled = true
             }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
@@ -541,7 +544,10 @@ public enum Pipeline {
             if let calendarStart = calendarMatch?.recordingStart { noteDate = calendarStart }
             else { noteDate = await noteStart(for: path, deps: deps) }
             var context = NoteContext(
-                noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
+                noteOwner: config.noteOwner,
+                // Channel labels put the owner (left, microphone) on SPEAKER_00 whatever label the owner typed
+                // for the diariser's numbering.
+                userSpeaker: channelLabelled ? "SPEAKER_00" : config.userSpeaker,
                 participants: participants, meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
@@ -554,6 +560,10 @@ public enum Pipeline {
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            // Key moments (#2950) are the owner's own live markers: they belong in every note, also the
+            // transcript-only one below.
+            let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
+                segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // #4015 (opt-in): film/TV audio or a solo memo is not a meeting. Not-a-meeting gets a short transcript-only
             // note; one voice gets the memo template. A participants sheet always means "meeting".
             if config.summarise.nonMeetingGuard {
@@ -566,7 +576,10 @@ public enum Pipeline {
                         enabled: config.summarise.actionItems)
                 case .notAMeeting(let reason):
                     let note = composeNote(
-                        body: MeetingShapeGate.notAMeetingNote(reason: reason, transcript: clean), footer: "", meta: nil,
+                        body: Self.keepingLiveCapture(
+                            MeetingShapeGate.notAMeetingNote(reason: reason, transcript: clean),
+                            scratchpad: context.scratchpad, keyMoments: keyMoments),
+                        footer: "", meta: nil,
                         config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
                         cleanTranscript: clean, dominantCode: dominantCode,
                         existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
@@ -585,8 +598,6 @@ public enum Pipeline {
                 context.summaryNotes.append(TruncationCheck.banner)
                 print("[Distavo] " + TruncationCheck.logLine(lastSegmentEnd: timed.segments.last?.end ?? 0, audioSeconds: audio))
             }
-            let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
-                segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.
@@ -714,7 +725,8 @@ public enum Pipeline {
             rememberTitle(noteMeta, config: config, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             var message = "note written"
-            if config.compactRecordingsAfterNote, variant == nil,
+            // Compaction makes the take mono; with channel speakers on, a reprocess needs the stereo original.
+            if config.compactRecordingsAfterNote, variant == nil, !transcribeConfig.channelSpeakers,
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }
@@ -955,6 +967,29 @@ public enum Pipeline {
     }
 
     /// Prefer a typed error's human message over the default struct description.
+    /// A transcript-only note still carries what the owner captured live: typed Quick Notes (as Highlights) and
+    /// Key moments markers. Neither depends on the model, so neither may vanish with the summary.
+    static func keepingLiveCapture(_ body: String, scratchpad: ScratchpadNotes?, keyMoments: String) -> String {
+        var out = body
+        if let pad = scratchpad { out = pad.ensureHighlights(in: out) }
+        return RecordingBookmarks.appending(keyMoments, to: out)
+    }
+
+    /// True for a conversion failure that says nothing about the file itself (cancelled, offline volume, disk full,
+    /// permission): it must stay retryable and never count towards the terminal `.unreadable` state (#5283).
+    static func isTransientConvertFailure(_ error: Error) -> Bool {
+        if error is CancellationError || error is URLError { return true }
+        let ns = error as NSError
+        if ns.domain == NSCocoaErrorDomain {
+            return [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError,
+                    NSFileLockingError, NSUserCancelledError].contains(ns.code)
+        }
+        if ns.domain == NSPOSIXErrorDomain {
+            return [ENOSPC, EACCES, EPERM, EBUSY, EINTR, EAGAIN, EDQUOT, EIO].contains(Int32(ns.code))
+        }
+        return false
+    }
+
     static func cleanMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "\(error)"
     }

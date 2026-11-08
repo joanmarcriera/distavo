@@ -451,7 +451,9 @@ public enum Pipeline {
                     // transcribe truncated audio (and no second failure would ever be counted).
                     try? FileManager.default.removeItem(at: wavPath)
                     let terminal: Bool
-                    if error is CancellationError {
+                    if error is CancellationError || Self.isMachineLevelConvertFailure(error) {
+                        // Cancelled, or the machine's problem (disk full, permission): never the file's fault, so it
+                        // is never counted towards a terminal state however often it recurs.
                         terminal = false
                     } else if Self.isTransientConvertFailure(error) {
                         terminal = state.recordTransientConvertFailure(base, message: message, fileSize: size)
@@ -1020,6 +1022,23 @@ public enum Pipeline {
         if transient { return true }
         // AVFoundation / AudioToolbox wrap the real cause one level down.
         if let under = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isTransientConvertFailure(under) }
+        return false
+    }
+
+    /// True when the machine, not the recording, is at fault (disk full, quota, permission): such a failure is
+    /// retried at every launch and never counted toward `.unreadable` (the cap is for offline volumes and the like).
+    static func isMachineLevelConvertFailure(_ error: Error) -> Bool {
+        let ns = error as NSError
+        switch ns.domain {
+        case NSCocoaErrorDomain:
+            if [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError].contains(ns.code) { return true }
+        case NSPOSIXErrorDomain:
+            if [ENOSPC, EACCES, EDQUOT].contains(Int32(ns.code)) { return true }
+        case NSOSStatusErrorDomain:
+            if ns.code == -34 { return true }
+        default: break
+        }
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isMachineLevelConvertFailure(under) }
         return false
     }
 

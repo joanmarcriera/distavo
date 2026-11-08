@@ -112,7 +112,7 @@ final class DriveDFindingsTests: XCTestCase {
     /// A transient failure is retried per launch, but not for ever: the fifth in a row is terminal.
     func testTransientConvertFailureBecomesTerminalAtTheCap() async throws {
         let (input, cfg) = try env()
-        let d = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        let d = failingDeps(URLError(.timedOut))
         for n in 1...4 {
             let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
             XCTAssertEqual(r.status, .failed)
@@ -127,13 +127,13 @@ final class DriveDFindingsTests: XCTestCase {
     /// A successful conversion in between resets the run, so scattered hiccups never add up.
     func testSuccessfulConversionResetsTheTransientCount() async throws {
         let (input, cfg) = try env()
-        let bad = failingDeps(CocoaError(.fileWriteOutOfSpace))
+        let bad = failingDeps(URLError(.timedOut))
         var good = bad
         good.convertToWav = { _, dest in
             try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
             try Data([0]).write(to: dest)
         }
-        good.transcribe = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }   // convert succeeds, a later stage fails
+        good.transcribe = { _, _ in throw URLError(.timedOut) }   // convert succeeds, a later stage fails
         for _ in 0..<4 { _ = await Pipeline.processOne(path: input, config: cfg, deps: bad, stableChecks: 1, stableDelay: 0) }
         _ = await Pipeline.processOne(path: input, config: cfg, deps: good, stableChecks: 1, stableDelay: 0)
         for _ in 0..<4 { _ = await Pipeline.processOne(path: input, config: cfg, deps: bad, stableChecks: 1, stableDelay: 0) }
@@ -212,6 +212,20 @@ final class DriveDFindingsTests: XCTestCase {
         XCTAssertNotEqual(r.status, .failed)
         let base = DistavoState.baseFor(recordingsDir: URL(fileURLWithPath: cfg.recordingsDir), path: input)
         XCTAssertFalse(try store(cfg).isFailed(base))
+    }
+
+    /// Drive 1246 (LOW): a full disk or a permission refusal is the machine's problem, not the file's: however many
+    /// launches hit it, the recording never becomes terminal ("replace the file" would be wrong advice).
+    func testMachineLevelFailuresNeverMakeAFileTerminal() async throws {
+        for error in [CocoaError(.fileWriteOutOfSpace) as Error, NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))] {
+            let (input, cfg) = try env()
+            for _ in 0..<(DistavoState.Store.transientFailureCap + 2) {
+                let r = await Pipeline.processOne(path: input, config: cfg, deps: failingDeps(error), stableChecks: 1, stableDelay: 0)
+                XCTAssertFalse(r.message.contains("not retried again"), r.message)
+                try store(cfg).retryFailed()
+            }
+            XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "\(error)")
+        }
     }
 
     /// A replaced file (different size) starts a fresh count, and the menu's retry clears it.

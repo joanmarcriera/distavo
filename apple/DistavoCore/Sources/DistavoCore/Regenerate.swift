@@ -209,7 +209,8 @@ extension Pipeline {
         // Speakers renamed after transcription (#2944): the transcript carries the
         // new names, so the owner's label and the participants hint follow them.
         let renamed = SpeakerNames.regenerateContext(
-            userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
+            userSpeaker: TranscriptMeta.load(workDir: workDir, base: base)?.ownerSpeaker ?? cfg.userSpeaker,   // channel-labelled: SPEAKER_00
+            participants: participants, workDir: workDir, base: base)
         let resolvedTemplate = regenerateTemplate(
             options: options, config: cfg, workDir: workDir, sourceBase: sourceBase, sourcePath: sourcePath,
             participants: renamed.participants, transcript: transcript)

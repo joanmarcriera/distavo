@@ -510,7 +510,8 @@ public enum Pipeline {
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.
-            TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
+            TranscriptMeta.store(dominant: dominantCode, ownerSpeaker: channelLabelled ? "SPEAKER_00" : nil,
+                                 workDir: workDir, base: base)
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
             var timedForNote: TranscriptSegments?   // tracked terms / duration (#2954)

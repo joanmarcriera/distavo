@@ -56,8 +56,8 @@ public enum TranscriptionCorrections {
         for pair in parse(section) {
             for heard in pair.heard where heard.count >= 2 && heard.lowercased() != pair.corrected.lowercased() {
                 guard occurs(heard, in: transcript) else { continue }
-                let h = replace(heard, with: pair.corrected, in: head)
-                let t = replace(heard, with: pair.corrected, in: tail)
+                let h = replaceOutsideHighlights(heard, with: pair.corrected, in: head)
+                let t = replaceOutsideHighlights(heard, with: pair.corrected, in: tail)
                 if h.changed || t.changed {
                     head = h.text
                     tail = t.text
@@ -122,6 +122,28 @@ public enum TranscriptionCorrections {
     /// Replaces `term` outside protected spans and outside existing occurrences of `new`, so `heard "Starling"` ->
     /// `"Starling Bank"` does not turn an already-correct "Starling Bank" into "Starling Bank Bank".
     /// Idempotent on its own output.
+    /// `replace` over a body, skipping any "Highlights" section: those lines are the owner's own typed Quick Notes
+    /// (`ScratchpadNotes`) and are never rewritten. A section runs from its heading to the next heading.
+    private static func replaceOutsideHighlights(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
+        var chunks: [(lines: [String], isProtected: Bool)] = [([], false)]
+        for line in text.components(separatedBy: "\n") {
+            if isHeading(line) {
+                chunks.append(([line], line.lowercased().contains("highlight")))
+            } else {
+                chunks[chunks.count - 1].lines.append(line)
+            }
+        }
+        var changed = false
+        let parts = chunks.map { chunk -> String in
+            let joined = chunk.lines.joined(separator: "\n")
+            if chunk.isProtected { return joined }
+            let r = replace(term, with: new, in: joined)
+            changed = changed || r.changed
+            return r.text
+        }
+        return (parts.joined(separator: "\n"), changed)
+    }
+
     private static func replace(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
         guard let re = regex(term) else { return (text, false) }
         var changed = false

@@ -37,6 +37,28 @@ final class TranscriptionCorrectionsTests: XCTestCase {
         XCTAssertEqual(r.applied.map(\.corrected), ["Acme Banc", "PAYE", "Starling"])
     }
 
+    /// Drive 1246 (LOW): the owner's typed Quick Notes ride under "## Highlights" verbatim; a correction must not
+    /// rewrite what the owner wrote themselves, while the rest of the body is still corrected.
+    func testOwnersHighlightsAreNeverRewritten() {
+        let withHighlights = """
+        ## Executive summary
+        Open Acme Bank first.
+
+        ## Highlights
+        - Ask about the Acme Bank card
+
+        ## Decisions
+        - Open Acme Bank first.
+
+        ## Possible transcription corrections
+        - heard "Acme Bank", probably "Acme Banc"
+        """
+        let r = TranscriptionCorrections.apply(withHighlights, transcript: transcript)
+        XCTAssertTrue(r.text.contains("- Ask about the Acme Bank card"), r.text)
+        XCTAssertTrue(r.text.contains("Open Acme Banc first."), r.text)
+        XCTAssertFalse(r.text.contains("- Open Acme Bank first."), r.text)
+    }
+
     /// Review 2026-11-07: a corrected form that contains the heard term must not be extended twice, and a second
     /// pass over the output must change nothing.
     func testCorrectedFormContainingHeardTermIsNotDoubled() {

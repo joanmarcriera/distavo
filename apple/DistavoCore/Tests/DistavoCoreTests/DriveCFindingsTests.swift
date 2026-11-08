@@ -100,15 +100,15 @@ final class DriveCFindingsTests: XCTestCase {
 
     private final class Box: @unchecked Sendable { var context: NoteContext? }
 
-    private func channelRun(userSpeaker: String) async throws -> (NoteContext?, Int, URL) {
+    private func channelRun(userSpeaker: String, flag: Bool = true, channels: StereoChannels? = nil) async throws -> (NoteContext?, Int, URL) {
         let (_, input, c) = try env()
         var cfg = c
-        cfg.transcribe.channelSpeakers = true
+        cfg.transcribe.channelSpeakers = flag
         cfg.userSpeaker = userSpeaker
         cfg.compactRecordingsAfterNote = true
         let box = Box()
         let result = engineResult()
-        let chans = stereo()
+        let chans = channels ?? stereo()
         let d = PipelineDeps(
             convertToWav: { _, dest in
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -118,7 +118,7 @@ final class DriveCFindingsTests: XCTestCase {
             ollamaReachable: { _ in true },
             summarise: { _, _, _, ctx in box.context = ctx; return PipelineTests.validNote },
             audioDurationSeconds: { _ in nil },
-            stereoChannels: { _ in chans })
+            stereoChannels: { _ in flag || channels != nil ? chans : nil })
         let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(r.status, .done, r.message)
         let size = (try FileManager.default.attributesOfItem(atPath: input.path)[.size] as? Int) ?? -1
@@ -135,5 +135,64 @@ final class DriveCFindingsTests: XCTestCase {
     func testCompactionKeepsTheStereoTakeWhileChannelSpeakersIsOn() async throws {
         let (_, size, _) = try await channelRun(userSpeaker: "unknown")
         XCTAssertEqual(size, 4000, "the original recording must stay untouched")
+    }
+
+    /// Controls: with the flag off nothing about the owner label or compaction changes.
+    func testFlagOffKeepsConfiguredSpeakerAndStillCompacts() async throws {
+        let (ctx, size, _) = try await channelRun(userSpeaker: "SPEAKER_01", flag: false)
+        XCTAssertEqual(ctx?.userSpeaker, "SPEAKER_01")
+        XCTAssertEqual(size, 1, "compaction still happens when channel speakers is off")
+    }
+
+    /// Flag on but the source is mono (no stereo take to protect): configured label stays, compaction still happens.
+    func testFlagOnButMonoSourceKeepsLabelAndStillCompacts() async throws {
+        let (_, input, c) = try env()
+        var cfg = c
+        cfg.transcribe.channelSpeakers = true
+        cfg.userSpeaker = "SPEAKER_01"
+        cfg.compactRecordingsAfterNote = true
+        let box = Box()
+        let result = engineResult()
+        let d = PipelineDeps(
+            convertToWav: { _, dest in
+                try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data([0]).write(to: dest)
+            },
+            transcribe: { _, _ in result }, ollamaReachable: { _ in true },
+            summarise: { _, _, _, ctx in box.context = ctx; return PipelineTests.validNote },
+            audioDurationSeconds: { _ in nil }, stereoChannels: { _ in nil })
+        let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done, r.message)
+        XCTAssertEqual(box.context?.userSpeaker, "SPEAKER_01")
+        XCTAssertEqual((try FileManager.default.attributesOfItem(atPath: input.path)[.size] as? Int) ?? -1, 1)
+    }
+
+    // MARK: transient classification
+
+    func testTransientClassification() {
+        XCTAssertTrue(Pipeline.isTransientConvertFailure(CancellationError()))
+        XCTAssertTrue(Pipeline.isTransientConvertFailure(CocoaError(.fileWriteOutOfSpace)))
+        XCTAssertTrue(Pipeline.isTransientConvertFailure(NSError(domain: NSOSStatusErrorDomain, code: -34)))
+        let wrapped = NSError(domain: "AVFoundationErrorDomain", code: -11800,
+                              userInfo: [NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))])
+        XCTAssertTrue(Pipeline.isTransientConvertFailure(wrapped), "the cause one level down counts")
+        // The file's own problems stay countable towards .unreadable.
+        XCTAssertFalse(Pipeline.isTransientConvertFailure(NSError(domain: NSPOSIXErrorDomain, code: Int(EIO))))
+        XCTAssertFalse(Pipeline.isTransientConvertFailure(NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))))
+        XCTAssertFalse(Pipeline.isTransientConvertFailure(URLError(.cannotDecodeContentData)))
+        XCTAssertFalse(Pipeline.isTransientConvertFailure(URLError(.zeroByteResource)))
+        XCTAssertFalse(Pipeline.isTransientConvertFailure(AudioConverterError("no audio track found")))
+    }
+
+    /// Control: a genuine, identical, non-transient failure twice still becomes terminal.
+    func testGenuineFailureTwiceStillGoesUnreadable() async throws {
+        let (_, input, cfg) = try env()
+        var d = deps()
+        d.convertToWav = { _, _ in throw Boom(m: "demo.wav: no audio track found.") }
+        for _ in 0..<2 { _ = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0) }
+        let store = try DistavoState.Store(
+            stateDir: URL(fileURLWithPath: cfg.workDir).appendingPathComponent(".state"),
+            notesDir: URL(fileURLWithPath: cfg.notesDir))
+        XCTAssertEqual(store.unreadableBases().count, 1)
     }
 }

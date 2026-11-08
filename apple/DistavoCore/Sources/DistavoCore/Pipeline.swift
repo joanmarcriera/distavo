@@ -466,15 +466,18 @@ public enum Pipeline {
             deps.onPhase?(.transcribing)
             var result = try await deps.transcribe(wavPath, transcribeConfig)
             var channelLabelled = false   // owner is SPEAKER_00 by construction (ChannelSpeakerLabeller)
+            var stereoNeeded = false      // a stereo original that a reprocess would read again
             // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
             // other case (mono source, a silent channel, no word timings) keeps the engine's own labels.
             // Two sides cannot describe a call of three or more people (the remote side is several voices): then the
             // diariser's labels stay. Auto (0) counts the people the participants sheet names.
             let expectedPeople = max(transcribeConfig.numSpeakers, SpeakerHints.suggestedCount(hints?.participants) ?? 0)
-            if transcribeConfig.channelSpeakers, expectedPeople <= 2, let ch = await deps.stereoChannels(path),
-               let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
-                result = relabelled
-                channelLabelled = true
+            if transcribeConfig.channelSpeakers, expectedPeople <= 2, let ch = await deps.stereoChannels(path) {
+                stereoNeeded = true
+                if let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
+                    result = relabelled
+                    channelLabelled = true
+                }
             }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
@@ -726,7 +729,7 @@ public enum Pipeline {
             state.markDone(base)
             var message = "note written"
             // Compaction makes the take mono; with channel speakers on, a reprocess needs the stereo original.
-            if config.compactRecordingsAfterNote, variant == nil, !transcribeConfig.channelSpeakers,
+            if config.compactRecordingsAfterNote, variant == nil, !stereoNeeded,
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }
@@ -966,7 +969,6 @@ public enum Pipeline {
         return failures.contains { $0.hasPrefix("summary is empty") || $0.hasPrefix("summary is truncated") }
     }
 
-    /// Prefer a typed error's human message over the default struct description.
     /// A transcript-only note still carries what the owner captured live: typed Quick Notes (as Highlights) and
     /// Key moments markers. Neither depends on the model, so neither may vanish with the summary.
     static func keepingLiveCapture(_ body: String, scratchpad: ScratchpadNotes?, keyMoments: String) -> String {
@@ -978,18 +980,31 @@ public enum Pipeline {
     /// True for a conversion failure that says nothing about the file itself (cancelled, offline volume, disk full,
     /// permission): it must stay retryable and never count towards the terminal `.unreadable` state (#5283).
     static func isTransientConvertFailure(_ error: Error) -> Bool {
-        if error is CancellationError || error is URLError { return true }
+        if error is CancellationError { return true }
         let ns = error as NSError
-        if ns.domain == NSCocoaErrorDomain {
-            return [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError,
-                    NSFileLockingError, NSUserCancelledError].contains(ns.code)
+        let transient: Bool
+        switch ns.domain {
+        case NSURLErrorDomain:
+            transient = [NSURLErrorCancelled, NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost,
+                         NSURLErrorNotConnectedToInternet, NSURLErrorCannotConnectToHost].contains(ns.code)
+        case NSCocoaErrorDomain:
+            transient = [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError,
+                         NSFileLockingError, NSUserCancelledError].contains(ns.code)
+        case NSPOSIXErrorDomain:
+            // EIO and EPERM are deliberately absent: a bad sector or a permanent refusal is the file's problem.
+            transient = [ENOSPC, EACCES, EBUSY, EINTR, EAGAIN, EDQUOT].contains(Int32(ns.code))
+        case NSOSStatusErrorDomain:
+            transient = ns.code == -34   // dskFulErr
+        default:
+            transient = false
         }
-        if ns.domain == NSPOSIXErrorDomain {
-            return [ENOSPC, EACCES, EPERM, EBUSY, EINTR, EAGAIN, EDQUOT, EIO].contains(Int32(ns.code))
-        }
+        if transient { return true }
+        // AVFoundation / AudioToolbox wrap the real cause one level down.
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isTransientConvertFailure(under) }
         return false
     }
 
+    /// Prefer a typed error's human message over the default struct description.
     static func cleanMessage(_ error: Error) -> String {
         (error as? LocalizedError)?.errorDescription ?? "\(error)"
     }

@@ -4,7 +4,7 @@ import XCTest
 final class StateTests: XCTestCase {
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavocore-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
@@ -158,7 +158,7 @@ final class StateTests: XCTestCase {
     // MARK: newestNote
 
     private func notesDirWith(_ files: [(String, TimeInterval)]) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory
+        let dir = TestTemp.root
             .appendingPathComponent("distavo-notes-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         for (name, ageSeconds) in files {
@@ -192,7 +192,7 @@ final class StateTests: XCTestCase {
     // MARK: failedBases
 
     private func freshStore() throws -> DistavoState.Store {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-failed-\(UUID().uuidString)")
         return try DistavoState.Store(stateDir: root.appendingPathComponent(".state"),
                                       notesDir: root.appendingPathComponent("notes"))
@@ -320,7 +320,7 @@ final class StateTests: XCTestCase {
 
 final class SpeakerHintsTests: XCTestCase {
     func testRoundTripAndEmptyDetection() throws {
-        let work = FileManager.default.temporaryDirectory
+        let work = TestTemp.root
             .appendingPathComponent("distavo-hints-\(UUID().uuidString)")
         XCTAssertNil(SpeakerHints.load(workDir: work, base: "x"))
         let hints = SpeakerHints(count: 2, participants: "A — host; B (me) — guest")

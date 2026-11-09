@@ -7,7 +7,7 @@ import XCTest
 final class NotesReviewFixTests: XCTestCase {
 
     private func tmp(_ name: String) -> URL {
-        let u = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(name)-\(UUID().uuidString)")
+        let u = TestTemp.root.appendingPathComponent("distavo-\(name)-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }

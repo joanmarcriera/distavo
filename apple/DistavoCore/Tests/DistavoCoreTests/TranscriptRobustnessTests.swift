@@ -52,7 +52,7 @@ final class TranscriptRobustnessTests: XCTestCase {
     }
 
     func testLoadSanitisesHandEditedSidecar() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("rob-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("rob-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let json = #"{"version":1,"segments":[{"start":1e300,"end":1e301,"text":"x"},{"start":1,"end":2,"text":"ok"}]}"#
@@ -86,7 +86,7 @@ final class TranscriptRobustnessTests: XCTestCase {
     // MARK: Stale sidecar
 
     private func env() throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-stale-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-stale-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")
@@ -116,7 +116,7 @@ final class TranscriptRobustnessTests: XCTestCase {
 
     /// Regenerate (#2947) does not re-transcribe, so the timed transcript must survive it.
     func testRegenerateKeepsTheSidecar() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-regsc-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-regsc-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
         cfg.notesDir = root.appendingPathComponent("notes").path

@@ -158,7 +158,7 @@ final class VocabularyTests: XCTestCase {
     }
 
     func testPipelineUsesVariantTranscribeConfigForGlossary() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-vocab-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")
@@ -195,7 +195,7 @@ final class VocabularyTests: XCTestCase {
     // MARK: Timed sidecar (#2943)
 
     private func runWithTimedResult(replacements: [ReplacementRule]) async throws -> (TranscriptSegments, String?) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-side-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-vocab-side-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")
@@ -258,7 +258,7 @@ final class VocabularyTests: XCTestCase {
     // MARK: Regenerate and the custom instruction (#2947)
 
     func testRegenerateCarriesGlossaryButDoesNotReapplyReplacements() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-regen-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-vocab-regen-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
         cfg.notesDir = root.appendingPathComponent("notes").path
@@ -395,7 +395,7 @@ final class VocabularyTests: XCTestCase {
     // MARK: WhisperX request
 
     private func whisperXQuery(vocabulary: [String]) async throws -> String {
-        let wav = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString).wav")
+        let wav = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString).wav")
         try Data([0, 1]).write(to: wav)
         defer { try? FileManager.default.removeItem(at: wav) }
         let box = QueryBox()
@@ -431,7 +431,7 @@ final class VocabularyTests: XCTestCase {
     /// glossary reaches the summary prompt; the transcriber stub also proves
     /// the vocabulary arrives through the config seam.
     func testMisheardTermIsFixedInTranscriptAndPrompt() async throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vocab-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-vocab-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")

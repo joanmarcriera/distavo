@@ -30,7 +30,7 @@ final class StoredZipWriterTests: XCTestCase {
         z.add(name: "word/document.xml", data: Data("<w:document>é ü 日本</w:document>".utf8))
         z.add(name: "empty.txt", data: Data())
         z.add(name: "[Content_Types].xml", data: Data(repeating: 0x41, count: 5000))
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("zip-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("zip-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let zip = dir.appendingPathComponent("t.zip")

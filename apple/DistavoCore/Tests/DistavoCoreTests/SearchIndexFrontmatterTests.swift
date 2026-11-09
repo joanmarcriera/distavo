@@ -4,7 +4,7 @@ import XCTest
 /// Vikunja #2954 x #2942: a note with YAML frontmatter must not pollute search titles or snippets.
 final class SearchIndexFrontmatterTests: XCTestCase {
     private func env() throws -> (SearchIndex, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("search-fm-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("search-fm-\(UUID().uuidString)")
         let notes = root.appendingPathComponent("notes")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         return (SearchIndex(url: root.appendingPathComponent("support/i.sqlite")), notes)

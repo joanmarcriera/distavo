@@ -7,7 +7,7 @@ final class VocabularyUsageTests: XCTestCase {
     }
 
     func testRecordAndStale() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("vu-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("vu-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         let old = Date(timeIntervalSince1970: 1_700_000_000)
         VocabularyUsage.record(terms: ["ERP", "Slurm"], transcript: "parlem de l'ERP", workDir: dir, now: old)

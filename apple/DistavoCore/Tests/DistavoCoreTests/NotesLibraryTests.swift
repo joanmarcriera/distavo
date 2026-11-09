@@ -6,7 +6,7 @@ final class NotesLibraryTests: XCTestCase {
     private let utc = TimeZone(identifier: "UTC")!
 
     private func tempDirs() -> (notes: URL, work: URL) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-noteslib-\(UUID().uuidString)")
         let notes = root.appendingPathComponent("notes")
         let work = root.appendingPathComponent("work")

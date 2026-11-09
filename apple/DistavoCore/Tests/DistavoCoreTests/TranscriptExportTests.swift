@@ -43,7 +43,7 @@ final class TranscriptExportTests: XCTestCase {
     }
 
     func testSaveLoadRoundTrip() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("seg-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("seg-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         XCTAssertNil(TranscriptSegments.load(workDir: dir, base: "m"))
         try sample().save(workDir: dir, base: "m@bsc-ca")
@@ -146,7 +146,7 @@ final class TranscriptExportTests: XCTestCase {
 
     func testDocxIsAValidZipWithSpeakerLabels() throws {
         let data = TranscriptDocument.docx(sample(), title: "Weekly <sync>")
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("t-\(UUID().uuidString).docx")
+        let file = TestTemp.root.appendingPathComponent("t-\(UUID().uuidString).docx")
         try data.write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
 
@@ -172,7 +172,7 @@ final class TranscriptExportTests: XCTestCase {
 
     func testDocxStripsIllegalXMLControlCharacters() throws {
         let t = TranscriptSegments(segments: [S(start: 0, end: 1, text: "bad\u{0001}char", speaker: "A")])
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("c-\(UUID().uuidString).docx")
+        let file = TestTemp.root.appendingPathComponent("c-\(UUID().uuidString).docx")
         try TranscriptDocument.docx(t, title: "x").write(to: file)
         defer { try? FileManager.default.removeItem(at: file) }
         let xml = try run("/usr/bin/unzip", ["-p", file.path, "word/document.xml"]).output

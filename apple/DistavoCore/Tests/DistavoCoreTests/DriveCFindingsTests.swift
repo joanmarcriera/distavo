@@ -7,7 +7,7 @@ final class DriveCFindingsTests: XCTestCase {
     private struct Boom: Error, LocalizedError { let m: String; var errorDescription: String? { m } }
 
     private func env() throws -> (root: URL, input: URL, cfg: Config) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-c-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-c-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.wav")

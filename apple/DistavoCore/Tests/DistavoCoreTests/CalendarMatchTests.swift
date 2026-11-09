@@ -22,7 +22,7 @@ final class CalendarMatchTests: XCTestCase {
                              calendarIDs: ids, ownerName: owner)
     }
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-cal-\(UUID().uuidString)")
+        let url = TestTemp.root.appendingPathComponent("distavo-cal-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

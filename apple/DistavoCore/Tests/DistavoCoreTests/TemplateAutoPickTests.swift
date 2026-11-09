@@ -73,7 +73,7 @@ final class TemplateAutoPickTests: XCTestCase {
     // MARK: Footer
 
     func testPipelineFooterNamesTheAutoChoice() async throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         var cfg = Config()
         cfg.recordingsDir = dir.appendingPathComponent("rec").path

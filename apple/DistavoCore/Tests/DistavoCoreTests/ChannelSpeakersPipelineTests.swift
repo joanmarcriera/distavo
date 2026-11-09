@@ -63,7 +63,7 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
     /// still labels correctly.
     func testReadStreamsAnEnvelopeNotEverySample() throws {
         let s = stereo()
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ch-\(UUID().uuidString).wav")
+        let url = TestTemp.root.appendingPathComponent("ch-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: url) }
         let fmt = try XCTUnwrap(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sr, channels: 2, interleaved: false))
         let buf = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(s.left.count)))
@@ -167,7 +167,7 @@ final class ChannelSpeakersPipelineTests: XCTestCase {
     }
 
     private func run(flag: Bool, channels: StereoChannels?, numSpeakers: Int = 0, participants: String? = nil) async throws -> [String] {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-ch-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-ch-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")

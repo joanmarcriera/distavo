@@ -39,7 +39,7 @@ final class RegenerateTests: XCTestCase {
 
     private func makeEnv(transcript: String? = "SPEAKER_00: hello there",
                          note: String? = "# Meeting notes\n\nOLD NOTE BODY") throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-regen-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
@@ -263,7 +263,7 @@ final class RegenerateTests: XCTestCase {
     }
 
     private func processOneEnv(language: String = "auto") throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-meta-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-meta-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")

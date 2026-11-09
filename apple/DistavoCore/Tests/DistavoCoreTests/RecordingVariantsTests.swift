@@ -4,7 +4,7 @@ import XCTest
 /// Vikunja #2201: sibling-discovery for the "Compare two models" window.
 final class RecordingVariantsTests: XCTestCase {
     private func tempDirs() -> (notes: URL, work: URL) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-variants-\(UUID().uuidString)")
         let notes = root.appendingPathComponent("notes")
         let work = root.appendingPathComponent("work")

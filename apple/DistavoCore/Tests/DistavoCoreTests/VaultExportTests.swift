@@ -71,7 +71,7 @@ final class VaultExportTests: XCTestCase {
     // MARK: file system
 
     private func env() throws -> (note: URL, work: URL, vault: URL, root: URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-vault-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-vault-\(UUID().uuidString)")
         let fm = FileManager.default
         for d in ["notes", "work", "vault"] { try fm.createDirectory(at: root.appendingPathComponent(d), withIntermediateDirectories: true) }
         let note = root.appendingPathComponent("notes/demo.md")

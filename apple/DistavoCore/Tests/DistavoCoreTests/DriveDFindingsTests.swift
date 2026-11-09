@@ -12,7 +12,7 @@ final class DriveDFindingsTests: XCTestCase {
     }
 
     private func env() throws -> (input: URL, cfg: Config) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-d-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-d-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.wav")
@@ -94,7 +94,7 @@ final class DriveDFindingsTests: XCTestCase {
     }
 
     func testTranscriptMetaRoundTripsOwnerWithoutLanguage() {
-        let work = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-d-meta-\(UUID().uuidString)")
+        let work = TestTemp.root.appendingPathComponent("distavo-d-meta-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         TranscriptMeta.store(dominant: nil, ownerSpeaker: "SPEAKER_00", workDir: work, base: "b")
         let m = TranscriptMeta.load(workDir: work, base: "b")

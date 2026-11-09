@@ -31,7 +31,7 @@ final class PipelineTests: XCTestCase {
         "of decisions made and outstanding risks that require follow-up before the next session."
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-pipe-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

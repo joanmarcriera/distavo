@@ -6,7 +6,7 @@ import XCTest
 final class RecordingBookmarksTests: XCTestCase {
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-marks-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

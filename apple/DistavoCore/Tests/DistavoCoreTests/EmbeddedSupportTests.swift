@@ -229,7 +229,7 @@ final class EmbeddedSupportTests: XCTestCase {
     }
 
     func testLoadUsesFreshDefaultsOnlyWhenFileMissing() throws {
-        let dir = FileManager.default.temporaryDirectory
+        let dir = TestTemp.root
             .appendingPathComponent("distavo-test-\(UUID().uuidString)")
         let url = dir.appendingPathComponent("watcher-config.json")
         defer { try? FileManager.default.removeItem(at: dir) }

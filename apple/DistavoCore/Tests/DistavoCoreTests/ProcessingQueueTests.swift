@@ -297,7 +297,7 @@ final class ProcessingQueueTests: XCTestCase {
     }
 
     private func tempEnv(files: [String]) throws -> (Config, DistavoState.Store, URL) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-queue-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)

@@ -5,7 +5,7 @@ import XCTest
 final class EngineFallbackTests: XCTestCase {
 
     private func env() throws -> (Config, URL, DistavoState.Store) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-fallback-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)

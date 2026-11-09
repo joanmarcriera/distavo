@@ -23,7 +23,7 @@ final class PipelineFootprintTests: XCTestCase {
 
     func testRepeatedProcessingDoesNotGrowFootprint() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["DISTAVO_LIVE"] == "1", "set DISTAVO_LIVE=1")
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-foot-" + UUID().uuidString)
+        let root = TestTemp.root.appendingPathComponent("distavo-foot-" + UUID().uuidString)
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: root) }

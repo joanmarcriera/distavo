@@ -10,7 +10,7 @@ final class AskNotesTests: XCTestCase {
     private var work: URL!
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("ask-\(UUID().uuidString)")
+        root = TestTemp.root.appendingPathComponent("ask-\(UUID().uuidString)")
         notes = root.appendingPathComponent("notes"); work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)

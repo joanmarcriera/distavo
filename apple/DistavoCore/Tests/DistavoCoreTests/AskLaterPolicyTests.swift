@@ -30,7 +30,7 @@ final class AskLaterPolicyTests: XCTestCase {
     }
 
     func testPersistsAcrossRelaunch() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("asklater-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("asklater-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let e = AskLaterPolicy.start(base: "Meeting_x", choice: .minutes(60), now: t0)

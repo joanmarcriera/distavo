@@ -18,7 +18,7 @@ final class SpeakerRenameTests: XCTestCase {
 
     private func env(note: String? = nil, transcript: String? = nil, segments: TranscriptSegments? = nil)
         throws -> (notes: URL, work: URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-rename-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-rename-\(UUID().uuidString)")
         let notes = root.appendingPathComponent("notes"), work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)

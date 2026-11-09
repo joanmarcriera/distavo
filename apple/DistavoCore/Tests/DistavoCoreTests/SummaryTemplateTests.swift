@@ -221,7 +221,7 @@ final class SummaryTemplateTests: XCTestCase {
     // MARK: Sidecar
 
     func testSidecarRoundTripAndOldSidecarsDecodeUnchanged() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-tpl-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("distavo-tpl-\(UUID().uuidString)")
         try LanguageOverride(template: "interview").save(workDir: dir, base: "b")
         let loaded = LanguageOverride.load(workDir: dir, base: "b")
         XCTAssertEqual(loaded?.template, "interview")      // template-only sidecar is kept

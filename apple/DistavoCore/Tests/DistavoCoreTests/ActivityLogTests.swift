@@ -4,7 +4,7 @@ import XCTest
 final class ActivityLogTests: XCTestCase {
 
     private func tempLog() -> URL {
-        FileManager.default.temporaryDirectory
+        TestTemp.root
             .appendingPathComponent("distavo-log-\(UUID().uuidString)")
             .appendingPathComponent("distavo.log")
     }

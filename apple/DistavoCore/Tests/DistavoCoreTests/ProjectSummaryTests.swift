@@ -82,7 +82,7 @@ final class ProjectSummaryTests: XCTestCase {
 final class ProjectSummaryRunTests: XCTestCase {
     private var notes: URL!
     override func setUpWithError() throws {
-        notes = FileManager.default.temporaryDirectory.appendingPathComponent("ps-\(UUID().uuidString)")
+        notes = TestTemp.root.appendingPathComponent("ps-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         try "Budget of 40 units agreed.".write(to: notes.appendingPathComponent("A.md"), atomically: true, encoding: .utf8)
         try "Delay of 3 weeks.".write(to: notes.appendingPathComponent("B.md"), atomically: true, encoding: .utf8)

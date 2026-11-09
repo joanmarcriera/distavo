@@ -12,7 +12,7 @@ final class UnreadableRecordingTests: XCTestCase {
     }
 
     private func makeEnv() throws -> (Config, URL, DistavoState.Store) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-unreadable-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)

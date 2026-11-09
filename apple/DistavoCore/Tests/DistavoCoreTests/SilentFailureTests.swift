@@ -5,7 +5,7 @@ import XCTest
 /// "propagate" there. Each test pins a failure that used to be swallowed (`try?`) and now shows up.
 final class SilentFailureTests: XCTestCase {
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavocore-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

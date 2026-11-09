@@ -9,7 +9,7 @@ final class TrailingSilenceTests: XCTestCase {
     private var dir: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-trail-\(UUID().uuidString)")
+        dir = TestTemp.root.appendingPathComponent("distavo-trail-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }

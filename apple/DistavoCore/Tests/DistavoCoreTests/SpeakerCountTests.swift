@@ -38,7 +38,7 @@ final class SpeakerCountTests: XCTestCase {
         let kept = try JSONDecoder().decode(TranscribeConfig.self, from: Data(#"{"num_speakers": 3}"#.utf8))
         XCTAssertEqual(kept.numSpeakers, 3, "a saved value is kept")
 
-        let wav = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString).wav")
+        let wav = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString).wav")
         try Data([0, 1, 2, 3]).write(to: wav)
         defer { try? FileManager.default.removeItem(at: wav) }
         let session = MockURLProtocol.session { req in

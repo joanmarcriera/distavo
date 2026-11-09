@@ -98,7 +98,7 @@ final class SummaryTemplateReviewTests: XCTestCase {
     // MARK: 5. Regenerate with a template
 
     private func env() throws -> (Config, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-regtpl-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-regtpl-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
         cfg.notesDir = root.appendingPathComponent("notes").path

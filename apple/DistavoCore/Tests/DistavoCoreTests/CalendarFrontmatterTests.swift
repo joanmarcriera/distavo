@@ -7,7 +7,7 @@ import XCTest
 final class CalendarFrontmatterTests: XCTestCase {
 
     private func tmp() -> URL {
-        let u = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-calfm-\(UUID().uuidString)")
+        let u = TestTemp.root.appendingPathComponent("distavo-calfm-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
         return u
     }

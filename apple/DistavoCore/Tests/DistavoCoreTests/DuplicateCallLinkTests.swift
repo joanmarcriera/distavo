@@ -6,7 +6,7 @@ final class DuplicateCallLinkTests: XCTestCase {
     let t0 = Date(timeIntervalSince1970: 1_800_000_000)
     var dir: URL!
     override func setUp() {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("dcl-\(UUID().uuidString)")
+        dir = TestTemp.root.appendingPathComponent("dcl-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }

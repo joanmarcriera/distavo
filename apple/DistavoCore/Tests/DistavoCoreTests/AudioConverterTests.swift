@@ -6,7 +6,7 @@ final class AudioConverterTests: XCTestCase {
 
     /// Write a short stereo 44.1 kHz float WAV with a sine tone, returning its URL.
     private func makeSourceWav() throws -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-src-\(UUID().uuidString).wav")
         let format = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 2)!
         let frames = AVAudioFrameCount(44100 / 4)  // 0.25s
@@ -29,7 +29,7 @@ final class AudioConverterTests: XCTestCase {
     func testConvertProducesMono16kPCM() async throws {
         let src = try makeSourceWav()
         defer { try? FileManager.default.removeItem(at: src) }
-        let dst = FileManager.default.temporaryDirectory
+        let dst = TestTemp.root
             .appendingPathComponent("distavo-out-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: dst) }
 
@@ -47,7 +47,7 @@ final class AudioConverterTests: XCTestCase {
     /// microphone, right = system audio). `seconds` long at `rate`.
     private func makeOneSidedFile(ext: String, toneChannel: Int, rate: Double = 48000,
                                   seconds: Double = 1, settings: [String: Any]? = nil) throws -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-side-\(UUID().uuidString).\(ext)")
         let format = AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2)!
         let frames = AVAudioFrameCount(rate * seconds)
@@ -78,7 +78,7 @@ final class AudioConverterTests: XCTestCase {
     }
 
     private func tempOut() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("distavo-out-\(UUID().uuidString).wav")
+        TestTemp.root.appendingPathComponent("distavo-out-\(UUID().uuidString).wav")
     }
 
     func testFilePathProducesMono16kOfTheRightLength() throws {
@@ -121,7 +121,7 @@ final class AudioConverterTests: XCTestCase {
 
     /// Full-scale sound on both sides clips instead of wrapping around.
     func testFilePathClipsInsteadOfWrapping() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-loud-\(UUID().uuidString).wav")
+        let url = TestTemp.root.appendingPathComponent("distavo-loud-\(UUID().uuidString).wav")
         let format = AVAudioFormat(standardFormatWithSampleRate: 16000, channels: 2)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16000)!
         buffer.frameLength = 16000
@@ -147,7 +147,7 @@ final class AudioConverterTests: XCTestCase {
 
     /// Something AVAudioFile cannot open is handed to the asset reader, not failed.
     func testFilePathDeclinesWhatItCannotOpen() throws {
-        let junk = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-junk-\(UUID().uuidString).mov")
+        let junk = TestTemp.root.appendingPathComponent("distavo-junk-\(UUID().uuidString).mov")
         try Data("not audio".utf8).write(to: junk)
         defer { try? FileManager.default.removeItem(at: junk) }
         XCTAssertFalse(try AudioConverter.convertWithAudioFile(source: junk, dest: tempOut()))

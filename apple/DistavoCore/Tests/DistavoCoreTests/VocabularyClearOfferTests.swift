@@ -6,7 +6,7 @@ import XCTest
 final class VocabularyClearOfferTests: XCTestCase {
     private var dir: URL!
     override func setUp() {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("vco-\(UUID().uuidString)")
+        dir = TestTemp.root.appendingPathComponent("vco-\(UUID().uuidString)")
     }
     override func tearDown() { try? FileManager.default.removeItem(at: dir) }
 

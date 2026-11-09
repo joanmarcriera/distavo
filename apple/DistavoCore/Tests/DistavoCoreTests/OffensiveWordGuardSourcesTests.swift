@@ -8,7 +8,7 @@ final class OffensiveWordGuardSourcesTests: XCTestCase {
     private let slur = ["n", "i", "g", "g", "e", "r"].joined()   // rebuilt so the repository does not contain it
 
     func testAskBlocksAreGuardedForAnOldTranscriptAndNote() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("guard-ask-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("guard-ask-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let notes = root.appendingPathComponent("notes"), work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
@@ -28,7 +28,7 @@ final class OffensiveWordGuardSourcesTests: XCTestCase {
 
     /// Summarise together reads old notes straight into its prompt (Sonnet review of this lane's fix).
     func testProjectSummarySourcesAreGuarded() throws {
-        let notes = FileManager.default.temporaryDirectory.appendingPathComponent("guard-proj-\(UUID().uuidString)")
+        let notes = TestTemp.root.appendingPathComponent("guard-proj-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: notes) }
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         try "# Meeting notes\n\nMarc wrote \(slur)s plugins; \(slur) again.\n"
@@ -40,7 +40,7 @@ final class OffensiveWordGuardSourcesTests: XCTestCase {
 
     /// Ask across all notes reads passages from the search index, which may have been built before the guard.
     func testLibraryAskPassagesAreGuarded() {
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("guard-pack-\(UUID().uuidString)")
+        let tmp = TestTemp.root.appendingPathComponent("guard-pack-\(UUID().uuidString)")
         let p = SearchPassage(path: "/x/old.md", base: "old", title: "Old", kind: .note,
                               text: "Marc wrote \(slur)s plugins; \(slur) again.")
         let out = AskNotes.pack([p], budget: 2000, notesDir: tmp, workDir: tmp)

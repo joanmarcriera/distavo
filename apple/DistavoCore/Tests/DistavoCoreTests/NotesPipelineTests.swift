@@ -16,7 +16,7 @@ final class NotesPipelineTests: XCTestCase {
     private let recordingName = "Meeting 2026-10-05 10.00.00.opus"
 
     private func env(_ tweak: (inout Config) -> Void = { _ in }) throws -> (Config, URL, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-notes-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-notes-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent(recordingName)
@@ -165,7 +165,7 @@ final class NotesPipelineTests: XCTestCase {
     // MARK: regenerate
 
     private func regenEnv(note: String) throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-notes-regen-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-notes-regen-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
         cfg.notesDir = root.appendingPathComponent("notes").path

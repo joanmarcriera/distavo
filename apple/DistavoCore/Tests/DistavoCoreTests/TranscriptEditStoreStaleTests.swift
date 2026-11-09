@@ -4,7 +4,7 @@ import XCTest
 /// Vikunja #2951: save/revert refuse when the files changed after the viewer loaded them.
 final class TranscriptEditStoreStaleTests: XCTestCase {
     func testSaveAndRevertRefuseWhenDiskChangedSinceLoad() throws {
-        let work = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-stale-\(UUID().uuidString)")
+        let work = TestTemp.root.appendingPathComponent("distavo-stale-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)
         let t = TranscriptSegments(segments: [.init(start: 0, end: 1, text: "hello", speaker: "A")])
         try t.save(workDir: work, base: "d")

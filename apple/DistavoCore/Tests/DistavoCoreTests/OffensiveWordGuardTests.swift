@@ -74,7 +74,7 @@ final class OffensiveWordGuardTests: XCTestCase {
     }
 
     func testGuardReportRoundTripAndWarning() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("guard-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("guard-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         XCTAssertEqual(GuardReport.load(workDir: dir, base: "m"), 0)

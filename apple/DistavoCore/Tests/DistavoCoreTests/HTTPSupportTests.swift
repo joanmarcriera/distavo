@@ -43,7 +43,7 @@ final class HTTPSupportTests: XCTestCase {
     // MARK: shared-HTTP failure modes through WhisperXClient (MockURLProtocol)
 
     private func tempWav() throws -> URL {
-        let u = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString).wav")
+        let u = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString).wav")
         try Data([0, 1, 2, 3]).write(to: u)
         return u
     }

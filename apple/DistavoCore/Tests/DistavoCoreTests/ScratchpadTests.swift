@@ -6,7 +6,7 @@ import CryptoKit
 final class ScratchpadTests: XCTestCase {
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-pad-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

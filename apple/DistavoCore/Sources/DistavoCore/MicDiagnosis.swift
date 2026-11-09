@@ -8,8 +8,8 @@ import Foundation
 // here opens System Settings: `.openMicrophoneSettings` is an action the user clicks (#4022).
 
 public enum MicDiagnosis {
-    public enum Permission: Sendable { case granted, denied, undetermined }
-    public enum Cause: Equatable, Sendable { case permissionDenied, permissionNotAsked, inputMuted, noInputDevice, unknown }
+    public enum Permission: Sendable { case granted, denied, undetermined, restricted }
+    public enum Cause: Equatable, Sendable { case permissionDenied, permissionNotAsked, permissionRestricted, inputMuted, noInputDevice, unknown }
     public enum Action: Equatable, Sendable { case openMicrophoneSettings, switchInput, ignore }
 
     public struct Result: Equatable, Sendable {
@@ -25,6 +25,11 @@ public enum MicDiagnosis {
             return Result(cause: .permissionDenied,
                           message: "Distavo may not use the microphone. Allow it in System Settings, then restart the recording.",
                           actions: [.openMicrophoneSettings, .ignore])
+        }
+        if permission == .restricted {
+            return Result(cause: .permissionRestricted,
+                          message: "Microphone access is restricted on this Mac (parental controls or a managed profile), so Distavo cannot use it.",
+                          actions: [.ignore])
         }
         if permission == .undetermined {
             return Result(cause: .permissionNotAsked,
@@ -42,7 +47,7 @@ public enum MicDiagnosis {
                           actions: [.switchInput, .ignore])
         }
         return Result(cause: .unknown,
-                      message: "Nothing is coming in from \u{201C}\(device)\u{201D}. Is it switched on, or is another input meant?",
+                      message: "Nothing is coming in from \u{201C}\(device)\u{201D}. Is it muted, switched on, or is another input meant?",
                       actions: [.switchInput, .openMicrophoneSettings, .ignore])
     }
 }

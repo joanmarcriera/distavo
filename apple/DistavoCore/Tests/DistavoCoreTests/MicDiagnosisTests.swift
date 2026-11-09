@@ -45,3 +45,15 @@ final class MicDiagnosisTests: XCTestCase {
         XCTAssertEqual(MicDiagnosis.diagnose(permission: .granted, inputName: "  ", inputMuted: false).cause, .noInputDevice)
     }
 }
+
+final class MicDiagnosisRestrictedTests: XCTestCase {
+    func testRestrictedAccessDoesNotTellTheUserToAllowIt() {
+        let r = MicDiagnosis.diagnose(permission: .restricted, inputName: "Boya", inputMuted: false)
+        XCTAssertEqual(r.cause, .permissionRestricted)
+        XCTAssertFalse(r.actions.contains(.openMicrophoneSettings))
+    }
+    func testUnknownCauseStillMentionsMuting() {
+        let r = MicDiagnosis.diagnose(permission: .granted, inputName: "Boya", inputMuted: false)
+        XCTAssertTrue(r.message.contains("muted"))
+    }
+}

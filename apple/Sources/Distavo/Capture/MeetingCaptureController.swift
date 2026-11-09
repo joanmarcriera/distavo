@@ -471,6 +471,7 @@ final class MeetingCaptureController: ObservableObject {
             switch AVCaptureDevice.authorizationStatus(for: .audio) {
             case .authorized: permission = .granted
             case .notDetermined: permission = .undetermined
+            case .restricted: permission = .restricted
             default: permission = .denied
             }
             let diagnosis = MicDiagnosis.diagnose(permission: permission, inputName: liveInputName, inputMuted: false)

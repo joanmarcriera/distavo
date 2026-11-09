@@ -466,9 +466,16 @@ final class MeetingCaptureController: ObservableObject {
 
         if micLevelCheck.ingest(mic: levels.mic, system: levels.system) {
             log("Warning: microphone silent for the first \(micLevelCheck.window) s while the call is audible")
+            // Say WHY when we can tell (permission / which input), per MicDiagnosis (#3930).
+            let permission: MicDiagnosis.Permission
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized: permission = .granted
+            case .notDetermined: permission = .undetermined
+            default: permission = .denied
+            }
+            let diagnosis = MicDiagnosis.diagnose(permission: permission, inputName: liveInputName, inputMuted: false)
             notify("Your microphone is silent",
-                   "The other side is coming through, but nothing is reaching the microphone. "
-                   + "Check it is not muted, the right input is selected, and Distavo has microphone access.")
+                   "The other side is coming through, but nothing is reaching the microphone. " + diagnosis.message)
         }
 
         applyMicFallback(levels: levels, recorder: recorder)

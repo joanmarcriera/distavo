@@ -263,6 +263,44 @@ final class SummaryDriverTests: XCTestCase {
         XCTAssertTrue(gen.prompts.isEmpty)
     }
 
+    // MARK: Degrade instead of failing (Vikunja #5284)
+
+    /// Dense text (digits, Catalan, names) costs more real tokens than the
+    /// 3-chars-per-token heuristic: the planner says "one pass", the tokenizer
+    /// says the prompt does not fit. The recording must be summarised in parts,
+    /// not failed for good.
+    func testDenseTranscriptTheHeuristicUndercountsIsChunkedNotFailed() async throws {
+        let measure: @Sendable (String) -> Int? = { Int(ceil(Double($0.count) / 2.0)) }
+        let plain = EmbeddedSummaryBudget.final(contextSize: 4096, noteOwner: "Marc", userSpeaker: "SPEAKER_00")
+        let text = String(transcript(chars: 6000).prefix(Int(Double(plain.transcriptTokens) * 3.0) - 20))
+        XCTAssertEqual(EmbeddedSummaryPlanner.plan(transcript: text, contextSize: 4096, noteOwner: "Marc",
+                                                   userSpeaker: "SPEAKER_00"), .single,
+                       "precondition: the heuristic thinks this fits one pass")
+        let gen = FakeGenerator(contextSize: 4096, tokenCount: measure)
+        let note = try await SummaryDriver.run(request(text), generator: gen)
+        XCTAssertTrue(note.hasPrefix("# Meeting notes"))
+        XCTAssertGreaterThanOrEqual(gen.prompts.count, 2, "map step(s) then the final note")
+        XCTAssertTrue(gen.prompts.first?.hasPrefix("You are reading ONE PART") ?? false)
+        // Every prompt actually sent fits the window with room for an answer.
+        for (prompt, out) in zip(gen.prompts, gen.maxTokens) {
+            XCTAssertLessThanOrEqual(measure(prompt)! + out + EmbeddedSummaryBudget.defaultSafetyMargin, 4096)
+        }
+        // Nothing of the transcript was dropped on the way into the map steps.
+        let mapped = gen.prompts.dropLast().joined()
+        for line in text.split(separator: "\n") { XCTAssertTrue(mapped.contains(line), "lost: \(line)") }
+    }
+
+    /// When the INSTRUCTIONS alone do not fit, chunking cannot help: the
+    /// original error stands and nothing is generated.
+    func testInstructionOverflowStillThrowsWithoutGenerating() async {
+        let gen = FakeGenerator(contextSize: 4096, tokenCount: { $0.count > 200 ? 4000 : 10 })
+        do {
+            _ = try await SummaryDriver.run(request(transcript(chars: 3_000)), generator: gen)
+            XCTFail("expected promptTooLong")
+        } catch { XCTAssertEqual(error as? SummaryDriverError, .promptTooLong(measured: 4000, contextSize: 4096)) }
+        XCTAssertTrue(gen.prompts.isEmpty)
+    }
+
     // MARK: Errors
 
     func testContextTooSmallThrows() async {

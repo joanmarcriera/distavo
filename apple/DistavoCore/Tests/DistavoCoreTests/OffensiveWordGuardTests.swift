@@ -24,7 +24,7 @@ final class OffensiveWordGuardTests: XCTestCase {
     }
     /// Wider monitoring vocabulary (#3951): more words after, and a sibling tool right before or after.
     func testWiderToolContextBecomesNagios() {
-        for tail in ["scripts", "alerts", "dashboard", "config", "style checks", "and Icinga", "or CheckMK", "XI"] {
+        for tail in ["plugin", "checks", "core", "and Icinga", "or CheckMK", "XI"] {
             let r = OffensiveWordGuard.apply("we ran \(slur) \(tail) there")
             XCTAssertEqual(r.text, "we ran Nagios \(tail) there", tail)
             XCTAssertEqual(r.flagged, 1, tail)
@@ -32,6 +32,15 @@ final class OffensiveWordGuardTests: XCTestCase {
         for head in ["Icinga and", "Zabbix or", "CheckMK,", "Checkmk vs"] {
             let r = OffensiveWordGuard.apply("we compared \(head) \(slur) yesterday")
             XCTAssertEqual(r.text, "we compared \(head) Nagios yesterday", head)
+        }
+    }
+    /// A sentence or line break, or a generic English word, must never turn a slur into "Nagios".
+    func testContextDoesNotCrossBreaksOrGenericWords() {
+        for text in ["a \(slur). Config is", "\(slur)\n\nHost of the show", "\(slur) based on race",
+                     "\(slur) style", "\(slur). Core values", "Zabbix. \(slur) x", "Prometheus \(slur)"] {
+            let r = OffensiveWordGuard.apply(text)
+            XCTAssertFalse(r.text.contains("Nagios"), text)
+            XCTAssertTrue(r.text.contains(OffensiveWordGuard.placeholder), text)
         }
     }
     func testNoContextStillRemoved() {

@@ -39,12 +39,16 @@ public struct SpeakerHints: Codable, Equatable {
         for raw in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "\n" }) {
             var piece = String(raw)
             if let open = piece.firstIndex(of: "("), let close = piece[open...].firstIndex(of: ")") {
-                // "(accountant for Example Ltd)": a role is not a name, only the organisation after "for" is.
-                // Only split on "for" when what precedes it is a role, so "Centre for Computational Biology" stays whole.
+                // "(accountant for Example Ltd)", "(CEO of Acme)", "(accountant at X)": a role is not a name, only
+                // the organisation after the joining word is. Only split when what precedes it is a role, so
+                // "Centre for Computational Biology" and "Bank of England" stay whole.
                 var inner = String(piece[piece.index(after: open)..<close])
-                if let r = inner.range(of: " for ", options: .caseInsensitive),
-                   Self.isRole(String(inner[..<r.lowerBound])) {
-                    inner = String(inner[r.upperBound...])
+                for joiner in [" for ", " of ", " at "] {
+                    if let r = inner.range(of: joiner, options: .caseInsensitive),
+                       Self.isRole(String(inner[..<r.lowerBound])) {
+                        inner = String(inner[r.upperBound...])
+                        break
+                    }
                 }
                 if !inner.trimmingCharacters(in: .whitespaces).isEmpty, !Self.isRole(inner) { terms.append(inner) }
                 piece.removeSubrange(open...close)

@@ -60,4 +60,12 @@ final class RoleTermPacksTests: XCTestCase {
         XCTAssertEqual(SpeakerHints(participants: "Sam (Accountant For Acme Ltd)").participantTerms, ["Acme Ltd", "Sam"])
         XCTAssertEqual(SpeakerHints(participants: "Sam (CFO), Pat (the accountant)").participantTerms, ["Sam", "Pat"])
     }
+
+    /// h-chain review 2026-11-09: "(CEO of Acme)" opens with a role word, so the whole term was dropped and
+    /// "Acme" (seeded on main) was lost. "of" and "at" after a role give the organisation, like "for".
+    func testRoleOfOrAtOrganisationKeepsTheOrganisation() {
+        XCTAssertEqual(SpeakerHints(participants: "Sam (CEO of Acme)").participantTerms, ["Acme", "Sam"])
+        XCTAssertEqual(SpeakerHints(participants: "Pat (accountant at Example Ltd)").participantTerms, ["Example Ltd", "Pat"])
+        XCTAssertEqual(SpeakerHints(participants: "Kim (Bank of England)").participantTerms, ["Bank of England", "Kim"])
+    }
 }

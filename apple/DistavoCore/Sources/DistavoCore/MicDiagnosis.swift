@@ -9,7 +9,7 @@ import Foundation
 
 public enum MicDiagnosis {
     public enum Permission: Sendable { case granted, denied, undetermined }
-    public enum Cause: Equatable, Sendable { case permissionDenied, inputMuted, noInputDevice, unknown }
+    public enum Cause: Equatable, Sendable { case permissionDenied, permissionNotAsked, inputMuted, noInputDevice, unknown }
     public enum Action: Equatable, Sendable { case openMicrophoneSettings, switchInput, ignore }
 
     public struct Result: Equatable, Sendable {
@@ -24,6 +24,11 @@ public enum MicDiagnosis {
         if permission == .denied {
             return Result(cause: .permissionDenied,
                           message: "Distavo may not use the microphone. Allow it in System Settings, then restart the recording.",
+                          actions: [.openMicrophoneSettings, .ignore])
+        }
+        if permission == .undetermined {
+            return Result(cause: .permissionNotAsked,
+                          message: "Microphone access has not been answered yet. Allow it when macOS asks, or in System Settings.",
                           actions: [.openMicrophoneSettings, .ignore])
         }
         guard let device else {

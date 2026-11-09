@@ -419,9 +419,16 @@ public enum Pipeline {
         // packs follow the user's own rules.
         // Names from the participants line are seeded too (#3950).
         // Then the role packs of the participants line (accountant -> UK tax terms, RoleTermPacks).
-        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? []) + (hints?.roleTerms ?? [])
+        // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
+        // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
+        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
+        let roleTerms = hints?.roleTerms ?? []
         if !meetingTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
+        }
+        let fuzzyTerms = transcribeConfig.vocabulary
+        if !roleTerms.isEmpty {
+            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + roleTerms)
         }
         transcribeConfig.replacements = transcribeConfig.effectiveReplacements
         // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
@@ -495,9 +502,9 @@ public enum Pipeline {
             }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
-            if transcribeConfig.fuzzyVocabulary, !transcribeConfig.vocabulary.isEmpty {
+            if transcribeConfig.fuzzyVocabulary, !fuzzyTerms.isEmpty {
                 let text = TranscriptCleaner.segments(from: result).map(\.text).joined(separator: " ")
-                transcribeConfig.replacements += FuzzyVocabulary.rules(terms: transcribeConfig.vocabulary, text: text)
+                transcribeConfig.replacements += FuzzyVocabulary.rules(terms: fuzzyTerms, text: text)
             }
             let detectedLanguages = detectedLanguages(from: result)
             // Computed unconditionally (unlike `noteLanguage` below, which

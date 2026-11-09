@@ -31,6 +31,16 @@ final class MicDiagnosisTests: XCTestCase {
         }
     }
 
+    func testUnansweredPermissionIsNamedAsSuch() {
+        let d = MicDiagnosis.diagnose(permission: .undetermined, inputName: "USB Audio", inputMuted: false)
+        XCTAssertEqual(d.cause, .permissionNotAsked)
+        XCTAssertEqual(d.actions, [.openMicrophoneSettings, .ignore])
+    }
+
+    func testDeniedBeatsMuted() {
+        XCTAssertEqual(MicDiagnosis.diagnose(permission: .denied, inputName: "X", inputMuted: true).cause, .permissionDenied)
+    }
+
     func testBlankDeviceNameIsTreatedAsNone() {
         XCTAssertEqual(MicDiagnosis.diagnose(permission: .granted, inputName: "  ", inputMuted: false).cause, .noInputDevice)
     }

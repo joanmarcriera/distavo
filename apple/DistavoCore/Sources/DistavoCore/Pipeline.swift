@@ -701,16 +701,27 @@ public enum Pipeline {
                 let parts = Pipeline.collapseParts(of: clean)
                 if parts.count >= 2 {
                     var partNotes: [String] = []
-                    for part in parts {
-                        guard let note = try? await deps.summarise(part, target, summaryOptions, context),
-                              SummaryValidator.validate(note).isEmpty else { continue }   // a part that fails is skipped
-                        partNotes.append(note)
+                    for (i, part) in parts.enumerated() {
+                        try Task.checkCancellation()
+                        do {
+                            let raw = try await deps.summarise(part, target, summaryOptions, context)
+                            let note = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                            if SummaryValidator.validate(note).isEmpty { partNotes.append(note) }
+                            else { print("[Distavo] part \(i + 1)/\(parts.count) rejected; left out of the merge") }
+                        } catch is CancellationError { throw CancellationError()
+                        } catch let retry as RetryableDependencyError { throw retry
+                        } catch { print("[Distavo] part \(i + 1)/\(parts.count) failed (\(error.localizedDescription)); left out of the merge") }
                     }
                     if !partNotes.isEmpty {
+                        // Kept set through the language check below; every path that still fails returns the fallback.
                         summariseInput = EmbeddedSummaryPrompt.merge(partials: partNotes)
-                        (noteText, failures) = try await summariseAttempt()
-                        collapsed = failures.contains { $0.contains("repetition collapse") }
-                        summariseInput = nil
+                        do {
+                            (noteText, failures) = try await summariseAttempt()
+                        } catch is CancellationError { throw CancellationError()
+                        } catch let retry as RetryableDependencyError { throw retry
+                        } catch { failures = ["merge of part notes failed: \(error.localizedDescription)"] }
+                        // Any failure of the merge keeps the transcript-only note, never a stuck `.failed`.
+                        collapsed = !failures.isEmpty
                     }
                 }
             }
@@ -731,7 +742,7 @@ public enum Pipeline {
                 try fallback.write(to: notePath, atomically: true, encoding: .utf8)
                 state.markDone(base)
                 return ProcessResult(status: .done, base: base,
-                                     message: "note written (transcript only: summary rejected twice: \(reason))"
+                                     message: "note written (transcript only: summary rejected: \(reason))"
                                         + (saveError.map { "; rejected summary could not be saved: \($0)" } ?? ""),
                                      notePath: notePath, transcriptPath: transcriptPath,
                                      detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)

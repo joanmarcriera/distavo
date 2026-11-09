@@ -34,5 +34,5 @@ Task: https://familia.riera.co.uk/tasks/1793 . Background: `docs/embedded-summar
 ## For Marc (needs a Mac with Apple Intelligence; not done unattended)
 
 ```
-cd apple/DistavoCore && DISTAVO_PIPELINE_LIVE=1 DISTAVO_PIPELINE_AUDIO=<recording> DISTAVO_PIPELINE_OUT=<dir> DISTAVO_PIPELINE_OLLAMA=http://127.0.0.1:11434 swift test --filter EmbeddedPipelineLiveTests
+cd apple/DistavoEmbedded && DISTAVO_PIPELINE_LIVE=1 DISTAVO_PIPELINE_AUDIO=<recording> DISTAVO_PIPELINE_OUT=<dir> DISTAVO_PIPELINE_OLLAMA=http://127.0.0.1:11434 swift test --filter EmbeddedPipelineLiveTests
 ```

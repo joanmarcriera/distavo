@@ -846,6 +846,49 @@ final class PipelineTests: XCTestCase {
         XCTAssertFalse(note.contains("No summary:"))
     }
 
+    private func longSegments() -> [[String: Any]] {
+        (0..<400).map { i in
+            ["speaker": "SPEAKER_0\(i % 2)", "start": Double(i) * 5, "end": Double(i) * 5 + 4,
+             "text": "Turn \(i): we talked about item number \(i) and what it means for the plan."]
+        }
+    }
+
+    /// #4011 review: a part that is cancelled or hits a transient outage must not become a permanent transcript-only note.
+    func testChunkedFallbackDoesNotTurnAnOutageIntoADoneNote() async throws {
+        let (cfg, input) = try makeEnv()
+        let segments = longSegments()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    if transcript.count > 12_000 { return repeated }
+                    throw RetryableDependencyError("ollama dropped")
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertNotEqual(result.status, .done, result.message)
+        XCTAssertNotEqual(result.status, .failed, result.message)
+    }
+
+    /// #4011 review: a merge that comes back truncated falls back to the transcript-only note, not a stuck `.failed`.
+    func testChunkedMergeFailureStillWritesTranscriptOnlyNote() async throws {
+        let (cfg, input) = try makeEnv()
+        let segments = longSegments()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    if transcript.count > 12_000 { return repeated }
+                    return transcript.contains("Notes from part") ? "# Meeting notes\n\nShort." : PipelineTests.validNote
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertTrue(result.message.contains("transcript only"), result.message)
+    }
+
     // MARK: Summariser selection
 
     func testChooseSummariserLocalBackend() async {

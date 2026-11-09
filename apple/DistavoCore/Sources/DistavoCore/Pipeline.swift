@@ -637,8 +637,9 @@ public enum Pipeline {
             var noteBody = "", noteFooter = ""
             var languageRetried = false             // #3585: the one retry for a note in the wrong language
             var summaryOptions = config.summarise.options   // #4011: stiffened for the one retry after a repetition collapse
+            var summariseInput: String?             // #4011: the merged part notes on the chunked third attempt
             func summariseAttempt() async throws -> (text: String, failures: [String]) {
-                let raw = try await deps.summarise(clean, target, summaryOptions, context)
+                let raw = try await deps.summarise(summariseInput ?? clean, target, summaryOptions, context)
                 // A rare edge case (the ledger only existed in the discarded
                 // preamble): print rather than writing to the real
                 // ActivityLog file, so a unit test exercising it never
@@ -693,6 +694,25 @@ public enum Pipeline {
                 summaryOptions = Pipeline.stiffened(summaryOptions)
                 (noteText, failures) = try await summariseAttempt()
                 collapsed = failures.contains { $0.contains("repetition collapse") }
+            }
+            // A long take that still loops is summarised part by part, then the part notes are merged (#4011):
+            // each part is short enough that the model has no room to loop on one quote.
+            if collapsed {
+                let parts = Pipeline.collapseParts(of: clean)
+                if parts.count >= 2 {
+                    var partNotes: [String] = []
+                    for part in parts {
+                        guard let note = try? await deps.summarise(part, target, summaryOptions, context),
+                              SummaryValidator.validate(note).isEmpty else { continue }   // a part that fails is skipped
+                        partNotes.append(note)
+                    }
+                    if !partNotes.isEmpty {
+                        summariseInput = EmbeddedSummaryPrompt.merge(partials: partNotes)
+                        (noteText, failures) = try await summariseAttempt()
+                        collapsed = failures.contains { $0.contains("repetition collapse") }
+                        summariseInput = nil
+                    }
+                }
             }
             // Still looping: keep the work. A transcript-only note that says why beats no note and a stuck
             // `.failed` marker; Regenerate can fill the summary in later. The rejected text stays quarantined.
@@ -981,6 +1001,13 @@ public enum Pipeline {
         n.temperature = max(o.temperature, 0.3)
         n.seed = o.seed &+ 1
         return n
+    }
+
+    /// Roughly ten minutes of speech per part (~9,000 characters). Fewer than two parts means the whole
+    /// transcript is already short and chunking cannot help.
+    static let collapsePartTokens = 3000
+    static func collapseParts(of transcript: String) -> [String] {
+        EmbeddedSummaryPlanner.chunks(transcript: transcript, budgetTokens: collapsePartTokens)
     }
 
     /// Body of the fallback note written when the summary collapsed twice (#4011).

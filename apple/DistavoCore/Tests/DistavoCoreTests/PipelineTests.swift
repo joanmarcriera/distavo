@@ -817,6 +817,35 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(calls.count, 2)
     }
 
+    /// #4011: a long recording whose whole-transcript summary loops twice gets a third, chunked attempt
+    /// (one call per ~10-minute part, then one call over the merged part notes) before the transcript-only fallback.
+    func testCollapseOnLongTranscriptFallsBackToChunkedSummary() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let segments: [[String: Any]] = (0..<400).map { i in
+            ["speaker": "SPEAKER_0\(i % 2)", "start": Double(i) * 5, "end": Double(i) * 5 + 4,
+             "text": "Turn \(i): we talked about item number \(i) and what it means for the plan."]
+        }
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    calls.increment()
+                    // The model only loops on the whole transcript; a part or the merged part notes is fine.
+                    return transcript.count > 12_000 ? repeated : PipelineTests.validNote
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertFalse(result.message.contains("transcript only"), result.message)
+        // 2 whole-transcript attempts + at least 2 parts + 1 merge.
+        XCTAssertGreaterThanOrEqual(calls.count, 5)
+        let note = try String(contentsOf: try XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertTrue(note.contains("Executive summary"))
+        XCTAssertFalse(note.contains("No summary:"))
+    }
+
     // MARK: Summariser selection
 
     func testChooseSummariserLocalBackend() async {

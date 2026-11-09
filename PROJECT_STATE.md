@@ -2,6 +2,10 @@
 
 ## Next action (2026-11-09, drive review lane)
 
+- l (`feat/drive-distavo-l-2026-11-09`, from k, on forgejo-work): review of k plus #4010/#3951/#4007 fixes,
+  swift test 1595 / 0 failures; see "Review of k" in `docs/drive-review-2026-11-09.md`. Merge order: j, k, l,
+  after the by-eye checks.
+
 - Read `docs/drive-review-2026-11-09.md`, take decisions A-C, run the by-eye checks, then merge
   `feat/drive-distavo-j-2026-11-09` (contains the whole h chain, lanes d-h) into `main`:
   `git checkout main && git merge --no-ff feat/drive-distavo-j-2026-11-09`. Dry run clean; swift test 1581 / 0 failures.

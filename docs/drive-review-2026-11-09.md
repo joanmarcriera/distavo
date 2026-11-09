@@ -113,3 +113,23 @@ an hour, 397d3fe). Open, low:
    (if enabled) ends it. Wiring #4007 is a separate task.
 4. After the merge, one real recording on the built-in engine: a note is written, and a recording made with the
    microphone covered produces no invented note (#4025).
+
+## Review of k (drive 2026-11-09-0758, distavo-review lane, branch feat/drive-distavo-l-2026-11-09)
+
+The last six commits of k (397d3fe..0af0d24: #4011 chunked third attempt, transient-failure spacing, #1793 doc)
+read clean: no new finding. swift test on k: its 1584 tests pass (run together with 11 new tests: 1595 executed,
+the only failures were the new red tests). Findings in the chain code for the next tasks, each with a failing test
+first, fixed on l (swift test 1595, 2 skipped, 0 failures; a Sonnet reviewer read the fixes, its 4 narrowings applied):
+
+| # | sev | Finding | Fix |
+|---|-----|---------|-----|
+| 1 | medium | #4010 scrubber deleted a section answered "none" (the prompt asks for "none" under transcription corrections) | 1899634 |
+| 2 | medium | #4010 scrubber deleted any line with "as per the instructions" / "using evidence only" (ordinary English) | 1899634 |
+| 3 | low | #4010 scrubber removed real "### Step 1: Back up the database" headings | 1899634 |
+| 4 | medium | #3951 Regenerate, Ask (note + library) and Summarise together read text cached before the guard: the recording that reported the bug still reached a prompt unmarked | 1aa6bfc |
+| 5 | low | #3951 hyphen/slash tool forms (open low #10 above) | 1aa6bfc |
+| 6 | medium | #4007 MeetingEndPolicy stopped 60 s after Record when the call was not joined yet (a free mic read as an ended call) | 4f06035 |
+
+Open, low: Regenerate does not write `<base>.guard.json`, so the Notes window does not warn for an old recording
+whose regenerated summary was guarded in memory; transcript export and viewer of an old recording are unguarded; a
+model that paraphrases the speaker instruction with "using evidence only" now leaks that line.

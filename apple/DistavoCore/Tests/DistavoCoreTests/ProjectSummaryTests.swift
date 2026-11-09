@@ -69,6 +69,20 @@ final class ProjectSummaryTests: XCTestCase {
         XCTAssertGreaterThan(r.calls, 2)                         // several maps + one merge
     }
 
+    /// #6070 (Codex bugs P2): the merge prompt must itself fit the window; many ~900-token
+    /// partials are reduced in bounded batches, never concatenated into one prompt.
+    func testMergePromptsStayWithinTheWindow() async throws {
+        let notes = (0..<10).map { ProjectSource(name: "n\($0)", body: String(repeating: "word ", count: 1500)) }
+        let partial = "- " + String(repeating: "x ", count: 1700) + "[[n0]]"   // ~900 tokens
+        var mergeTokens: [Int] = []
+        _ = try await ProjectSummary.summarise(notes, title: "P", contextSize: 4096) { p, _ in
+            if p.contains("Merge these partial summaries") { mergeTokens.append(EmbeddedSummaryTokens.estimate(p)) }
+            return partial
+        }
+        XCTAssertFalse(mergeTokens.isEmpty)
+        for t in mergeTokens { XCTAssertLessThanOrEqual(t + ProjectSummary.outputTokens, 4096, "merge prompt \(t) tokens") }
+    }
+
     func testFileNameAndCompose() {
         XCTAssertEqual(ProjectSummary.fileName(title: "Q1/Launch: plan?"), "Project - Q1 Launch plan.md")
         XCTAssertEqual(ProjectSummary.fileName(title: " . "), "Project - Untitled.md")

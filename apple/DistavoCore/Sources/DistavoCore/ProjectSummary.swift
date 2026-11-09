@@ -135,12 +135,35 @@ public enum ProjectSummary {
         for b in all {
             partials.append(try await complete(mapPrompt(b, title: title), outputTokens)); calls += 1
         }
-        var text = partials.first ?? ""
-        if partials.count > 1 {
-            text = try await complete(mergePrompt(partials: partials, title: title), outputTokens); calls += 1
+        // Reduce in bounded batches (#6070): every merge prompt fits the window, however many partials.
+        let room = max(200, contextSize - instructionTokens - outputTokens - EmbeddedSummaryBudget.defaultSafetyMargin)
+        while partials.count > 1 {
+            var next: [String] = []
+            for group in partialGroups(partials, room: room) {
+                if group.count == 1 { next.append(group[0]); continue }
+                next.append(try await complete(mergePrompt(partials: group, title: title), outputTokens)); calls += 1
+            }
+            partials = next
         }
+        let text = partials.first ?? ""
         let checked = verify(text, sources: sources)
         return Result(markdown: checked.text, droppedLines: checked.dropped, calls: calls)
+    }
+
+    /// Consecutive partials grouped so each group's merge prompt fits `room` tokens. A group has
+    /// at least two members (so every round shrinks the list), and a partial too long for the
+    /// room is shortened.
+    static func partialGroups(_ partials: [String], room: Int) -> [[String]] {
+        let each = max(50, room / 2 - 20)
+        var out: [[String]] = [], cur: [String] = [], used = 0
+        for p in partials {
+            let part = fit(p, tokens: each)
+            let cost = EmbeddedSummaryTokens.estimate(part) + 20
+            if cur.count >= 2 && used + cost > room { out.append(cur); cur = []; used = 0 }
+            cur.append(part); used += cost
+        }
+        if !cur.isEmpty { out.append(cur) }
+        return out
     }
 
     // MARK: Verification

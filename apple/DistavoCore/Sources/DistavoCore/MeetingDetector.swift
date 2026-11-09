@@ -57,6 +57,9 @@ public struct MeetingDetectionConfig: Codable, Equatable, Sendable {
     /// Also watch browsers (Google Meet etc.): offers when a browser captures the
     /// microphone. Off by default, also on fresh installs.
     public var browserDetection: Bool
+    /// Stop a recording 60 s after the call app (or watched browser) that was holding the microphone
+    /// releases it (`MeetingEndPolicy`, Vikunja #4007). Off by default, also on fresh installs.
+    public var stopWhenCallEnds: Bool
 
     public static let snoozeMinutesRange = 1...480
 
@@ -131,8 +134,9 @@ public struct MeetingDetectionConfig: Codable, Equatable, Sendable {
 
     public init(enabled: Bool = false, apps: [String] = MeetingDetectionConfig.defaultApps,
                 snoozeMinutes: Int = 30, allowFrontmostFallback: Bool = false,
-                browserDetection: Bool = false) {
+                browserDetection: Bool = false, stopWhenCallEnds: Bool = false) {
         self.enabled = enabled
+        self.stopWhenCallEnds = stopWhenCallEnds
         self.apps = Self.deduped(apps)
         self.snoozeMinutes = Self.clampSnooze(snoozeMinutes)
         self.allowFrontmostFallback = allowFrontmostFallback
@@ -144,6 +148,7 @@ public struct MeetingDetectionConfig: Codable, Equatable, Sendable {
         case snoozeMinutes = "snooze_minutes"
         case allowFrontmostFallback = "allow_frontmost_fallback"
         case browserDetection = "browser_detection"
+        case stopWhenCallEnds = "stop_when_call_ends"
     }
 
     public init(from decoder: Decoder) throws {
@@ -156,6 +161,7 @@ public struct MeetingDetectionConfig: Codable, Equatable, Sendable {
         snoozeMinutes = Self.clampSnooze((try? c.decodeIfPresent(Int.self, forKey: .snoozeMinutes)).flatMap { $0 } ?? d.snoozeMinutes)
         allowFrontmostFallback = (try? c.decodeIfPresent(Bool.self, forKey: .allowFrontmostFallback)).flatMap { $0 } ?? d.allowFrontmostFallback
         browserDetection = (try? c.decodeIfPresent(Bool.self, forKey: .browserDetection)).flatMap { $0 } ?? d.browserDetection
+        stopWhenCallEnds = (try? c.decodeIfPresent(Bool.self, forKey: .stopWhenCallEnds)).flatMap { $0 } ?? d.stopWhenCallEnds
     }
 
     static func clampSnooze(_ m: Int) -> Int {

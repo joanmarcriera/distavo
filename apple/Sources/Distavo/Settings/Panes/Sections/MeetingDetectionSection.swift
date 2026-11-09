@@ -19,6 +19,8 @@ struct MeetingDetectionSection: View {
                         in: MeetingDetectionConfig.snoozeMinutesRange, step: 5)
                 Toggle("Also watch browsers (Google Meet, calls on the web)", isOn: $model.draft.meetingDetection.browserDetection)
                     .withHelp("Chrome, Safari, Arc, Edge, Firefox, Brave, Vivaldi and Opera. An offer appears when one of them starts using the microphone. Distavo cannot tell which tab, so the offer says only that the browser is using the microphone. Off by default.")
+                Toggle("Stop recording when the call ends", isOn: $model.draft.meetingDetection.stopWhenCallEnds)
+                    .withHelp("When a listed call app (or a watched browser) has been using the microphone during a recording and then releases it for a minute, Distavo stops and saves the recording. The calendar end never stops a recording, so a meeting that overruns is kept whole. A short drop (a reconnect) does not count. If you press Record before joining the call, nothing stops until the call has started and ended. Off by default.")
                 ForEach(model.draft.meetingDetection.apps, id: \.self) { id in
                     HStack {
                         Text(MeetingDetectionConfig.displayName(forBundleID: id))

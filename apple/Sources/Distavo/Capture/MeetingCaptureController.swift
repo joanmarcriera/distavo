@@ -33,6 +33,8 @@ final class MeetingCaptureController: ObservableObject {
         case manual
         /// Stopped by the auto-stop option after this many silent minutes.
         case silence(minutes: Int)
+        /// The call app that held the microphone released it (#4007, `CallEndStop`). Behaves like a manual stop.
+        case callEnded
     }
 
     /// The tap TCC category settled in macOS 14.4 — hide the feature below it.
@@ -56,6 +58,8 @@ final class MeetingCaptureController: ObservableObject {
     let keyMoments = KeyMomentsModel()
 
     private var silenceMonitor: SilenceMonitor?
+    /// Call-end stop (#4007): fed once a second only while `CallEndStop.isArmed`; reset per recording.
+    private var callEndPolicy = CallEndStop.policy()
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
     private var timer: Timer?
     private var startedAt: Date?
@@ -263,6 +267,7 @@ final class MeetingCaptureController: ObservableObject {
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
+        callEndPolicy = CallEndStop.policy()
         log("Meeting recording started → \(recorder.fileURL?.lastPathComponent ?? "?")")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             // A Timer fires from the main run loop, so run the tick in place
@@ -443,6 +448,22 @@ final class MeetingCaptureController: ObservableObject {
         elapsedLabel = String(format: "%d:%02d", seconds / 60, seconds % 60)
         warnIfSystemAudioSilent(after: seconds)
         checkSilence()
+        checkCallEnded(at: ProcessInfo.processInfo.systemUptime)   // monotonic, like the silence monitor
+    }
+
+    /// Once a second, only with meeting detection and `stop_when_call_ends` on (#4007): stop 60 s after the
+    /// call app that was holding the microphone released it. The decision is `MeetingEndPolicy` (pure, in
+    /// DistavoCore); this reads which processes capture the mic (read-only Core Audio metadata, Distavo
+    /// excluded) and stops. A call never seen, or an unreadable capture state, never stops anything.
+    private func checkCallEnded(at now: TimeInterval) {
+        let detection = configProvider().meetingDetection
+        guard isRecording, CallEndStop.isArmed(detection) else { return }
+        let signal = CallEndStop.callActive(capturing: MeetingDetectionController.capturingBundleIDs(),
+                                            config: detection)
+        guard callEndPolicy.observe(now: now, callActive: signal) == .stop else { return }
+        log("The call released the microphone 60 s ago - stopping the recording")
+        notify("Recording stopped", "The call ended, so Distavo stopped and saved the recording.")
+        stop(reason: .callEnded)
     }
 
     /// Once a second: refresh the policy from Settings (changes apply live),

@@ -106,11 +106,14 @@ an hour, 397d3fe). Open, low:
    ⌃⌥⌘R. With another app in front, press it: a recording starts with no questions; press again: it stops and the
    note is processed. Switch it off: the shortcut does nothing. A clash with another app's shortcut must show the
    registration error under the field.
-3. **Call ends before the calendar end (#4007).** `MeetingEndPolicy` is on main but **not wired to the
-   controller** (its header says so), so there is nothing to see yet: today a call that ends early keeps recording
-   until the silence auto-stop (if on) or a manual stop. Check only that: end a Teams/Meet call 10 min before its
-   calendar end and confirm the recording does not stop on its own at the calendar end and that silence auto-stop
-   (if enabled) ends it. Wiring #4007 is a separate task.
+3. **Stop when the call ends (#4007, wired on branch p).** Settings, Recording, Meeting detection: switch on
+   "Offer to record when a call starts" and "Stop recording when the call ends" (both off by default). (a) Press
+   Record, then join a Zoom/Teams call 2 min later: nothing stops before you join. (b) Let the call run past its
+   calendar slot: it keeps recording. (c) Leave the call: about 60 s later a "Recording stopped — The call ended"
+   notification appears, the speakers question shows as for a manual stop, and a note is made. (d) Mute and
+   unmute, or drop the network for under a minute: no stop. (e) Switch the option off mid-recording: no stop.
+   Unknown until this check: whether Teams/Zoom/Meet keep the microphone open while muted (if one releases it,
+   a mute longer than 60 s would stop the recording; the option stays off by default until this is checked).
 4. After the merge, one real recording on the built-in engine: a note is written, and a recording made with the
    microphone covered produces no invented note (#4025).
 

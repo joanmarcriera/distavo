@@ -83,6 +83,29 @@ public enum TranscriptCleaner {
         return out == value ? value : normaliseSpace(out)
     }
 
+    /// Whole-segment phrases Whisper emits on silence (Vikunja #4025): an 80-minute recording with the
+    /// mic in its case came back as "Thank you for watching" ~20 times and "you you you", and the summary
+    /// invented a meeting from it. Compared case- and accent-folded, punctuation dropped, against the
+    /// WHOLE segment, so "Thank you." or "thank you for watching the demo" (real speech) is never touched.
+    static let silencePhrases: Set<String> = [
+        "thank you for watching", "thanks for watching", "thank you so much for watching",
+        "thank you for watching this video", "thanks for watching this video",
+        "please subscribe", "like and subscribe", "please like and subscribe",
+        "gracias por ver", "gracias por ver el video", "gracias por vernos",
+        "gracies per veure", "gracies per veure el video",
+    ]
+
+    /// True when `value` is, as a whole, a stock Whisper silence hallucination: one of
+    /// `silencePhrases`, an Amara.org subtitle credit (any language), or "you" said 3+ times and nothing else.
+    public static func isSilenceHallucination(_ value: String) -> Bool {
+        let folded = value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+        if folded.contains("amara.org") { return true }
+        let words = folded.components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+        guard !words.isEmpty else { return false }
+        if words.count >= 3, words.allSatisfy({ $0 == "you" }) { return true }
+        return silencePhrases.contains(words.joined(separator: " "))
+    }
+
     /// Group consecutive same-speaker turns under one `[SPEAKER_xx]` header,
     /// flushing on speaker change or when a turn would exceed `maxTurnChars`.
     ///
@@ -108,7 +131,7 @@ public enum TranscriptCleaner {
         for segment in segments {
             let speaker = segment.speaker.isEmpty ? "SPEAKER_UNKNOWN" : segment.speaker
             let text = normaliseSpace(stripSoundTags(segment.text))
-            if text.isEmpty { continue }
+            if text.isEmpty || isSilenceHallucination(text) { continue }
             if let cs = currentSpeaker, speaker != cs || currentLen + text.count > maxTurnChars {
                 flush()
             }

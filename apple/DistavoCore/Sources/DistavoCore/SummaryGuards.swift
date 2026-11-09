@@ -384,6 +384,44 @@ public enum SummaryPostProcess {
 /// example — the model copies it (invented names, 4-row ledger).
 public enum EndOfTurnBlock {
 
+    enum RoleLang { case en, ca, es }
+
+    /// The speaker-roles sentence. A known label anchors it to the owner; "unknown" (or empty) must
+    /// NOT read "unknown IS <owner>" (#3857): it asks for evidence instead and never invents an anchor.
+    static func roles(_ lang: RoleLang, ownerSpeaker: String, noteOwner: String) -> String {
+        let label = ownerSpeaker.trimmingCharacters(in: .whitespaces)
+        let known = !label.isEmpty && label.lowercased() != "unknown"
+        switch (lang, known) {
+        case (.en, true):
+            return "SPEAKER ROLES (authoritative): \(ownerSpeaker) IS \(noteOwner), the note owner. "
+                + "Any other speaker is NOT \(noteOwner), even if the word '\(noteOwner)' appears in their turn "
+                + "(it is a greeting addressed to \(noteOwner)). "
+        case (.en, false):
+            return "SPEAKER ROLES: the speaker label of the note owner (\(noteOwner)) is not known. "
+                + "Decide it from evidence in the transcript (self-introduction, who is addressed or offered "
+                + "something); if there is none, do not attribute either speaker's statements to \(noteOwner). "
+                + "The word '\(noteOwner)' in a turn is usually a greeting addressed to \(noteOwner), not the speaker. "
+        case (.ca, true):
+            return "ROLS DELS PARLANTS (autoritatiu): \(ownerSpeaker) ÉS \(noteOwner), el propietari de la nota. "
+                + "Qualsevol altre parlant NO és \(noteOwner), encara que en el seu torn aparegui la paraula "
+                + "'\(noteOwner)' (és una salutació adreçada a \(noteOwner)). "
+        case (.ca, false):
+            return "ROLS DELS PARLANTS: l'etiqueta del propietari de la nota (\(noteOwner)) no es coneix. "
+                + "Dedueix-la de l'evidència de la transcripció (presentació, a qui s'adreça); si no n'hi ha, "
+                + "no atribueixis a \(noteOwner) les paraules de cap parlant. "
+                + "La paraula '\(noteOwner)' en un torn sol ser una salutació adreçada a \(noteOwner). "
+        case (.es, true):
+            return "ROLES DE LOS HABLANTES (autoritativo): \(ownerSpeaker) ES \(noteOwner), el propietario de la nota. "
+                + "Cualquier otro hablante NO es \(noteOwner), aunque en su turno aparezca la palabra "
+                + "'\(noteOwner)' (es un saludo dirigido a \(noteOwner)). "
+        case (.es, false):
+            return "ROLES DE LOS HABLANTES: la etiqueta del propietario de la nota (\(noteOwner)) no se conoce. "
+                + "Dedúcela de la evidencia de la transcripción (presentación, a quién se dirige); si no la hay, "
+                + "no atribuyas a \(noteOwner) las palabras de ningún hablante. "
+                + "La palabra '\(noteOwner)' en un turno suele ser un saludo dirigido a \(noteOwner). "
+        }
+    }
+
     /// `ownerSpeaker` is the known speaker label of the note owner (the app's
     /// `userSpeaker`, e.g. "SPEAKER_00").
     public static func build(
@@ -407,9 +445,7 @@ public enum EndOfTurnBlock {
                     + "amb una cita de com a màxim 12 paraules. "
             }
             s += "No afegeixis cap nota meta al final. "
-                + "ROLS DELS PARLANTS (autoritatiu): \(ownerSpeaker) ÉS \(noteOwner), el propietari de la nota. "
-                + "Qualsevol altre parlant NO és \(noteOwner), encara que en el seu torn aparegui la paraula "
-                + "'\(noteOwner)' (és una salutació adreçada a \(noteOwner)). "
+                + roles(.ca, ownerSpeaker: ownerSpeaker, noteOwner: noteOwner)
             if facts {
                 s += "A '## Speakers' escriu una línia per parlant. "
             }
@@ -429,9 +465,7 @@ public enum EndOfTurnBlock {
                     + "con una cita de como máximo 12 palabras. "
             }
             s += "No añadas ninguna nota meta al final. "
-                + "ROLES DE LOS HABLANTES (autoritativo): \(ownerSpeaker) ES \(noteOwner), el propietario de la nota. "
-                + "Cualquier otro hablante NO es \(noteOwner), aunque en su turno aparezca la palabra "
-                + "'\(noteOwner)' (es un saludo dirigido a \(noteOwner)). "
+                + roles(.es, ownerSpeaker: ownerSpeaker, noteOwner: noteOwner)
             if facts {
                 s += "En '## Speakers' escribe una línea por hablante. "
             }
@@ -456,9 +490,7 @@ public enum EndOfTurnBlock {
                 s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "
             }
             s += "Output nothing after the last section: no notes, self-corrections or commentary. "
-                + "SPEAKER ROLES (authoritative): \(ownerSpeaker) IS \(noteOwner), the note owner. "
-                + "Any other speaker is NOT \(noteOwner), even if the word '\(noteOwner)' appears in their turn "
-                + "(it is a greeting addressed to \(noteOwner)). "
+                + roles(.en, ownerSpeaker: ownerSpeaker, noteOwner: noteOwner)
                 + "In '## Key people and organisations' list ONLY names that appear literally in the transcript "
                 + "(do not infer: 'ChatGPT' does not imply 'OpenAI'); each entry once; if a name looks like a "
                 + "transcription error, put it under '## Possible transcription corrections'."
@@ -500,9 +532,7 @@ public enum EndOfTurnBlock {
             s += "No repeated ledger rows (max 25 unique rows, each fact once, quote at most 12 words). "
         }
         s += "Output nothing after the last section: no notes, self-corrections or commentary. "
-            + "SPEAKER ROLES (authoritative): \(ownerSpeaker) IS \(noteOwner), the note owner. "
-            + "Any other speaker is NOT \(noteOwner), even if the word '\(noteOwner)' appears in their turn "
-            + "(it is a greeting addressed to \(noteOwner)). "
+            + roles(.en, ownerSpeaker: ownerSpeaker, noteOwner: noteOwner)
         if have.contains("key people and organisations") {
             s += "In '## Key people and organisations' list ONLY names that appear literally in the transcript "
                 + "(do not infer: 'ChatGPT' does not imply 'OpenAI'); each entry once. "

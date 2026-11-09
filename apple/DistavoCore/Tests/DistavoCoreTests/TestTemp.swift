@@ -36,7 +36,12 @@ enum TestTemp {
         }
         if let current { return current }
         let dir = base.appendingPathComponent("distavo-test-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        } catch {
+            // Fail here, with the path, rather than later with a confusing "no such file" (review of o).
+            preconditionFailure("TestTemp: cannot create \(dir.path): \(error)")
+        }
         current = dir
         return dir
     }

@@ -16,7 +16,7 @@ public enum OwnerSpeakerLabel {
     /// `configured` when it is a turn label of `transcript` (case-insensitive; returned in the transcript's
     /// spelling), else "unknown". A transcript with no `[Label]` turns at all cannot be checked and keeps `configured`.
     public static func effective(configured: String, transcript: String) -> String {
-        let want = configured.trimmingCharacters(in: .whitespaces)
+        let want = configured.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !want.isEmpty, want.lowercased() != "unknown" else { return "unknown" }
         var labels: [String] = []
         for line in transcript.components(separatedBy: "\n") {

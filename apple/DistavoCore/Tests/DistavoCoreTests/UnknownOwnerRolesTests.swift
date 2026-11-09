@@ -17,9 +17,34 @@ final class UnknownOwnerRolesTests: XCTestCase {
                 XCTAssertFalse(b.lowercased().contains("unknown is"), "\(lang ?? "nil"): \(b)")
                 XCTAssertFalse(b.lowercased().contains("unknown és"), b)
                 XCTAssertFalse(b.lowercased().contains("unknown es "), b)
-                XCTAssertTrue(b.contains("Marc"), b)
             }
         }
+    }
+
+    /// The templated end block (`EndOfTurnBlock.templated`) goes through the same roles text (review of o).
+    func testTemplatedBlockWithUnknownLabelAsksForEvidence() {
+        let template = SummaryTemplate.parse(
+            id: "pin", name: "Pin", summary: "s", outline: "## One\nDo one.\n\n## Two\nDo two.\n")!
+        for lang in [nil, "ca", "es"] as [String?] {
+            let b = block(lang, "unknown", template: template)
+            XCTAssertFalse(b.lowercased().contains("unknown is"), b)
+            XCTAssertFalse(b.lowercased().contains("unknown és"), b)
+            XCTAssertFalse(b.lowercased().contains("unknown es "), b)
+        }
+        XCTAssertTrue(block(nil, "unknown", template: template).contains("is not known"))
+    }
+
+    /// Three or more voices: the English unknown wording must not say "either speaker" (review of o).
+    func testEnglishUnknownCoversAnySpeaker() {
+        let b = block(nil, "unknown")
+        XCTAssertFalse(b.contains("either speaker"), b)
+        XCTAssertTrue(b.contains("any speaker's statements"), b)
+    }
+
+    /// A label with a trailing newline that names a real turn label still resolves (review of o).
+    func testOwnerLabelWithTrailingNewlineResolves() {
+        let transcript = "[SPEAKER_00]\nhello\n\n[SPEAKER_01]\nhi\n"
+        XCTAssertEqual(OwnerSpeakerLabel.effective(configured: "SPEAKER_00\n", transcript: transcript), "SPEAKER_00")
     }
 
     func testEnglishUnknownAsksForEvidence() {

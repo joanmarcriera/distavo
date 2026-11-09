@@ -399,7 +399,7 @@ public enum EndOfTurnBlock {
         case (.en, false):
             return "SPEAKER ROLES: the speaker label of the note owner (\(noteOwner)) is not known. "
                 + "Decide it from evidence in the transcript (self-introduction, who is addressed or offered "
-                + "something); if there is none, do not attribute either speaker's statements to \(noteOwner). "
+                + "something); if there is none, do not attribute any speaker's statements to \(noteOwner). "
                 + "The word '\(noteOwner)' in a turn is usually a greeting addressed to \(noteOwner), not the speaker. "
         case (.ca, true):
             return "ROLS DELS PARLANTS (autoritatiu): \(ownerSpeaker) ÉS \(noteOwner), el propietari de la nota. "

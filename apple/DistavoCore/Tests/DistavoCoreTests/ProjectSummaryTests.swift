@@ -73,7 +73,7 @@ final class ProjectSummaryTests: XCTestCase {
     /// partials are reduced in bounded batches, never concatenated into one prompt.
     func testMergePromptsStayWithinTheWindow() async throws {
         let notes = (0..<10).map { ProjectSource(name: "n\($0)", body: String(repeating: "word ", count: 1500)) }
-        let partial = "- " + String(repeating: "x ", count: 1700) + "[[n0]]"   // ~900 tokens
+        let partial = "- " + String(repeating: "x ", count: 1700) + "[[n0]]"   // ~1100 tokens, above the 900 output cap
         var mergeTokens: [Int] = []
         _ = try await ProjectSummary.summarise(notes, title: "P", contextSize: 4096) { p, _ in
             if p.contains("Merge these partial summaries") { mergeTokens.append(EmbeddedSummaryTokens.estimate(p)) }

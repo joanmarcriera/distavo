@@ -154,7 +154,7 @@ public enum ProjectSummary {
     /// at least two members (so every round shrinks the list), and a partial too long for the
     /// room is shortened.
     static func partialGroups(_ partials: [String], room: Int) -> [[String]] {
-        let each = max(50, room / 2 - 20)
+        let each = max(50, room / 2 - 32)   // 12 tokens for the "shortened" marker
         var out: [[String]] = [], cur: [String] = [], used = 0
         for p in partials {
             let part = fit(p, tokens: each)

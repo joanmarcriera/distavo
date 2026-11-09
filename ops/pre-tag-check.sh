@@ -26,13 +26,14 @@ set -Eeuo pipefail
 # Snapshot every tracked Package.resolved; restore_resolved puts them back byte for byte.
 RESOLVED_SNAP="$(mktemp -d)"
 RESOLVED_FILES=()
+RESOLVED_ROOT="$(git rev-parse --show-toplevel)"   # absolute: the script cds to it later
 while IFS= read -r f; do
   [[ -n "$f" ]] || continue
-  RESOLVED_FILES+=("$f"); mkdir -p "$RESOLVED_SNAP/$(dirname "$f")"; cp -p "$f" "$RESOLVED_SNAP/$f"
-done < <(git ls-files -- '*Package.resolved' 2>/dev/null || true)
+  RESOLVED_FILES+=("$f"); mkdir -p "$RESOLVED_SNAP/$(dirname "$f")"; cp -p "$RESOLVED_ROOT/$f" "$RESOLVED_SNAP/$f"
+done < <(git -C "$RESOLVED_ROOT" ls-files -- '*Package.resolved' 2>/dev/null || true)
 restore_resolved() {
   local f
-  for f in ${RESOLVED_FILES[@]+"${RESOLVED_FILES[@]}"}; do cp -p "$RESOLVED_SNAP/$f" "$f" 2>/dev/null || true; done
+  for f in ${RESOLVED_FILES[@]+"${RESOLVED_FILES[@]}"}; do cp -p "$RESOLVED_SNAP/$f" "$RESOLVED_ROOT/$f" 2>/dev/null || true; done
   rm -rf -- "$RESOLVED_SNAP"
 }
 trap restore_resolved EXIT

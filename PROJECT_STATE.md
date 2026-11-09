@@ -1,5 +1,11 @@
 # Project State
 
+## Next action (2026-11-09, drive review lane)
+
+- Read `docs/drive-review-2026-11-09.md`, take decisions A-C, run the by-eye checks, then merge
+  `feat/drive-distavo-j-2026-11-09` (contains the whole h chain, lanes d-h) into `main`:
+  `git checkout main && git merge --no-ff feat/drive-distavo-j-2026-11-09`. Dry run clean; swift test 1581 / 0 failures.
+
 ## Resume here (2026-10-21)
 
 - **v1.20.0 (build 23) shipped** from `main` @ c7e1f68, tag `v1.20.0` on `origin` (GitHub, primary).

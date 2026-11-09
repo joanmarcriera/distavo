@@ -190,12 +190,19 @@ def setup_price(client: AscClient, app_id: str) -> None:
     if resp.status_code == 200 and resp.json().get("data"):
         print("price schedule: already set")
         return
+    if resp.status_code not in (200, 404):
+        # Fail closed: an auth/server error must not be read as "no schedule yet",
+        # or a re-run could POST a new schedule over a live price.
+        raise SubmitError(f"could not read the price schedule (HTTP {resp.status_code}); "
+                          "not touching the price")
     point = None
     url = (f"{_submit.API_BASE}/v1/apps/{app_id}/appPricePoints"
            f"?filter[territory]=USA&limit=200")
     while url and point is None:
-        page = client.session.get(
-            url, headers={"Authorization": f"Bearer {client._bearer()}"}, timeout=60).json()
+        page_resp = client.session.get(
+            url, headers={"Authorization": f"Bearer {client._bearer()}"}, timeout=60)
+        page_resp.raise_for_status()
+        page = page_resp.json()
         for candidate in page.get("data", []):
             if candidate.get("attributes", {}).get("customerPrice") in (
                     RETAIL_PRICE_USD, RETAIL_PRICE_USD.rstrip("0").rstrip(".")):

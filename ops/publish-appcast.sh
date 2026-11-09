@@ -54,7 +54,8 @@ fi
 
 STAMP="$(date +%Y-%m-%d)"
 echo "==> Backing up the live appcast and uploading"
-ssh "$HOST" "test -f '$DOCROOT/appcast.xml' && cp -a '$DOCROOT/appcast.xml' '$DOCROOT/appcast.xml.bak-$STAMP' || true"
+# A missing live feed is fine (first publish); a failed copy is not, so it aborts.
+ssh "$HOST" "if test -f '$DOCROOT/appcast.xml'; then cp -a '$DOCROOT/appcast.xml' '$DOCROOT/appcast.xml.bak-$STAMP'; fi"
 # Upload beside the target, then rename into place: the live appcast.xml is
 # root-owned (nginx wrote it) so it cannot be opened for writing, but the
 # directory is ours — and unlink/rename needs directory permission, not file

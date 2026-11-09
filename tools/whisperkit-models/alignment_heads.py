@@ -15,6 +15,8 @@ import json
 import sys
 import urllib.request
 
+if len(sys.argv) not in (2, 3) or sys.argv[1] in ("-h", "--help"):
+    sys.exit("usage: alignment_heads.py <local-checkpoint-dir> [openai-base-name]")
 d = sys.argv[1]
 gc_path = f"{d}/generation_config.json"
 gc = json.load(open(gc_path))
@@ -35,7 +37,10 @@ else:
         (4, 384): "tiny", (6, 512): "base", (12, 768): "small", (24, 1024): "medium",
         (32, 1280): "large-v3" if cfg.get("num_mel_bins") == 128 else "large-v2",
         (4, 1280): "large-v3-turbo",
-    }[shape]
+    }.get(shape)
+    if base is None:
+        sys.exit(f"alignment_heads.py: unknown decoder shape {shape}; "
+                 "pass the OpenAI base name as the second argument")
 url = f"https://huggingface.co/openai/whisper-{base}/raw/main/generation_config.json"
 gc["alignment_heads"] = json.load(urllib.request.urlopen(url))["alignment_heads"]
 json.dump(gc, open(gc_path, "w"), indent=2)

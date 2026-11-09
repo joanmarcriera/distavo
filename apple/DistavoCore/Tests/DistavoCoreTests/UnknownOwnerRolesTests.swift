@@ -29,6 +29,12 @@ final class UnknownOwnerRolesTests: XCTestCase {
         XCTAssertTrue(b.contains("evidence"), b)
     }
 
+    func testCatalanAndSpanishUnknownUseTheirOwnLanguage() {
+        XCTAssertTrue(block("ca", "unknown").contains("no es coneix"))
+        XCTAssertTrue(block("es", "unknown").contains("no se conoce"))
+        XCTAssertTrue(block("en", "\n").contains("is not known"))
+    }
+
     func testKnownLabelKeepsTheAuthoritativeSentence() {
         for lang in [nil, "ca", "es", "fr"] as [String?] {
             let b = block(lang, "SPEAKER_00")

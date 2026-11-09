@@ -389,7 +389,7 @@ public enum EndOfTurnBlock {
     /// The speaker-roles sentence. A known label anchors it to the owner; "unknown" (or empty) must
     /// NOT read "unknown IS <owner>" (#3857): it asks for evidence instead and never invents an anchor.
     static func roles(_ lang: RoleLang, ownerSpeaker: String, noteOwner: String) -> String {
-        let label = ownerSpeaker.trimmingCharacters(in: .whitespaces)
+        let label = ownerSpeaker.trimmingCharacters(in: .whitespacesAndNewlines)
         let known = !label.isEmpty && label.lowercased() != "unknown"
         switch (lang, known) {
         case (.en, true):

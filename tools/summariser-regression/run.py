@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Bake-off: Distavo summary prompts x Ollama models on one transcript.
 
-Usage: run.py <model> <variant A|B|C> [note_owner] [user_speaker]
+Usage: run.py <model> <variant A|B|C|D> [note_owner] [user_speaker]
 Writes out/<model>_<variant>.md and appends timing to out/timing.tsv.
 Options mirror Distavo's watcher-config.json (num_ctx 65536, temp 0.1, ...).
 """
@@ -38,6 +38,8 @@ def fill(tpl, transcript, owner, spk):
                .replace("{transcript_text}", transcript))
 
 def main():
+    if len(sys.argv) < 3 or sys.argv[1] in ("-h", "--help"):
+        sys.exit(__doc__)
     model, variant = sys.argv[1], sys.argv[2]
     owner = sys.argv[3] if len(sys.argv) > 3 else "Me"
     spk = sys.argv[4] if len(sys.argv) > 4 else "unknown"

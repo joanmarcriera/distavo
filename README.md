@@ -55,8 +55,9 @@ for you, and only ever talks to the URLs you configure.
 
 ## Install
 
-Distavo is heading to the **Mac App Store** and **Setapp**; a notarized
-direct-download build is published on [GitHub Releases](https://github.com/Joanmarcriera/distavo/releases).
+Distavo is available on the **[Mac App Store](https://apps.apple.com/app/distavo/id6785437932)**;
+a notarized direct-download build is published on [GitHub Releases](https://github.com/Joanmarcriera/distavo/releases),
+and a **Setapp** edition is built from the same code (its upload is manual).
 
 To build from source you need [XcodeGen](https://github.com/yonaskolb/XcodeGen)
 (`brew install xcodegen`):
@@ -100,8 +101,10 @@ Config and the work/cache directory live under
 `~/Library/Application Support/Distavo/`, and logs are written to
 `~/Library/Logs/Distavo/distavo.log`.
 
-Supported input formats include `.wav`, `.m4a`, `.mp3`, `.opus`, `.ogg`,
-`.flac`, `.aac`, `.mov`, `.mp4`, and `.m4v` (anything AVFoundation can decode).
+The watcher picks up `.wav`, `.m4a`, `.m4b`, `.mp3`, `.opus`, `.ogg`, `.flac`,
+`.aac`, `.mov`, `.mp4`, `.m4v`, `.3gp`, `.webm` and `.mkv` files (the fixed list in
+`DistavoState.swift`); each is then converted with AVFoundation, so a container or
+codec that AVFoundation cannot decode fails at the conversion step.
 
 ## Privacy
 

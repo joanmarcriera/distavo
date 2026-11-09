@@ -6,7 +6,13 @@ later conversion never silently replaces this one (spec §5.6).
 Usage: manifest.py <folder> <source-model-id> <source-revision> <tools-revision>
 """
 import hashlib, json, os, sys
+if len(sys.argv) != 5:
+    sys.exit("usage: manifest.py <folder> <source-model-id> <source-revision> <tools-revision>")
 folder, source, source_rev, tools_rev = sys.argv[1:5]
+if not os.path.isdir(folder):
+    # os.walk on a missing folder yields nothing: without this check a failed
+    # conversion produced an empty-but-valid manifest.
+    sys.exit(f"manifest.py: not a directory: {folder}")
 files = {}
 for root, _, names in os.walk(folder):
     for n in sorted(names):
@@ -18,5 +24,7 @@ for root, _, names in os.walk(folder):
             for chunk in iter(lambda: f.read(1 << 20), b""):
                 h.update(chunk)
         files[rel] = {"bytes": os.path.getsize(p), "sha256": h.hexdigest()}
+if not files:
+    sys.exit(f"manifest.py: no files under {folder}")
 print(json.dumps({"source_model": source, "source_revision": source_rev,
                   "whisperkittools": tools_rev, "files": files}, indent=2))

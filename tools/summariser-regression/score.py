@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Score bake-off outputs against the 12-point checklist from the 2026-09-09 review.
+"""Score bake-off outputs against the 14-point checklist from the 2026-09-09 review.
 Regex checks are deliberately simple; read the notes for anything marked '?'.
 Usage: score.py  -> prints a table over out/*.md (ledgers excluded)."""
 import pathlib, re
@@ -30,7 +30,9 @@ def score(text):
     return row
 
 def main():
-    files = sorted(p for p in pathlib.Path("out").glob("*.md") if not p.name.endswith("_ledger.md"))
+    # Same folder run.py writes to, whatever the current directory is.
+    out = pathlib.Path(__file__).parent / "out"
+    files = sorted(p for p in out.glob("*.md") if not p.name.endswith("_ledger.md"))
     names = [c[0] for c in CHECKS]
     print("file".ljust(24) + " score  " + "  ".join(f"{i+1:>2}" for i in range(len(names))))
     for p in files:

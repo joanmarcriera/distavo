@@ -41,17 +41,26 @@ fi
 # Community fine-tunes often lack generation_config.alignment_heads, and the
 # converter then skips the text decoder without failing (see alignment_heads.py).
 # ALIGNMENT_BASE=large forces the stock checkpoint to copy from (whisper-large v1).
-"$wvenv/bin/python" "$here/alignment_heads.py" "$local" ${ALIGNMENT_BASE:-}
+"$wvenv/bin/python" "$here/alignment_heads.py" "$local" ${ALIGNMENT_BASE:+"$ALIGNMENT_BASE"}
 # The converter only compiles a component whose Core ML output matches torch above
 # TEST_PSNR_THR (35 dB, hard-coded in argmaxtools/whisperkittools). Some fine-tuned
 # medium decoders land at ~27 dB in fp16 and are silently left out; PSNR_THR=20 lowers the
 # gate. Treat the number as meaningful: a decoder that passed at 31.9 dB (vasista22 Gujarati)
 # produced garbage on real speech, one at 44 dB (vasista22 Tamil) was fine — always bake off.
 if [ -n "${PSNR_THR:-}" ]; then
-  sed -i '' -E "s/^TEST_PSNR_THR = [0-9]+/TEST_PSNR_THR = ${PSNR_THR}/" \
-    "$work"/venv/lib/python3.11/site-packages/tests/test_text_decoder.py \
-    "$work"/venv/lib/python3.11/site-packages/tests/test_audio_encoder.py \
-    "$work"/venv/lib/python3.11/site-packages/argmaxtools/test_utils.py 2>/dev/null || true
+  # Patch each file that exists, and say so: a silent `|| true` here meant a moved
+  # file left the 35 dB gate in place and PSNR_THR did nothing.
+  patched=0
+  for f in "$work"/venv/lib/python3.11/site-packages/tests/test_text_decoder.py \
+           "$work"/venv/lib/python3.11/site-packages/tests/test_audio_encoder.py \
+           "$work"/venv/lib/python3.11/site-packages/argmaxtools/test_utils.py; do
+    if [ -f "$f" ] && grep -qE '^TEST_PSNR_THR = [0-9]+' "$f"; then
+      sed -i '' -E "s/^TEST_PSNR_THR = [0-9]+/TEST_PSNR_THR = ${PSNR_THR}/" "$f"
+      patched=$((patched + 1))
+    fi
+  done
+  [ "$patched" -gt 0 ] || { echo "PSNR_THR set but no TEST_PSNR_THR line found to patch" >&2; exit 1; }
+  echo "PSNR gate lowered to ${PSNR_THR} dB in ${patched} file(s)"
 fi
 ( cd "$work/src" && MODEL_REPO_ID="$repo" whisperkit-generate-model --model-version "$model" --output-dir "$out" --upload-results )
 folder="$(echo "$model" | tr '/' '_')"

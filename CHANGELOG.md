@@ -5,6 +5,10 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **Note:** this file was not maintained after 1.1.0. For 1.2.0 onwards (current: 1.20.0)
+> see the per-release notes on [GitHub Releases](https://github.com/joanmarcriera/distavo/releases)
+> and the App Store "What's New" text in `apple/metadata/whats-new/en-GB.txt`.
+
 ## [Unreleased]
 
 ## [1.1.0] - 2026-06-29

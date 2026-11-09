@@ -28,7 +28,7 @@ final class ModelCoordinatorTests: XCTestCase {
     }
 
     func testFreeSpaceBytesWalksUpToNearestExistingAncestor() {
-        let missing = FileManager.default.temporaryDirectory
+        let missing = TestTemp.root
             .appendingPathComponent("distavo-nonexistent-\(UUID().uuidString)/models")
         XCTAssertGreaterThan(EmbeddedModelStore.freeSpaceBytes(at: missing), 0)
     }

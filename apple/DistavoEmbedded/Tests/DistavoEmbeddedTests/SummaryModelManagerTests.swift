@@ -9,7 +9,7 @@ import DistavoCore
 final class SummaryModelManagerTests: XCTestCase {
 
     private func tempRoot() -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-sum-\(UUID().uuidString)")
+        let url = TestTemp.root.appendingPathComponent("distavo-sum-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

@@ -38,7 +38,7 @@ final class HoleRecoveryLiveTests: XCTestCase {
 
         for (lo, hi) in clips {
             let slice = Array(audio[Int(lo * sr)..<min(audio.count, Int(hi * sr))])
-            let dir = FileManager.default.temporaryDirectory.appendingPathComponent("holes-\(UUID().uuidString)")
+            let dir = TestTemp.root.appendingPathComponent("holes-\(UUID().uuidString)")
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             defer { try? FileManager.default.removeItem(at: dir) }
             let url = dir.appendingPathComponent("clip.wav")

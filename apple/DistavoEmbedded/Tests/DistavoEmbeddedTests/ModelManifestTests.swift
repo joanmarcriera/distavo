@@ -4,7 +4,7 @@ import DistavoCore
 
 final class ModelManifestTests: XCTestCase {
     func testVerifyPassesThenFailsOnTamper() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = TestTemp.root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data("abc".utf8).write(to: dir.appendingPathComponent("a.bin"))
         let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
@@ -19,7 +19,7 @@ final class ModelManifestTests: XCTestCase {
     /// that stopped partway through) must be reported as `.missing`, not a
     /// generic file-not-found crash.
     func testMissingFileThrowsMissing() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = TestTemp.root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data(#"{"files": {"a.bin": {"bytes": 3, "sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}}}"#.utf8)
             .write(to: dir.appendingPathComponent("manifest.json"))
@@ -35,7 +35,7 @@ final class ModelManifestTests: XCTestCase {
     /// `manifest.json` at all — that must be a silent no-op, never an error,
     /// when the caller doesn't expect one.
     func testAbsentManifestIsNotAnErrorWhenNotExpected() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = TestTemp.root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         XCTAssertNoThrow(try ModelManifestCheck.verify(folder: dir, expectManifest: false))
     }
@@ -45,7 +45,7 @@ final class ModelManifestTests: XCTestCase {
     /// "no manifest, nothing to check" — it must fail loudly (`.missing`), or
     /// a folder that never got its weights checked would look verified.
     func testMissingManifestForCustomRepoThrowsMissing() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = TestTemp.root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         XCTAssertThrowsError(try ModelManifestCheck.verify(folder: dir, expectManifest: true)) { error in
             guard case ModelManifestError.missing(let file) = error else {
@@ -58,7 +58,7 @@ final class ModelManifestTests: XCTestCase {
     // MARK: Sentinel (I3)
 
     private func verifiedFolder() throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = TestTemp.root.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         try Data("abc".utf8).write(to: dir.appendingPathComponent("a.bin"))
         let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"

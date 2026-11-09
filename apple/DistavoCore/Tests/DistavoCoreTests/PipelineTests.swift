@@ -75,13 +75,13 @@ final class PipelineTests: XCTestCase {
 
     // MARK: Phase timings (Vikunja #4018)
 
-    /// A finished file reports where the time went: convert, transcribe, summarise, in that order, as numbers only.
+    /// A finished file reports where the time went: convert, transcribe, summarise+note, in that order, as numbers only.
     func testDoneResultCarriesPhaseTimings() async throws {
         let (cfg, input) = try makeEnv()
         let result = await Pipeline.processOne(path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
         let names = result.timings?.steps.map(\.name)
-        XCTAssertEqual(names, ["convert", "transcribe", "summarise"])
+        XCTAssertEqual(names, ["convert", "transcribe", "summarise+note"])
         XCTAssertTrue(result.timings?.logLine.hasPrefix("Timing: convert ") ?? false)
     }
 

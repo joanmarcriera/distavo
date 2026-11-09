@@ -446,6 +446,11 @@ public enum Pipeline {
             var timings = PhaseTimings()   // #4018: one line per file saying where the time went
             var phaseStart = Date()
             func lap(_ name: String) { timings.add(name, seconds: Date().timeIntervalSince(phaseStart)); phaseStart = Date() }
+            func withTimings(_ r: ProcessResult) -> ProcessResult {
+                lap("summarise+note")
+                print("[Distavo] " + timings.logLine)
+                var r = r; r.timings = timings; return r
+            }
             deps.onPhase?(.converting)
 
             // A prior attempt (e.g. one that later hit a RetryableDependencyError
@@ -624,10 +629,10 @@ public enum Pipeline {
                         existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
                     try note.write(to: notePath, atomically: true, encoding: .utf8)
                     state.markDone(base)
-                    return ProcessResult(status: .done, base: base,
+                    return withTimings(ProcessResult(status: .done, base: base,
                                          message: "note written (transcript only: does not look like a meeting: \(reason))",
                                          notePath: notePath, transcriptPath: transcriptPath,
-                                         detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+                                         detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
                 }
             }
             // #4013: a recording that stops mid-conversation is flagged, not summarised as complete.
@@ -748,11 +753,11 @@ public enum Pipeline {
                     existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
                 try fallback.write(to: notePath, atomically: true, encoding: .utf8)
                 state.markDone(base)
-                return ProcessResult(status: .done, base: base,
+                return withTimings(ProcessResult(status: .done, base: base,
                                      message: "note written (transcript only: summary rejected: \(reason))"
                                         + (saveError.map { "; rejected summary could not be saved: \($0)" } ?? ""),
                                      notePath: notePath, transcriptPath: transcriptPath,
-                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
             }
             // A Catalan/Spanish note that came back in another language gets one retry with the
             // language stated again (#3585). The first note is kept if the retry is rejected.
@@ -803,13 +808,9 @@ public enum Pipeline {
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }
-            lap("summarise")
-            print("[Distavo] " + timings.logLine)
-            var finished = ProcessResult(status: .done, base: base, message: message,
+            return withTimings(ProcessResult(status: .done, base: base, message: message,
                                  notePath: notePath, transcriptPath: transcriptPath,
-                                 detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
-            finished.timings = timings
-            return finished
+                                 detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
         } catch let retry as RetryableDependencyError {
 
             // I2: grow the wait with each consecutive deferral (60 s, 120 s,

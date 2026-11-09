@@ -475,6 +475,13 @@ public enum Pipeline {
                         return ProcessResult(status: .failed, base: base,
                                              message: message + " (not retried again; Move to Bin or replace the file)")
                     }
+                    // Retryable (the machine's problem, or transient under the cap): DEFER with backoff so the scan
+                    // retries it. A `.failed` marker is only cleared by the user's Retry, so a full disk or an
+                    // offline volume used to leave the file failed for good (h-chain review 2026-11-09).
+                    if !(error is CancellationError),
+                       Self.isMachineLevelConvertFailure(error) || Self.isTransientConvertFailure(error) {
+                        throw RetryableDependencyError(message + " - will retry")
+                    }
                     throw error
                 }
             }

@@ -115,7 +115,10 @@ final class DriveDFindingsTests: XCTestCase {
         let d = failingDeps(URLError(.timedOut))
         for n in 1...4 {
             let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
-            XCTAssertEqual(r.status, .failed)
+            // h-chain review 2026-11-09: retryable means DEFERRED (retried by the scan with backoff); a
+            // `.failed` marker is only cleared by the user's Retry, so the file would sit there for good.
+            XCTAssertEqual(r.status, .deferred)
+            XCTAssertFalse(try store(cfg).isFailed("demo"), "failure \(n) must not write a failed marker")
             XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "failure \(n) must stay retryable")
         }
         let fifth = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
@@ -171,7 +174,7 @@ final class DriveDFindingsTests: XCTestCase {
         d.transcribe = { _, _ in transcribed.bump(); return [:] }
         for _ in 0..<2 {
             let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
-            XCTAssertEqual(r.status, .failed)
+            XCTAssertEqual(r.status, .deferred, "disk full defers (review 2026-11-09)")
             try store(cfg).retryFailed()
         }
         XCTAssertEqual(calls.value, 2, "the second attempt must convert again, not trust the partial WAV")
@@ -226,6 +229,27 @@ final class DriveDFindingsTests: XCTestCase {
             }
             XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "\(error)")
         }
+    }
+
+    /// Disk full or no permission while converting is the machine's problem: the recording defers with
+    /// backoff and is picked up by the next scan once space is freed, with no user action (review 2026-11-09).
+    func testDiskFullConversionDefersNotFails() async throws {
+        for error in [CocoaError(.fileWriteOutOfSpace) as Error, NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC))] {
+            let (input, cfg) = try env()
+            let r = await Pipeline.processOne(path: input, config: cfg, deps: failingDeps(error), stableChecks: 1, stableDelay: 0)
+            XCTAssertEqual(r.status, .deferred, "\(error)")
+            XCTAssertFalse(try store(cfg).isFailed("demo"), "\(error)")
+            XCTAssertNotNil(try store(cfg).deferredUntil("demo"), "\(error)")
+        }
+    }
+
+    /// A conversion failure that is the FILE's fault (not transient, not the machine) still fails.
+    func testFileFaultConversionStillFails() async throws {
+        let (input, cfg) = try env()
+        let r = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: failingDeps(NSError(domain: "AVFoundationErrorDomain", code: -11829)), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .failed)
     }
 
     /// A replaced file (different size) starts a fresh count, and the menu's retry clears it.

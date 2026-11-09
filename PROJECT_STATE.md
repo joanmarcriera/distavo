@@ -2,6 +2,12 @@
 
 ## Next action (2026-11-09, drive review lane)
 
+- **p** (`feat/drive-distavo-p-2026-11-09`, from o a3199c1, on forgejo-work) is the newest branch: it contains o, n … j
+  and every older drive branch. Merge order and exact commands: `docs/remote-direction.md` (origin = GitHub primary,
+  forgejo = read-only pull mirror, forgejo-work = drive branches). p adds: Opus review fixes of o, #4007 stop when
+  the call ends (off by default, by-eye item 3 in `docs/drive-review-2026-11-09.md`), DistavoEmbedded temp-dir
+  leak fix (#6647). swift test: DistavoCore 1626 / 0 failures, DistavoEmbedded 92 / 0; Direct Debug build succeeded.
+
 - l (`feat/drive-distavo-l-2026-11-09`, from k, on forgejo-work): review of k plus #4010/#3951/#4007 fixes,
   swift test 1595 / 0 failures; see "Review of k" in `docs/drive-review-2026-11-09.md`. Merge order: j, k, l,
   after the by-eye checks.

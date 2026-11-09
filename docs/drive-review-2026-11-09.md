@@ -3,7 +3,7 @@
 Reviewer: drive 2026-11-09-0516, lane `distavo-review` (Opus). Scope: `main..feat/drive-distavo-h-2026-11-09`
 (110 commits, 181 files, +25.7k lines of which ~4.4k under `apple/`; the rest is docs, market memos,
 `docs/architecture/*.html`, the site under `ops/site/` and the changelog). Fixes for what the review found are on
-`feat/drive-distavo-j-2026-11-09` (8 commits on top of h, listed below).
+`feat/drive-distavo-j-2026-11-09` (10 commits on top of h, listed below).
 
 ## Recommendation
 
@@ -14,7 +14,7 @@ in both directions (see findings 1 and 2), and a duplicate-call match can put an
 - Dry run, 2026-11-09, throwaway worktree off `main` 16003f8: `git merge --no-commit --no-ff` of h, and then of j,
   both "Automatic merge went well" (181 and 185 files), aborted, worktree removed. `main` is an ancestor of both,
   so the merge is conflict-free (it can be a fast-forward).
-- Tests on j: `cd apple/DistavoCore && swift test`: 1579 tests, 2 skipped, 0 failures (h was 1567, 0 failures).
+- Tests on j: `cd apple/DistavoCore && swift test`: 1581 tests, 2 skipped, 0 failures (h was 1567, 0 failures).
   `cd apple/DistavoEmbedded && swift build`: Build complete. The app target was NOT built in this lane (no
   `xcodebuild`): j changes one app-adjacent file, `DistavoEmbedded/EmbeddedSummariser.swift`, which compiled.
 
@@ -54,6 +54,20 @@ corrupt-config fallback uses `Config()`; regenerate keeps the glossary order of 
 TranscriptionCorrections protects Highlights, fences and URLs; digest day keys use an injected time zone;
 `DeferredQuestionContext` sends the event title to the UI only; `check-tag-version.sh`, `smoke.sh` and
 `weekly-metrics.sh` only do public GETs.
+
+## Second round: Sonnet review of branch j
+
+No high findings. Fixed: a long dense meeting planned as map-reduce could still overflow per chunk (now split
+once, 30c2fd9); the density scale shrank the reduce budget for the model's own bullets (removed, 30c2fd9);
+deferring transient conversion failures made five quick retries hit the cap in ~15 min (now counted at most once
+an hour, 397d3fe). Open, low:
+- Machine-level conversion failures (disk full, no permission on the source) now defer for ever at a 30-min
+  backoff with only a "deferred" row as the signal; a lost security-scoped bookmark recurs identically. Consider a
+  cap, or treating read permission on the source as the file's fault.
+- Silence phrases are dropped from the clean transcript only: `.segments.json` (viewer, SRT/PDF exports) and
+  `MeetingShapeGate` still see them. Any segment mentioning "amara.org" is dropped.
+- "(Head of Research at Acme)" gives the term "Research at Acme"; "(Head of Finance)" now seeds "Finance".
+- Two dropped files from phones with different time conventions (Android END + iPhone START) no longer link.
 
 ## Branch j: the packet tasks
 

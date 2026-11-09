@@ -584,6 +584,9 @@ public enum Pipeline {
                 sidecarID: LanguageOverride.load(
                     workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template,
                 participants: participants, transcript: clean)
+            // The template actually used, by name, so the log answers "why is this note shaped like that" (#6667).
+            print("[Distavo] " + StopSheetTemplate.logLine(
+                base: base, template: resolvedTemplate.template, autoNote: resolvedTemplate.note))
             let noteDate: Date?
             if let calendarStart = calendarMatch?.recordingStart { noteDate = calendarStart }
             else { noteDate = await noteStart(for: path, deps: deps) }

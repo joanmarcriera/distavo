@@ -74,6 +74,8 @@ final class MeetingCaptureController: ObservableObject {
     /// Name of the input being recorded, shown in the menu while recording (#4039).
     @Published private(set) var liveInputName: String?
     private static let preflightKey = "distavo.didExplainCapture"
+    /// UserDefaults: last stop-sheet template per recordings subfolder (#6667).
+    private static let templatePicksKey = "stopSheet.templatePicks"
     /// How long to wait before telling the user the meeting side is silent
     /// (Vikunja #2060). Long enough to join a call and hear someone speak.
     static let silentSystemAudioWarningSeconds = 20
@@ -665,20 +667,18 @@ final class MeetingCaptureController: ObservableObject {
         let noteLanguageTarget = LanguagePickerActionTarget { userChangedNoteLanguage = true }
         noteLanguagePopup.target = noteLanguageTarget
         noteLanguagePopup.action = #selector(LanguagePickerActionTarget.picked)
-        // Per-recording summary template (Vikunja #2940). Index 0 = no override (the
-        // folder rule / Settings value applies). Only a click saves anything.
-        var templateChoices: [(title: String, value: String?)] =
-            [(SettingsDefaults.templateLabel(config), nil), ("Auto (from the participants)", SummaryTemplateCatalog.autoID),
-             ("No template", SummaryTemplateCatalog.noneID)]
-            + SummaryTemplateCatalog.bundledTemplates.map { ($0.name, Optional($0.id)) }
-        if SummaryTemplateCatalog.customTemplate(config: config) != nil {
-            templateChoices.append(("Custom", SummaryTemplateCatalog.customID))
-        }
+        // Per-recording summary template (Vikunja #2940, #6667). Auto is the first row and is preselected
+        // unless the owner picked something for this folder before or a folder rule names a template; a stale
+        // global Settings template is never preselected (`StopSheetTemplate`). The "Default from Settings" row
+        // is still there, second.
+        let templateFolder = SummaryTemplateCatalog.folder(of: url, in: folderProvider())
+        let templateChoices = StopSheetTemplate.choices(config: config, folder: templateFolder)
+        let templatePicks = UserDefaults.standard.dictionary(forKey: Self.templatePicksKey) as? [String: String] ?? [:]
         let templatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
         for choice in templateChoices { templatePopup.addItem(withTitle: choice.title) }
-        templatePopup.selectItem(at: 0)
-        var userChangedTemplate = false
-        let templateTarget = LanguagePickerActionTarget { userChangedTemplate = true }
+        templatePopup.selectItem(at: StopSheetTemplate.preselectedIndex(
+            config: config, folder: templateFolder, lastPicks: templatePicks))
+        let templateTarget = LanguagePickerActionTarget { }
         templatePopup.target = templateTarget
         templatePopup.action = #selector(LanguagePickerActionTarget.picked)
         // Count follows the participants text (#3580) and warns when the two disagree.
@@ -806,8 +806,12 @@ final class MeetingCaptureController: ObservableObject {
         let spokenCode = userChangedLanguage ? selectedCode : ""
         let noteChoice = userChangedNoteLanguage
             ? noteChoices[max(0, noteLanguagePopup.indexOfSelectedItem)].value : nil
-        let templateChoice = userChangedTemplate
-            ? templateChoices[max(0, templatePopup.indexOfSelectedItem)].value : nil
+        // The preselected row counts as a choice (#6667): an untouched sheet saves Auto, not the Settings value.
+        let templateChoice = StopSheetTemplate.valueToSave(
+            choices: templateChoices, selectedIndex: templatePopup.indexOfSelectedItem)
+        UserDefaults.standard.set(
+            StopSheetTemplate.remembering(templateChoice, folder: templateFolder, in: templatePicks),
+            forKey: Self.templatePicksKey)
         // One sidecar carries the spoken language, the note language and the summary
         // template (#2940); any may be absent. Nothing clicked = no file, as before.
         if !spokenCode.isEmpty || noteChoice != nil || templateChoice != nil {

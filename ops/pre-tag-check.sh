@@ -114,8 +114,12 @@ for edition in Direct Setapp AppStore; do
   fi
   if [[ "$edition" == AppStore ]]; then
     BIN="$APP/Contents/MacOS/Distavo"
-    strings -a "$BIN" | grep -qi "lemonsqueezy" && fail "AppStore binary mentions lemonsqueezy" || ok "AppStore binary: no Lemon Squeezy donate link"
-    strings -a "$BIN" | grep -q "Run in Terminal" && fail "AppStore binary has the Run in Terminal helper" || ok "AppStore binary: no Run in Terminal helper"
+    # strings to a file first: under pipefail, `strings | grep -q` exits 141 (SIGPIPE) exactly when
+    # grep FINDS the string early, which used to print "ok" for a binary that contains it.
+    STR="$OUT/$edition.strings.txt"
+    strings -a "$BIN" >"$STR"
+    grep -qi "lemonsqueezy" "$STR" && fail "AppStore binary mentions lemonsqueezy" || ok "AppStore binary: no Lemon Squeezy donate link"
+    grep -q "Run in Terminal" "$STR" && fail "AppStore binary has the Run in Terminal helper" || ok "AppStore binary: no Run in Terminal helper"
   fi
 done
 

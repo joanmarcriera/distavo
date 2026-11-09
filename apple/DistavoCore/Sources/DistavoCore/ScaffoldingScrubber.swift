@@ -12,10 +12,21 @@ public enum ScaffoldingScrubber {
     /// Lines that are the prompt talking, never note content.
     private static let instructionMarkers = [
         "decide which speaker label is the note owner",
-        "using evidence only",
-        "as per the instructions",
         "output only includes the notes",
     ]
+
+    /// True when `line` is the prompt or the model talking about its own output. "as per the instructions" and
+    /// "using evidence only" are ordinary English too, so they count only with a meta signal on the same line
+    /// (review of k, 2026-11-09: "configure it as per the instructions in the runbook" is a real action).
+    private static func isInstructionLine(_ line: String) -> Bool {
+        let low = line.lowercased()
+        if instructionMarkers.contains(where: { low.contains($0) }) { return true }
+        let lead = low.drop { " \t-*(>".contains($0) }
+        let meta = low.contains("output only") || low.contains("notes section")
+            || (lead.hasPrefix("note:") && low.contains(" only"))
+        if low.contains("as per the instructions") && meta { return true }
+        return low.contains("using evidence only") && (low.contains("speaker label") || low.contains("note owner"))
+    }
 
     private static func headingLevel(_ line: String) -> Int? {
         let hashes = line.prefix { $0 == "#" }.count
@@ -41,7 +52,12 @@ public enum ScaffoldingScrubber {
 
     private static func isStepHeading(_ line: String) -> Bool {
         guard headingLevel(line) != nil else { return false }
-        return headingText(line).lowercased().range(of: #"^step\s*\d+\b"#, options: .regularExpression) != nil
+        let t = headingText(line).lowercased()
+        guard t.range(of: #"^step\s*\d+\b"#, options: .regularExpression) != nil else { return false }
+        // Only the prompt's own steps (speakers, facts ledger, the notes): a meeting about a plan may have
+        // real "### Step 1: Back up the database" headings, which stay (review of k, 2026-11-09).
+        return t.range(of: #"^step\s*\d+\s*[:.)-]?\s*(identify the speakers?\b.*|facts ledger\b.*|the notes\s*[:.]?)$"#,
+                       options: .regularExpression) != nil
     }
 
     /// The real section a "Step N" heading stands for, nil = it has none (drop only the heading).
@@ -55,7 +71,8 @@ public enum ScaffoldingScrubber {
     private static func isFiller(_ s: String) -> Bool {
         let junk = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".()_*"))
         let t = s.trimmingCharacters(in: junk).lowercased()
-        return t.isEmpty || t == "see above" || t == "n/a" || t == "none"
+        // Not "none" / "n/a": the prompt asks for "none" in some sections, and it is an answer (review of k).
+        return t.isEmpty || t == "see above"
     }
 
     /// A bullet that is only a markdown table rule, e.g. "- --- | --- | ---".
@@ -89,9 +106,7 @@ public enum ScaffoldingScrubber {
 
         // 2. Single lines: a literal table-rule bullet, the prompt's own instructions.
         lines = lines.filter { line in
-            if isTableRuleBullet(line) { return false }
-            let low = line.lowercased()
-            return !instructionMarkers.contains { low.contains($0) }
+            !isTableRuleBullet(line) && !isInstructionLine(line)
         }
 
         // 3. Sections (level >= 2) holding nothing, or only "See above".

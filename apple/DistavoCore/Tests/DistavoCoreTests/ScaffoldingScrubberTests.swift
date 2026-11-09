@@ -62,6 +62,43 @@ final class ScaffoldingScrubberTests: XCTestCase {
         XCTAssertEqual(ScaffoldingScrubber.scrub(clean), clean)
     }
 
+    // Review of k (2026-11-09, distavo-review lane): the scrubber must not delete real note content.
+
+    /// The prompt itself says: if nothing was likely mis-transcribed, write "none". That answer is content.
+    func testNoneSectionThePromptAsksForIsKept() {
+        let note = "# Meeting notes\n\n## Summary\nWe met.\n\n## Possible transcription corrections\nnone\n\n## Decisions\nN/A\n"
+        XCTAssertEqual(ScaffoldingScrubber.scrub(note), note)
+    }
+
+    /// "as per the instructions" / "using evidence only" are ordinary English in a meeting note.
+    func testOrdinaryLinesThatShareAMarkerPhraseAreKept() {
+        let note = """
+        # Meeting notes
+
+        ## Actions
+        - Ana will configure the server as per the instructions in the runbook.
+        - The panel will decide using evidence only from the audit.
+        - Check the output as per the instructions from legal.
+        Note: deploy as per the instructions in the wiki.
+        """
+        XCTAssertEqual(ScaffoldingScrubber.scrub(note), note)
+    }
+
+    /// A meeting about a plan may have its own "Step N" headings; only the prompt's steps are scaffolding.
+    func testRealStepHeadingsInTheNoteAreKept() {
+        let note = "# Meeting notes\n\n## Migration plan\n### Step 1: Back up the database\n- Ana runs the backup.\n### Step 2: Switch DNS\n- Joan flips the record.\n"
+        XCTAssertEqual(ScaffoldingScrubber.scrub(note), note)
+        // Sonnet review: substring matches ("speakers", "notes") were too wide; only the prompt's own titles count.
+        let event = "# Meeting notes\n\n## Speakers\n- Ana\n\n## Conference plan\n### Step 2: Confirm the speakers\n- Ana emails them.\n### Step 3: Write up the notes\n- Joan.\n"
+        XCTAssertEqual(ScaffoldingScrubber.scrub(event), event)
+    }
+
+    /// The meta line still goes, with or without a "Note:" prefix.
+    func testMetaLinesAboutTheOutputStillDropped() {
+        let out = ScaffoldingScrubber.scrub("# Meeting notes\n## Summary\nShort.\n(Note: as per the instructions, only the notes are shown.)\nThe output only includes the notes section.")
+        XCTAssertEqual(out, "# Meeting notes\n## Summary\nShort.")
+    }
+
     func testSummaryChecksAppliesIt() {
         let out = SummaryChecks.apply(summary: leaked, transcript: "we ship on Friday", context: NoteContext(noteOwner: "Alex", userSpeaker: "SPEAKER_00"))
         XCTAssertFalse(out.text.contains("Step 1"))

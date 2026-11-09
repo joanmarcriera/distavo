@@ -31,6 +31,7 @@ public enum RecordingStorageFormat: String, Codable, CaseIterable, Equatable, Se
             "AVNumberOfChannelsKey": channels,
             "AVLinearPCMBitDepthKey": bitDepth,
             "AVLinearPCMIsFloatKey": self == .full,
+            "AVLinearPCMIsBigEndianKey": false,
         ]
     }
 

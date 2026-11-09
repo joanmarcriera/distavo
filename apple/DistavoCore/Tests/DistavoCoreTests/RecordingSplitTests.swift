@@ -44,7 +44,7 @@ final class RecordingSplitTests: XCTestCase {
         let gap = RecordingSplit.Silence(start: 2884, end: 3003)
         let c = RecordingSplit.candidates(silences: [gap], segments: segs(), duration: 3700)
         XCTAssertEqual(c.count, 1)
-        XCTAssertEqual(c[0].speakersBefore, ["SPEAKER_00", "SPEAKER_01", "SPEAKER_02"])
+        XCTAssertEqual(c[0].speakersBefore, ["SPEAKER_02"], "only the 5 minutes before the gap")
         XCTAssertEqual(c[0].speakersAfter, ["SPEAKER_00", "SPEAKER_07"])
 
         // same people on both sides: an ordinary break
@@ -61,6 +61,19 @@ final class RecordingSplitTests: XCTestCase {
         // nothing said on one side
         let oneSided = TranscriptSegments(segments: [.init(start: 10, end: 15, text: "a", speaker: "SPEAKER_00")])
         XCTAssertTrue(RecordingSplit.candidates(silences: [gap], segments: oneSided, duration: 3700).isEmpty)
+    }
+
+    func testOnlyTheMinutesAroundTheGapAreCompared() {
+        // A talks alone for 20 minutes; B joins 10 minutes after A started. A long pause later: not two meetings
+        // unless the people next to the gap differ.
+        func seg(_ t: Double, _ sp: String) -> TranscriptSegments.Segment { .init(start: t, end: t + 5, text: "x", speaker: sp) }
+        let s = TranscriptSegments(segments: [seg(10, "A"), seg(1100, "A"), seg(1190, "A"), seg(1500, "A"), seg(1550, "B")])
+        let gap = RecordingSplit.Silence(start: 1200, end: 1300)
+        XCTAssertEqual(RecordingSplit.candidates(silences: [gap], segments: s, duration: 1800).count, 1,
+                       "before = A, after = A and B inside the window")
+        // someone who spoke early (outside the window) and again after: same set next to the gap
+        let t = TranscriptSegments(segments: [seg(10, "B"), seg(1100, "A"), seg(1500, "A")])
+        XCTAssertTrue(RecordingSplit.candidates(silences: [gap], segments: t, duration: 1800).isEmpty)
     }
 
     // MARK: ranges
@@ -81,7 +94,8 @@ final class RecordingSplitTests: XCTestCase {
         XCTAssertEqual(RecordingSplit.halfBases(of: "Meeting_2026-11-09_13.59.20").second, "Meeting_2026-11-09_13.59.20 part 2")
         let names = ["B.speakers.json", "B.language.json", "B.transcript.clean.txt", "B.segments.json",
                      "B.bookmarks.json", "Other.speakers.json", "B2.speakers.json"]
-        XCTAssertEqual(RecordingSplit.sidecarsToCopy(names: names, base: "B"), ["B.language.json", "B.speakers.json"])
+        XCTAssertEqual(RecordingSplit.sidecarsToCopy(names: names, base: "B"), ["B.language.json"],
+                       "speakers.json describes the whole recording: each half asks its own")
     }
 
     func testMarksAreRetimedPerHalf() throws {

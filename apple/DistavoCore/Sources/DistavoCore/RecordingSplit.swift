@@ -21,6 +21,10 @@ public enum RecordingSplit {
     /// Silence kept at the end of the first half and the start of the second, so no word is clipped.
     public static let paddingSeconds = 2.0
 
+    /// How far either side of a silence the speaker sets are compared: a person who merely joined late in a
+    /// long meeting must not make an ordinary break look like a second meeting.
+    public static let compareWindowSeconds = 300.0
+
     public struct Silence: Equatable, Sendable {
         public var start: Double
         public var end: Double
@@ -102,8 +106,8 @@ public enum RecordingSplit {
     public static func candidates(silences: [Silence], segments: TranscriptSegments?, duration: Double) -> [Candidate] {
         guard let segs = segments?.segments, !segs.isEmpty else { return [] }
         return silences.compactMap { s in
-            let before = speakers(in: segs, from: 0, to: s.start)
-            let after = speakers(in: segs, from: s.end, to: max(duration, s.end + 1))
+            let before = speakers(in: segs, from: max(0, s.start - compareWindowSeconds), to: s.start)
+            let after = speakers(in: segs, from: s.end, to: min(max(duration, s.end + 1), s.end + compareWindowSeconds))
             guard !before.isEmpty, !after.isEmpty, before != after else { return nil }
             return Candidate(silence: s, speakersBefore: before, speakersAfter: after)
         }
@@ -136,7 +140,7 @@ public enum RecordingSplit {
             throw SplitError.emptyRange
         }
         let temp = destination.deletingLastPathComponent()
-            .appendingPathComponent(".split-\(UUID().uuidString)-\(destination.lastPathComponent)")
+            .appendingPathComponent(".split-\(UUID().uuidString)-\(destination.lastPathComponent).part")   // not a recording extension
         do {
             let writer = try AVAudioFile(forWriting: temp, settings: reader.fileFormat.settings,
                                          commonFormat: .pcmFormatFloat32, interleaved: false)
@@ -169,11 +173,13 @@ public enum RecordingSplit {
         ("\(base) part 1", "\(base) part 2")
     }
 
-    /// The per-recording sidecars a half inherits: what the owner TOLD Distavo (speakers, language, template).
-    /// Everything derived from the audio (transcript, segments, markers, `.state`) is rebuilt per half, and
-    /// `.bookmarks.json` is re-timed by `splitMarks`. Pure: `names` are the file names in the work folder.
+    /// The per-recording sidecars a half inherits: only `.language.json` (spoken language, note language,
+    /// template). `.speakers.json` is NOT copied: its count and participants describe the whole recording, and
+    /// the point of a split is that each half has different people (the caller asks the speakers sheet per
+    /// half). Everything derived from the audio (transcript, segments, markers, `.state`) is rebuilt per half,
+    /// and `.bookmarks.json` is re-timed by `splitMarks`. Pure: `names` are the file names in the work folder.
     public static func sidecarsToCopy(names: [String], base: String) -> [String] {
-        let wanted = [SpeakerHintsNames.suffix, ".language.json"]
+        let wanted = [".language.json"]
         return names.filter { n in wanted.contains { n == base + $0 } }.sorted()
     }
 
@@ -195,5 +201,3 @@ public enum RecordingSplit {
     }
 }
 
-/// File-name suffixes shared with `SpeakerHints` (kept here so the split core has no second copy of the literal).
-enum SpeakerHintsNames { static let suffix = ".speakers.json" }

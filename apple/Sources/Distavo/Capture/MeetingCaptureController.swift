@@ -679,7 +679,8 @@ final class MeetingCaptureController: ObservableObject {
         for choice in templateChoices { templatePopup.addItem(withTitle: choice.title) }
         templatePopup.selectItem(at: StopSheetTemplate.preselectedIndex(
             config: config, folder: templateFolder, lastPicks: templatePicks))
-        let templateTarget = LanguagePickerActionTarget { }
+        var userChangedTemplate = false
+        let templateTarget = LanguagePickerActionTarget { userChangedTemplate = true }
         templatePopup.target = templateTarget
         templatePopup.action = #selector(LanguagePickerActionTarget.picked)
         // Count follows the participants text (#3580) and warns when the two disagree.
@@ -810,9 +811,12 @@ final class MeetingCaptureController: ObservableObject {
         // The preselected row counts as a choice (#6667): an untouched sheet saves Auto, not the Settings value.
         let templateChoice = StopSheetTemplate.valueToSave(
             choices: templateChoices, selectedIndex: templatePopup.indexOfSelectedItem)
-        UserDefaults.standard.set(
-            StopSheetTemplate.remembering(templateChoice, folder: templateFolder, in: templatePicks),
-            forKey: Self.templatePicksKey)
+        // Only a pick the owner clicked is remembered (never the untouched preselection).
+        if userChangedTemplate {
+            UserDefaults.standard.set(
+                StopSheetTemplate.remembering(templateChoice, folder: templateFolder, in: templatePicks),
+                forKey: Self.templatePicksKey)
+        }
         // One sidecar carries the spoken language, the note language and the summary
         // template (#2940); any may be absent. Nothing clicked = no file, as before.
         if !spokenCode.isEmpty || noteChoice != nil || templateChoice != nil {

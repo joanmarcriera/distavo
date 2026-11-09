@@ -44,9 +44,14 @@ final class ProjectMeetingTemplateTests: XCTestCase {
         XCTAssertEqual(TemplateAutoPick.pick(participants: nil, transcript: start)?.id, "project_meeting")
     }
 
+    func testAFewEverydayWordsInTheTranscriptAreNotEnough() {
+        XCTAssertNil(TemplateAutoPick.pick(participants: nil, transcript: "Thanks everyone, the team did well on that project.")?.id)
+    }
+
     func testAutoNeverPicksProjectMeetingWhenInterviewWordsAppear() {
         let who = "Other participants: a recruiter about a project deployment role"
         XCTAssertNotEqual(TemplateAutoPick.pick(participants: who, transcript: "")?.id, "project_meeting")
+        XCTAssertNotEqual(TemplateAutoPick.pick(participants: "project deployment team, hiring", transcript: "")?.id, "project_meeting")
         let start = "Thanks for coming to the interview. Tell me about the last deployment project you ran, candidate."
         XCTAssertNotEqual(TemplateAutoPick.pick(participants: nil, transcript: start)?.id, "project_meeting")
     }

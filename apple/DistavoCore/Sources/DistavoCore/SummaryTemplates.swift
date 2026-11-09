@@ -699,9 +699,13 @@ public enum TemplateAutoPick {
         }
         guard let b = best, b.score >= 2, !tied else { return nil }
         // A recruiter or candidate in the room means the talk of a "project" is the role, not a delivery meeting.
-        if b.id == SummaryTemplateCatalog.projectMeetingID,
-           let interview = rules.first(where: { $0.id == "interview" }),
-           interview.strong.contains(where: { contains(who, $0) || contains(start, $0) }) { return nil }
+        if b.id == SummaryTemplateCatalog.projectMeetingID {
+            if let interview = rules.first(where: { $0.id == "interview" }),
+               (interview.strong + interview.weak).contains(where: { contains(who, $0) || contains(start, $0) }) { return nil }
+            // "project" and "team" are everyday words: with nothing from the participants, the start of the
+            // transcript must use at least three different project words before this is a project meeting.
+            if b.hits.isEmpty, b.score < 3 { return nil }
+        }
         return Pick(id: b.id, reason: b.hits.isEmpty ? "words in the transcript" : b.hits.prefix(3).joined(separator: ", "))
     }
 }

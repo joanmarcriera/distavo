@@ -38,8 +38,13 @@ final class StopSheetTemplateTests: XCTestCase {
 
     func testAVanishedPickFallsBackToAuto() {
         // "custom" is remembered but the custom text was since emptied
-        XCTAssertEqual(StopSheetTemplate.preselectedIndex(config: config(), folder: "", lastPicks: ["": "custom"]), 0)
-        XCTAssertEqual(StopSheetTemplate.preselectedIndex(config: config(), folder: "", lastPicks: ["": "bogus"]), 0)
+        XCTAssertEqual(StopSheetTemplate.preselectedIndex(config: config(), folder: "x", lastPicks: ["x": "custom"]), 0)
+        XCTAssertEqual(StopSheetTemplate.preselectedIndex(config: config(), folder: "x", lastPicks: ["x": "bogus"]), 0)
+    }
+
+    func testTheRecordingsRootNeverRemembersAPick() {
+        XCTAssertTrue(StopSheetTemplate.remembering("interview", folder: "", in: [:]).isEmpty)
+        XCTAssertEqual(StopSheetTemplate.preselectedIndex(config: config(), folder: "", lastPicks: ["": "interview"]), 0)
     }
 
     func testRememberingAndForgetting() {

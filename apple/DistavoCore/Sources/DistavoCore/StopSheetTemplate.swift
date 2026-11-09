@@ -44,7 +44,10 @@ public enum StopSheetTemplate {
             guard let id = id?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !id.isEmpty else { return nil }
             return rows.firstIndex { $0.value == id }
         }
-        if let i = index(of: lastPicks[folderKey(folder)]) { return i }
+        // The root has no key: the recorder always writes there, so a root pick would be one global,
+        // sticky choice (the stale-default trap again). Only a named subfolder remembers.
+        let key = folderKey(folder)
+        if !key.isEmpty, let i = index(of: lastPicks[key]) { return i }
         if let i = index(of: SummaryTemplateCatalog.folderTemplateID(folder: folder, map: config.summarise.folderTemplates)) {
             return i
         }
@@ -70,6 +73,7 @@ public enum StopSheetTemplate {
     public static func remembering(_ id: String?, folder: String, in picks: [String: String]) -> [String: String] {
         var out = picks
         let key = folderKey(folder)
+        guard !key.isEmpty else { return out }
         if let id, !id.isEmpty { out[key] = id.lowercased() } else { out.removeValue(forKey: key) }
         return out
     }

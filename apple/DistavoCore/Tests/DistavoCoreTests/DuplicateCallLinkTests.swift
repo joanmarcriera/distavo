@@ -46,6 +46,28 @@ final class DuplicateCallLinkTests: XCTestCase {
         XCTAssertNil(DuplicateCallLink.loadLink(workDir: dir, base: "a"))
     }
 
+    // MARK: h-chain review 2026-11-09: the two readings of a dropped file must not pair different calls
+
+    /// A Mac call 10:00-10:30, then a phone memo that STARTS at 10:31 for 25 min. Read as an END time it
+    /// would span 10:06-10:31 (96% overlap, 6 min skew). The memo must not get the call's names.
+    func testMemoAfterACallNeverGetsTheCallsParticipants() throws {
+        try SpeakerHints(count: 3, participants: "Alex (me), Sam, Kim").save(workDir: dir, base: "Meeting_a")
+        _ = DuplicateCallLink.register(CallRecord(base: "Meeting_a", time: t0, durationSeconds: 1800, isLiveCapture: true), workDir: dir)
+        _ = DuplicateCallLink.register(
+            CallRecord(base: "memo", time: t0.addingTimeInterval(1860), durationSeconds: 1500, isLiveCapture: false), workDir: dir)
+        XCTAssertNil(SpeakerHints.load(workDir: dir, base: "memo"), "a loose match must not copy names into another recording")
+    }
+
+    /// Two dropped phone files back to back (10:00 and 10:30, 30 min each): B read as END equals A read
+    /// as START. Files from one phone share one convention, so mixed readings are not a match.
+    func testBackToBackPhoneFilesAreNotLinked() throws {
+        try SpeakerHints(participants: "Alex (me), Sam").save(workDir: dir, base: "a")
+        _ = DuplicateCallLink.register(CallRecord(base: "a", time: t0, durationSeconds: 1800, isLiveCapture: false), workDir: dir)
+        XCTAssertNil(DuplicateCallLink.register(
+            CallRecord(base: "b", time: t0.addingTimeInterval(1800), durationSeconds: 1800, isLiveCapture: false), workDir: dir))
+        XCTAssertNil(SpeakerHints.load(workDir: dir, base: "b"))
+    }
+
     func testRecordRoundTrip() throws {
         let r = CallRecord(base: "r", time: t0, durationSeconds: 5, isLiveCapture: false)
         try DuplicateCallLink.saveRecord(r, workDir: dir)

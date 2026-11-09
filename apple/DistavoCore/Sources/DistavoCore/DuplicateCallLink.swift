@@ -77,19 +77,37 @@ public enum DuplicateCallLink {
             .compactMap { loadRecord(workDir: workDir, base: $0) }
     }
 
+    /// Largest start difference at which a twin's participants sheet is copied (h-chain review 2026-11-09).
+    /// Two devices started for the same call start within a minute or two; a looser match (a memo started
+    /// just after a call, read with the wrong time convention) still gets the "also captured" link, never
+    /// the other recording's names and speaker count.
+    public static let sheetCopyMaxStartSkew: TimeInterval = 120
+
     /// The best twin of `record` among `others` (largest overlap), judged by the detector. nil when none.
     public static func twin(of record: CallRecord, among others: [CallRecord], sheetBases: Set<String>) -> CallRecord? {
-        var best: (record: CallRecord, overlap: Double)?
+        bestMatch(of: record, among: others, sheetBases: sheetBases)?.record
+    }
+
+    /// The best twin plus how far apart the two matching readings start.
+    static func bestMatch(of record: CallRecord, among others: [CallRecord], sheetBases: Set<String>)
+        -> (record: CallRecord, startSkew: TimeInterval)? {
+        var best: (record: CallRecord, overlap: Double, skew: TimeInterval)?
+        let mineAll = record.candidates(hasSheet: sheetBases.contains(record.base))
         for o in others {
-            for mine in record.candidates(hasSheet: sheetBases.contains(record.base)) {
-                for theirs in o.candidates(hasSheet: sheetBases.contains(o.base))
-                where DuplicateCallDetector.isSameCall(mine, theirs) {
-                    let ov = DuplicateCallDetector.overlap(mine, theirs)
-                    if best == nil || ov > best!.overlap { best = (o, ov) }
+            let theirsAll = o.candidates(hasSheet: sheetBases.contains(o.base))
+            // Two dropped files share one container convention (one phone), so only the SAME reading of
+            // each is compared: otherwise B-as-end equals A-as-start for two back-to-back files.
+            let pairs: [(CapturedCall, CapturedCall)] = (!record.isLiveCapture && !o.isLiveCapture)
+                ? Array(zip(mineAll, theirsAll))
+                : mineAll.flatMap { m in theirsAll.map { (m, $0) } }
+            for (mine, theirs) in pairs where DuplicateCallDetector.isSameCall(mine, theirs) {
+                let ov = DuplicateCallDetector.overlap(mine, theirs)
+                if best == nil || ov > best!.overlap {
+                    best = (o, ov, abs(mine.start.timeIntervalSince(theirs.start)))
                 }
             }
         }
-        return best?.record
+        return best.map { ($0.record, $0.skew) }
     }
 
     /// Record this recording, look for a twin and, when found, link both sidecars and copy the twin's
@@ -100,13 +118,14 @@ public enum DuplicateCallLink {
         let others = otherRecords(workDir: workDir, excluding: record.base)
         let sheets = Set((others.map(\.base) + [record.base]).filter {
             SpeakerHints.load(workDir: workDir, base: $0).map { !$0.isEmpty } ?? false })
-        guard let other = twin(of: record, among: others, sheetBases: sheets) else { return nil }
+        guard let match = bestMatch(of: record, among: others, sheetBases: sheets) else { return nil }
+        let other = match.record
         // Primary by the detector's own rules (first reading is enough: sheet / duration / live decide).
         let mine = record.candidates(hasSheet: sheets.contains(record.base))[0]
         let theirs = other.candidates(hasSheet: sheets.contains(other.base))[0]
         let iAmPrimary = DuplicateCallDetector.primaryFirst(mine, theirs).0.base == record.base
         // Reuse the twin's sheet only when this one has none (names, count, terms).
-        if !sheets.contains(record.base), sheets.contains(other.base),
+        if !sheets.contains(record.base), sheets.contains(other.base), match.startSkew <= sheetCopyMaxStartSkew,
            let hints = SpeakerHints.load(workDir: workDir, base: other.base) {
             try? hints.save(workDir: workDir, base: record.base)
         }

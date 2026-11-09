@@ -290,6 +290,25 @@ final class SummaryDriverTests: XCTestCase {
         for line in text.split(separator: "\n") { XCTAssertTrue(mapped.contains(line), "lost: \(line)") }
     }
 
+    /// A long dense meeting is map-reduced, but its heuristic-sized chunks still overflow the real
+    /// tokenizer: each such chunk is split once and mapped in halves (j-branch review 2026-11-09).
+    func testDenseLongTranscriptSplitsAnOverflowingMapChunk() async throws {
+        let measure: @Sendable (String) -> Int? = { Int(ceil(Double($0.count) / 2.0)) }
+        let text = transcript(chars: 14_000)
+        guard case .mapReduce = EmbeddedSummaryPlanner.plan(transcript: text, contextSize: 4096, noteOwner: "Marc",
+                                                          userSpeaker: "SPEAKER_00") else {
+            return XCTFail("precondition: the heuristic plans map-reduce")
+        }
+        let gen = FakeGenerator(contextSize: 4096, tokenCount: measure)
+        let note = try await SummaryDriver.run(request(text), generator: gen)
+        XCTAssertTrue(note.hasPrefix("# Meeting notes"))
+        for (prompt, out) in zip(gen.prompts, gen.maxTokens) {
+            XCTAssertLessThanOrEqual(measure(prompt)! + out + EmbeddedSummaryBudget.defaultSafetyMargin, 4096)
+        }
+        let mapped = gen.prompts.dropLast().joined()
+        for line in text.split(separator: "\n") { XCTAssertTrue(mapped.contains(line), "lost: \(line)") }
+    }
+
     /// When the INSTRUCTIONS alone do not fit, chunking cannot help: the
     /// original error stands and nothing is generated.
     func testInstructionOverflowStillThrowsWithoutGenerating() async {

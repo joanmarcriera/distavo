@@ -172,13 +172,12 @@ public enum SummaryDriver {
             } catch let error as SummaryDriverError where error.isMeasuredOverflow {
                 // The heuristic under-counted this transcript (#5284): summarise it in
                 // parts sized by the real tokenizer instead of failing the recording.
-                guard let measured = await measuredChunks(request, prompt: prompt, generator: generator) else {
+                guard let chunks = await measuredChunks(request, prompt: prompt, generator: generator) else {
                     throw error
                 }
                 onProgress("This transcript is denser than expected - summarising it in parts…")
-                return try await mapReduce(chunks: measured.chunks, request: request, generator: generator,
-                                           mapBudget: mapBudget, finalBudget: finalBudget,
-                                           scale: measured.scale, onProgress: onProgress)
+                return try await mapReduce(chunks: chunks, request: request, generator: generator,
+                                           mapBudget: mapBudget, finalBudget: finalBudget, onProgress: onProgress)
             }
 
         case .contextTooSmall:
@@ -194,16 +193,15 @@ public enum SummaryDriver {
     static func mapReduce(
         chunks: [String], request: SummaryRequest, generator: some SummaryGenerator,
         mapBudget: EmbeddedSummaryBudget, finalBudget: EmbeddedSummaryBudget,
-        scale: Double = 1.0, onProgress: @Sendable (String) -> Void
+        onProgress: @Sendable (String) -> Void
     ) async throws -> String {
             guard !chunks.isEmpty else { throw SummaryDriverError.emptyResult }
             var partials: [String] = []
             partials.reserveCapacity(chunks.count)
             for (i, chunk) in chunks.enumerated() {
                 onProgress("Summarising part \(i + 1) of \(chunks.count) on this Mac…")
-                partials.append(try await generate(
-                    EmbeddedSummaryPrompt.map(chunk: chunk, index: i + 1, total: chunks.count),
-                    maxOutputTokens: mapBudget.reservedForOutput, generator))
+                partials.append(contentsOf: try await mapChunk(
+                    chunk, index: i + 1, total: chunks.count, mapBudget: mapBudget, generator: generator))
             }
             onProgress("Writing the note…")
             // The merged bullets stand in for the transcript in the normal
@@ -211,10 +209,32 @@ public enum SummaryDriver {
             // meeting can still overflow, so fold them down until they fit.
             let merged = try await reduceToFit(
                 partials: partials, request: request, generator: generator,
-                scale: scale, onProgress: onProgress)
+                onProgress: onProgress)
             return try await generate(
                 finalPrompt(request, transcript: merged),
                 maxOutputTokens: finalBudget.reservedForOutput, generator)
+    }
+
+    /// One map step. A chunk the real tokenizer says overflows (dense text the heuristic sized, #5284) is
+    /// split in two and each half mapped ONCE more; a half that still overflows throws the original error.
+    static func mapChunk(
+        _ chunk: String, index: Int, total: Int, mapBudget: EmbeddedSummaryBudget,
+        generator: some SummaryGenerator, mayRetry: Bool = true
+    ) async throws -> [String] {
+        do {
+            return [try await generate(EmbeddedSummaryPrompt.map(chunk: chunk, index: index, total: total),
+                                       maxOutputTokens: mapBudget.reservedForOutput, generator)]
+        } catch let error as SummaryDriverError where error.isMeasuredOverflow && mayRetry {
+            let half = max(1, EmbeddedSummaryTokens.estimate(chunk) / 2)
+            let pieces = EmbeddedSummaryPlanner.chunks(transcript: chunk, budgetTokens: half)
+            guard pieces.count >= 2 else { throw error }
+            var out: [String] = []
+            for piece in pieces {
+                out += try await mapChunk(piece, index: index, total: total, mapBudget: mapBudget,
+                                          generator: generator, mayRetry: false)
+            }
+            return out
+        }
     }
 
     /// Chunks sized with the generator's REAL token counts, for a transcript the
@@ -225,7 +245,7 @@ public enum SummaryDriver {
     /// window, not the transcript, is the problem - the original error stands).
     static func measuredChunks(
         _ request: SummaryRequest, prompt: String, generator: some SummaryGenerator
-    ) async -> (chunks: [String], scale: Double)? {
+    ) async -> [String]? {
         let size = generator.contextSize
         let margin = EmbeddedSummaryBudget.defaultSafetyMargin
         let reserve = EmbeddedSummaryBudget.finalOutputTokens(style: request.style)
@@ -241,11 +261,10 @@ public enum SummaryDriver {
         // Heuristic tokens per real token for THIS text, applied to the map step's room.
         let ratio = Double(EmbeddedSummaryTokens.estimate(prompt)) / Double(measured)
         let room = size - EmbeddedSummaryBudget.map(contextSize: size).reservedForOutput - margin - mapInstructions
-        let scale = min(1.0, ratio)
-        let budget = Int(Double(room) * scale)
+        let budget = Int(Double(room) * min(1.0, ratio))
         guard budget > 0 else { return nil }
         let chunks = EmbeddedSummaryPlanner.chunks(transcript: request.transcript, budgetTokens: budget)
-        return chunks.isEmpty ? nil : (chunks, scale)
+        return chunks.isEmpty ? nil : chunks
     }
 
     /// The final prompt for `transcript` (the real one, or merged notes).
@@ -271,7 +290,7 @@ public enum SummaryDriver {
     /// the final pass still produces a note instead of throwing.
     static func reduceToFit(
         partials: [String], request: SummaryRequest, generator: some SummaryGenerator,
-        scale: Double = 1.0, onProgress: @Sendable (String) -> Void
+        onProgress: @Sendable (String) -> Void
     ) async throws -> String {
         let contextSize = generator.contextSize
         let budget = EmbeddedSummaryBudget.final(
@@ -283,16 +302,14 @@ public enum SummaryDriver {
         // No room for the notes at all: stop rather than prompt with an empty transcript.
         guard budget.transcriptTokens >= minimumReduceTokens else { throw SummaryDriverError.contextTooSmall }
         let mapBudget = EmbeddedSummaryBudget.map(contextSize: contextSize)
-        // `scale` < 1 when the real tokenizer showed the text is denser than the
-        // heuristic assumes (#5284); 1 keeps every pre-#5284 run unchanged.
-        let room = Int(Double(budget.transcriptTokens) * scale)
+        let room = budget.transcriptTokens
         var merged = EmbeddedSummaryPrompt.merge(partials: partials)
 
         for round in 1...maxFoldRounds {
             if EmbeddedSummaryTokens.estimate(merged) <= room { return merged }
             onProgress("Condensing notes (pass \(round))…")
             let chunks = EmbeddedSummaryPlanner.chunks(
-                transcript: merged, budgetTokens: max(1, Int(Double(mapBudget.transcriptTokens) * scale)))
+                transcript: merged, budgetTokens: mapBudget.transcriptTokens)
             guard !chunks.isEmpty else { break }
             var condensed: [String] = []
             for (i, chunk) in chunks.enumerated() {

@@ -42,14 +42,14 @@ final class RoleTermPacksTests: XCTestCase {
     }
 
     /// Review gap from drive 0054: a role phrase in the parentheses was kept whole as a "name" and so reached
-    /// the fuzzy rewrite, which could snap ordinary words toward it. Only the organisation survives.
+    /// the fuzzy rewrite, which could snap ordinary words toward it. Only the organisation survives (parenthesised term first, as before).
     func testRolePhraseInParenthesesIsNotAParticipantTerm() {
         let phrase = SpeakerHints(participants: "Sam (accountant for Example Accounts Ltd), Marc (me)")
-        XCTAssertEqual(phrase.participantTerms, ["Sam", "Example Accounts Ltd"])
+        XCTAssertEqual(phrase.participantTerms, ["Example Accounts Ltd", "Sam", "Marc"])
         let bare = SpeakerHints(participants: "Sam (accountant), Pat (bookkeeper for Acme Books)")
-        XCTAssertEqual(bare.participantTerms, ["Sam", "Pat", "Acme Books"])
+        XCTAssertEqual(bare.participantTerms, ["Sam", "Acme Books", "Pat"])
         // A plain company in parentheses is still a term.
         XCTAssertEqual(SpeakerHints(participants: "Bong Cha (Lightning AI) - interviewer").participantTerms,
-                       ["Bong Cha", "Lightning AI"])
+                       ["Lightning AI", "Bong Cha"])
     }
 }

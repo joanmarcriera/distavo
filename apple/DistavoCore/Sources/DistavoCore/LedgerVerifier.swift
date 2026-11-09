@@ -173,8 +173,9 @@ public enum LedgerVerifier {
     /// The transcript turn label that is the only holder of the row's quote (nil when none or several).
     static func soleHolder(_ row: Row, turns: [Turn]) -> String? {
         guard row.fields.count >= 3 else { return nil }
-        let q = tokens(row.quote.components(separatedBy: "...").first ?? row.quote)
-        guard q.count >= 3 else { return nil }
+        // First quote part with at least 3 tokens ("..." and the Unicode ellipsis both split a quote).
+        let parts = row.quote.components(separatedBy: CharacterSet(charactersIn: "\u{2026}")).flatMap { $0.components(separatedBy: "...") }
+        guard let q = parts.map({ tokens($0) }).first(where: { $0.count >= 3 }) else { return nil }
         let holders = turns.filter { $0.index.bestCoverage(of: q) >= quoteThreshold }
         guard Set(holders.map { $0.label.lowercased() }).count == 1 else { return nil }
         return holders.first?.label
@@ -190,6 +191,15 @@ public enum LedgerVerifier {
         return names.labelByName[w]
     }
 
+    /// Roles and placeholders are not names to learn ("Both", "Unknown", "Recruiter", "Speaker 1").
+    static func isPersonLike(_ who: String) -> Bool {
+        let stop: Set<String> = ["both", "all", "everyone", "unknown", "unclear", "group", "team", "n/a", "none",
+                                 "recruiter", "interviewer", "interviewee", "candidate", "speaker", "other", "owner"]
+        let w = who.lowercased()
+        guard !stop.contains(w), !w.contains("speaker"), !who.contains(where: { $0.isNumber }) else { return false }
+        return who.first?.isUppercase == true
+    }
+
     /// Learn name -> label for the names the transcript does not use, from rows whose quote has one holder:
     /// a name needs at least two such rows, more than half of them on one label, and no other name may claim
     /// that label (two spellings of one person, or a mixed-up pair, are left alone).
@@ -198,7 +208,7 @@ public enum LedgerVerifier {
         var votes: [String: [String: Int]] = [:]
         var names = SpeakerNames()
         for row in rows where row.fields.count >= 3 {
-            guard labelFor(row.who, labels: labels, names: SpeakerNames()) == nil,
+            guard labelFor(row.who, labels: labels, names: SpeakerNames()) == nil, isPersonLike(row.who),
                   let holder = soleHolder(row, turns: turns) else { continue }
             let key = row.who.lowercased()
             votes[key, default: [:]][holder, default: 0] += 1
@@ -224,6 +234,8 @@ public enum LedgerVerifier {
               let current = labelFor(row.who, labels: labels, names: names),
               let holder = soleHolder(row, turns: turns),
               holder.lowercased() != current.lowercased() else { return nil }
+        // A turn the cleaner could not attribute is no speaker to move a row to.
+        guard holder.uppercased() != "SPEAKER_UNKNOWN" else { return nil }
         var fields = row.fields
         // Written the way the ledger spells that speaker (a learned name), else as the transcript label.
         fields[1] = names.spelling(of: holder) ?? holder

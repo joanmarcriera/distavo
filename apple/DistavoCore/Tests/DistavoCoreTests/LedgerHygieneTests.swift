@@ -127,6 +127,28 @@ final class LedgerHygieneTests: XCTestCase {
         XCTAssertTrue(r.text.contains("| Ahmed Khan |"), r.text)
     }
 
+    func testPlaceholderWhoValuesAreNotLearnedAsNames() {
+        XCTAssertFalse(LedgerVerifier.isPersonLike("Both"))
+        XCTAssertFalse(LedgerVerifier.isPersonLike("Speaker 1"))
+        XCTAssertFalse(LedgerVerifier.isPersonLike("recruiter"))
+        XCTAssertTrue(LedgerVerifier.isPersonLike("Ahmed"))
+    }
+
+    func testUnknownTurnIsNeverAHolder() {
+        let t = advice + "\n\n[SPEAKER_UNKNOWN]\nThe tax year ends on the fifth of April and the deadline is firm.\n"
+        let r = LedgerVerifier.verify(ledger([
+            "- 5 April tax year end | Ahmed | \"tax year ends on the fifth of April and the deadline is firm\" | date",
+        ]), transcript: t)
+        XCTAssertEqual(r.corrected, 0, r.text)
+    }
+
+    func testUnicodeEllipsisQuoteStillFindsItsHolder() {
+        let r = LedgerVerifier.verify(ledger([
+            "- 30,000 accelerators | SPEAKER_00 | \"\u{2026} planning thirty thousand accelerators for the first phase\" | count",
+        ]), transcript: transcript)
+        XCTAssertEqual(r.corrected, 1, r.text)
+    }
+
     func testTriviaIsDropped() {
         let q = "\"we use Teams for all the calls with the vendor team\""
         let r = LedgerVerifier.verify(ledger([

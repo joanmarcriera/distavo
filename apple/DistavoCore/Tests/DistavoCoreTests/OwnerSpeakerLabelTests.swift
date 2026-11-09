@@ -36,3 +36,13 @@ final class OwnerSpeakerLabelTests: XCTestCase {
         XCTAssertEqual(OwnerSpeakerLabel.effective(configured: "Marc", transcript: "plain text without turns"), "Marc")
     }
 }
+
+extension OwnerSpeakerLabelTests {
+    /// Reviewer finding: "Marc" against a renamed [Marc Riera] resolves to the full label; two Marcs stay unknown.
+    func testFirstNameResolvesToRenamedLabel() {
+        let t = "[Marc Riera]\nHello.\n\n[Edward]\nHi.\n"
+        XCTAssertEqual(OwnerSpeakerLabel.effective(configured: "Marc", transcript: t), "Marc Riera")
+        let two = "[Marc A]\nHello.\n\n[Marc B]\nHi.\n"
+        XCTAssertEqual(OwnerSpeakerLabel.effective(configured: "Marc", transcript: two), "unknown")
+    }
+}

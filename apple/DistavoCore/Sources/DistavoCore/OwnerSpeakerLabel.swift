@@ -24,6 +24,9 @@ public enum OwnerSpeakerLabel {
             if t.hasPrefix("["), t.hasSuffix("]"), t.count > 2 { labels.append(String(t.dropFirst().dropLast())) }
         }
         guard !labels.isEmpty else { return configured }
-        return labels.first { $0.lowercased() == want.lowercased() } ?? "unknown"
+        if let exact = labels.first(where: { $0.lowercased() == want.lowercased() }) { return exact }
+        // "Marc" for a renamed [Marc Riera]: a unique first-word match resolves to the full label.
+        let byFirst = Set(labels.filter { $0.lowercased().split(separator: " ").first.map(String.init) == want.lowercased() })
+        return byFirst.count == 1 ? byFirst.first! : "unknown"
     }
 }

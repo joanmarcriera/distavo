@@ -43,6 +43,23 @@ final class OffensiveWordGuardTests: XCTestCase {
             XCTAssertTrue(r.text.contains(OffensiveWordGuard.placeholder), text)
         }
     }
+    /// Open low #10 of the j review: hyphen and slash forms are tool context too.
+    func testHyphenAndSlashFormsBecomeNagios() {
+        let cases = [("the \(slur)s-plugins dir", "the Nagios-plugins dir"),
+                     ("\(slur)/Icinga checks", "Nagios/Icinga checks"),
+                     ("Icinga/\(slur) setup", "Icinga/Nagios setup"),
+                     ("\(slur) / Zabbix", "Nagios / Zabbix")]
+        for (heard, want) in cases {
+            let r = OffensiveWordGuard.apply(heard)
+            XCTAssertEqual(r.text, want, heard)
+            XCTAssertEqual(r.flagged, 1, heard)
+        }
+        // A hyphen or slash before a generic word is still no tool context.
+        // A spaced dash is a spoken pause, not a compound (Sonnet review): "he said x - check this out".
+        for text in ["\(slur)-style", "\(slur)/based", "Prometheus/\(slur)", "he said \(slur) - check this out"] {
+            XCTAssertFalse(OffensiveWordGuard.apply(text).text.contains("Nagios"), text)
+        }
+    }
     func testNoContextStillRemoved() {
         let r = OffensiveWordGuard.apply("the \(slur) alone and then nothing about tools")
         XCTAssertTrue(r.text.contains(OffensiveWordGuard.placeholder))

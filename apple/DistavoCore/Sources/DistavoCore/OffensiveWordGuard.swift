@@ -8,7 +8,8 @@
 //      ("Nagios"), and
 //   2. replace any other flagged word with "[word removed]", so it never reaches the summary
 //      prompt unmarked. The count is returned so a caller can warn the user.
-// Context never crosses a sentence or line break (only spaces, tabs and one comma). Known limits: variant
+// Context never crosses a sentence or line break (only spaces, tabs and one comma, an attached hyphen, or a
+// slash). Known limits: variant
 // spellings of the word are not matched, and word tokens in .segments.json are replaced one by one (no context).
 // Deliberately tiny and conservative: it is a safety net, not a profanity filter. The list is stored
 // ROT13-encoded so the repository itself does not carry the words.
@@ -26,7 +27,12 @@ public enum OffensiveWordGuard {
     /// Words that, right after a flagged word, mean the speaker said a monitoring product.
     private static let toolContext = "plugins?|checks?|core|server|monitoring|agents?|nrpe|xi|(?:and|or|vs|versus)[ \t]+(?:icinga|checkmk|zabbix)"
     /// Sibling monitoring tools that, right BEFORE a flagged word, mean the same.
-    private static let precedingTool = "(?<=\\b(?:icinga|zabbix|checkmk)(?:[ \t]{1,3}(?:and|or|vs|versus))?[ \t,]{1,2})"
+    /// "Icinga/x" counts like "Icinga x" (j review, open low #10).
+    private static let precedingTool = "(?<=\\b(?:icinga|zabbix|checkmk)(?:(?:[ \t]{1,3}(?:and|or|vs|versus))?[ \t,]{1,2}|[ \t]?/[ \t]?))"
+    /// Between the word and the tool word: spaces/tabs with at most one comma, an attached hyphen, or a slash
+    /// ("x-plugins", "x/Icinga", "x / Zabbix"). A spaced dash is a spoken pause, not a compound.
+    private static let separator = "(?:[ \\t]*,?[ \\t]+|-|[ \\t]*/[ \\t]*)"
+    private static let siblingTool = "icinga|checkmk|zabbix"
     public static let placeholder = "[word removed]"
 
     private static func rot13(_ s: String) -> String {
@@ -43,7 +49,7 @@ public enum OffensiveWordGuard {
         encodedStems.compactMap { enc in
             let stem = NSRegularExpression.escapedPattern(for: rot13(enc))
             let word = "\\b\(stem)s?\\b"
-            guard let ctx = try? NSRegularExpression(pattern: "(?:\(word)(?=[ \\t]*,?[ \\t]+(?:\(toolContext))\\b)|\(precedingTool)\(word))",
+            guard let ctx = try? NSRegularExpression(pattern: "(?:\(word)(?=\(separator)(?:\(toolContext)|\(siblingTool))\\b)|\(precedingTool)\(word))",
                                                      options: [.caseInsensitive]),
                   let plain = try? NSRegularExpression(pattern: word, options: [.caseInsensitive])
             else { return nil }

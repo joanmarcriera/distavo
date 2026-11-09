@@ -224,7 +224,8 @@ extension ProjectSummary {
             guard let text = try? String(contentsOf: notesDir.appendingPathComponent("\(base).md"), encoding: .utf8) else {
                 return (out, base)
             }
-            out.append(ProjectSource(name: base, body: text))
+            // #3951: a note written before the offensive-word guard existed must not reach this prompt unmarked.
+            out.append(ProjectSource(name: base, body: OffensiveWordGuard.apply(text).text))
         }
         return (out, nil)
     }

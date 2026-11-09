@@ -22,6 +22,14 @@ private final class Calls: @unchecked Sendable {
     var targets: [SummariseTarget] { lock.lock(); defer { lock.unlock() }; return _targets }
 }
 
+/// The last transcript the fake summariser saw.
+private final class SeenTranscript: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String?
+    func set(_ v: String) { lock.lock(); _value = v; lock.unlock() }
+    var value: String? { lock.lock(); defer { lock.unlock() }; return _value }
+}
+
 /// Vikunja #2947: regenerate re-summarises from the cached transcript only and
 /// keeps the previous note.
 final class RegenerateTests: XCTestCase {
@@ -95,6 +103,21 @@ final class RegenerateTests: XCTestCase {
         XCTAssertEqual(second.status, .done)
         XCTAssertEqual(backups(notes).count, 2, "an existing backup must never be overwritten")
         XCTAssertTrue(backups(notes).contains { read($0) == oldNote })
+    }
+
+    /// #3951 review: a transcript cached BEFORE the guard existed (the recording that reported the bug) must not
+    /// reach the summary prompt unmarked when the note is regenerated.
+    func testRegenerateGuardsATranscriptCachedBeforeTheGuard() async throws {
+        let slur = ["n", "i", "g", "g", "e", "r"].joined()   // rebuilt so the repository does not contain it
+        let (cfg, _, _) = try makeEnv(transcript: "SPEAKER_00: I wrote the \(slur)s plugins. Then he said \(slur).")
+        let seen = SeenTranscript()
+        let result = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg,
+                                               deps: deps(Calls(), summarise: { t in seen.set(t); return RegenerateTests.newNote }))
+        XCTAssertEqual(result.status, .done, result.message)
+        let input = try XCTUnwrap(seen.value)
+        XCTAssertFalse(input.lowercased().contains(slur), input)
+        XCTAssertTrue(input.contains("Nagios plugins"), input)
+        XCTAssertTrue(input.contains(OffensiveWordGuard.placeholder), input)
     }
 
     func testMissingTranscriptIsAClearErrorAndTouchesNothing() async throws {

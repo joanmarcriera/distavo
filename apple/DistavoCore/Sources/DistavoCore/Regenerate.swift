@@ -171,7 +171,9 @@ extension Pipeline {
         // 1. The cached transcript. Absent for notes made before it was kept, or
         //    after the work folder was cleared: say so, change nothing.
         let transcriptPath = cachedTranscriptURL(workDir: workDir, base: base)
-        let transcript = ((try? String(contentsOf: transcriptPath, encoding: .utf8)) ?? "")
+        // The #3951 guard again: a transcript cached before the guard existed must not reach the prompt
+        // unmarked (idempotent on a guarded one). In memory only; the cached file is left as it is.
+        let transcript = OffensiveWordGuard.apply((try? String(contentsOf: transcriptPath, encoding: .utf8)) ?? "").text
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcript.isEmpty else {
             return ProcessResult(

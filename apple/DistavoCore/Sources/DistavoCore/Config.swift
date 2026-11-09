@@ -239,8 +239,14 @@ public struct SummariseConfig: Codable, Equatable {
     /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). On by default;
     /// false keeps the list as advice only.
     public var applyCorrections: Bool
+    /// When no summary template applies ("none", unset, or "auto" with nothing to go on) use the neutral
+    /// section list instead of the stock one that carries Opportunity / Role expectations / Compensation
+    /// (Vikunja #6666). **false for any config predating the key** (the prompt stays byte-identical);
+    /// true only for fresh installs via `recommendedForThisMac()`.
+    public var neutralDefault: Bool
 
     enum CodingKeys: String, CodingKey {
+        case neutralDefault = "neutral_default"
         case nonMeetingGuard = "non_meeting_guard"
         case actionItems = "action_items"
         case applyCorrections = "apply_corrections"
@@ -263,7 +269,8 @@ public struct SummariseConfig: Codable, Equatable {
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
                 actionItems: Bool = false, nonMeetingGuard: Bool = false,
-                applyCorrections: Bool = true) {
+                applyCorrections: Bool = true, neutralDefault: Bool = false) {
+        self.neutralDefault = neutralDefault
         self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
         self.applyCorrections = applyCorrections
         self.backend = backend; self.server = server; self.local = local
@@ -308,6 +315,7 @@ public struct SummariseConfig: Codable, Equatable {
         actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
         nonMeetingGuard = ((try? c.decodeIfPresent(Bool.self, forKey: .nonMeetingGuard)) ?? nil) ?? d.nonMeetingGuard
         applyCorrections = ((try? c.decodeIfPresent(Bool.self, forKey: .applyCorrections)) ?? nil) ?? d.applyCorrections
+        neutralDefault = ((try? c.decodeIfPresent(Bool.self, forKey: .neutralDefault)) ?? nil) ?? d.neutralDefault
     }
 }
 
@@ -561,6 +569,8 @@ public struct Config: Codable, Equatable {
         // Fresh installs pick the note template per recording from the participants (#3582), so a
         // stale global template never decides the shape of an unrelated meeting.
         cfg.summarise.template = SummaryTemplateCatalog.autoID
+        // ...and when nothing matches they get neutral sections, not the job-search layout (#6666).
+        cfg.summarise.neutralDefault = true
         // Fresh installs let the recorder try other microphones when the first is silent (#4039).
         cfg.recording.micAutoSwitch = true
         if embeddedSupported {

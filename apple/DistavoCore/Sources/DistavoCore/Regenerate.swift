@@ -122,7 +122,9 @@ extension Pipeline {
         participants: String? = nil, transcript: String = ""
     ) -> (template: SummaryTemplate?, note: String?) {
         let chosen = options.templateID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if chosen.lowercased() == SummaryTemplateCatalog.noneID { return (nil, nil) }
+        if chosen.lowercased() == SummaryTemplateCatalog.noneID {
+            return (config.summarise.neutralDefault ? SummaryTemplateCatalog.neutralDefault : nil, nil)   // #6666
+        }
         if !chosen.isEmpty, chosen.lowercased() != SummaryTemplateCatalog.autoID,
            let t = SummaryTemplateCatalog.template(id: chosen, config: config) { return (t, nil) }
         let folder = sourcePath.map {

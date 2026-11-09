@@ -404,7 +404,66 @@ public enum SummaryTemplateCatalog {
         ## Next meeting
         The agreed follow-up call or meeting: when, who and the topic. Write "none stated" if nothing was agreed.
         """),
+        bundled(projectMeetingID, "Project meeting", "Context, decisions, actions, risks, open questions, next meeting.", """
+        This is a project, delivery or team meeting (a deployment, a rollout, a runbook review, a workstream sync). Capture what the team decided and who does what. It is not a sales, recruitment or interview conversation: never write opportunity, role, candidate, compensation or follow-up-email sections, and do not invent names, dates or commitments.
+
+        ## Context
+        What the project or topic is, who attended and why the meeting took place, as stated.
+
+        ## Decisions
+        Only what was explicitly decided, with who decided it. Write "none stated" if nothing was.
+
+        ## Actions
+        Use this table (owner as a person, deadline as spoken or "none stated"):
+
+        | Action | Owner | Deadline | Evidence | Confidence |
+        |---|---|---|---|---|
+
+        ## Risks and issues
+        Problems, blockers and risks raised, one bullet each, with who raised them.
+
+        ## Open questions
+        Questions left unanswered, and who was asked.
+
+        ## Next meeting
+        When, who and the topic of the agreed follow-up. Write "none stated" if nothing was agreed.
+        """),
     ] + [ukContracting]
+
+    /// Id of the project-meeting template (Vikunja #6666).
+    public static let projectMeetingID = "project_meeting"
+
+    /// Id of the neutral fallback layout (Vikunja #6666). Not in the picker and not a valid sidecar id:
+    /// only `resolveWithReason` returns it, when no template applies and `summarise.neutral_default` is on.
+    public static let neutralID = "neutral"
+
+    /// The stock layout without the job-search sections (Opportunity, Role expectations, Compensation,
+    /// Highest-ROI follow-up, follow-up email): what a meeting gets when no template applies.
+    static let neutralDefault: SummaryTemplate = bundled(neutralID, "Standard notes", "Neutral meeting notes.", """
+        ## Executive summary
+
+        ## Context
+
+        ## Key people and organisations
+
+        ## Technical scope
+
+        ## Timeline
+
+        ## Decisions made
+
+        ## Action items
+        Use this table:
+
+        | Action | Owner | Deadline | Evidence | Confidence |
+        |---|---|---|---|---|
+
+        ## Open questions
+
+        ## Risks and concerns
+
+        ## Possible transcription corrections
+        """)
 
     /// Id of the advice-call template (accountant, lawyer, financial adviser; Vikunja #6355).
     public static let adviceCallID = "advice_call"
@@ -541,6 +600,17 @@ public enum SummaryTemplateCatalog {
     public static func resolveWithReason(config: Config, folder: String = "", sidecarID: String? = nil,
                                          participants: String? = nil, transcript: String = "")
         -> (template: SummaryTemplate?, note: String?) {
+        let r = resolveNamed(config: config, folder: folder, sidecarID: sidecarID,
+                             participants: participants, transcript: transcript)
+        // No template applies ("none", unset, unknown id, auto with nothing to go on): the opt-in neutral
+        // layout instead of the stock job-search one (#6666).
+        if r.template == nil, config.summarise.neutralDefault { return (neutralDefault, nil) }
+        return r
+    }
+
+    private static func resolveNamed(config: Config, folder: String, sidecarID: String?,
+                                     participants: String?, transcript: String)
+        -> (template: SummaryTemplate?, note: String?) {
         func named(_ s: String?) -> String? {
             let t = s?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             return t.isEmpty ? nil : t
@@ -588,6 +658,11 @@ public enum TemplateAutoPick {
           "gestoría", "comptable"],
          // No bare "financial"/"tax": a "Head of Financial Planning" or a tax-themed sales call must not score.
          ["hmrc", "dividend", "legal advice", "tax return"]),
+        // Delivery talk (Vikunja #6666). Suppressed below when any interview/recruiter word is present.
+        ("project_meeting",
+         ["project", "deployment", "rollout", "roll-out", "runbook", "runbooks", "cutover", "go-live", "kickoff",
+          "kick-off", "proyecto", "projecte", "despliegue", "desplegament"],
+         ["team", "workstream", "milestone", "programme", "equipo", "equip"]),
         ("standup", ["stand-up", "standup", "stand up", "scrum", "daily sync"], ["sprint", "blocker"]),
         ("one_on_one", ["1:1", "one-to-one", "one to one", "one on one"], ["mentor", "mentee"]),
         ("sales_call", ["sales call", "demo", "prospect"], ["pricing", "quote", "proposal"]),
@@ -623,6 +698,10 @@ public enum TemplateAutoPick {
             } else { best = (score, rule.id, hits) }
         }
         guard let b = best, b.score >= 2, !tied else { return nil }
+        // A recruiter or candidate in the room means the talk of a "project" is the role, not a delivery meeting.
+        if b.id == SummaryTemplateCatalog.projectMeetingID,
+           let interview = rules.first(where: { $0.id == "interview" }),
+           interview.strong.contains(where: { contains(who, $0) || contains(start, $0) }) { return nil }
         return Pick(id: b.id, reason: b.hits.isEmpty ? "words in the transcript" : b.hits.prefix(3).joined(separator: ", "))
     }
 }

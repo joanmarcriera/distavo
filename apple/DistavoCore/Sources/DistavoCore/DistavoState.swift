@@ -202,19 +202,32 @@ public enum DistavoState {
         /// retried at every launch for ever. The caller never counts a cancellation.
         public static let transientFailureCap = 5
 
-        /// `.transientfail` ("<size>\n<count>"): the run of transient failures for the file at this size. Returns
-        /// true when it reached `cap` and the base is now terminal (`.unreadable`, the #5283 state). A new file
-        /// size restarts the run; a successful conversion (`clearTransientConvertFailures`) ends it.
+        /// Failures closer together than this are one outage and count once. A transient conversion failure
+        /// DEFERS (60 s, 120 s, ... backoff), so without the spacing five quick retries made an offline volume
+        /// terminal within 15 minutes (j-branch review 2026-11-09); with it the cap means hours of failures.
+        public static let transientCountSpacing: TimeInterval = 3600
+
+        /// `.transientfail` ("<size>\n<count>\n<epoch of the last counted failure>"): the run of transient
+        /// failures for the file at this size. Returns true when it reached `cap` and the base is now terminal
+        /// (`.unreadable`, the #5283 state). A new file size restarts the run; a successful conversion
+        /// (`clearTransientConvertFailures`) ends it; a failure within `transientCountSpacing` of the last
+        /// counted one is not counted. A marker without the epoch line (older builds) counts as before.
         @discardableResult
         public func recordTransientConvertFailure(_ base: String, message: String, fileSize: Int?,
-                                                  cap: Int = Store.transientFailureCap) -> Bool {
+                                                  cap: Int = Store.transientFailureCap, now: Date = Date()) -> Bool {
             let size = fileSize.map(String.init) ?? ""
             var count = 1
             if let old = try? String(contentsOf: marker(base, "transientfail"), encoding: .utf8) {
                 let l = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-                if l.count >= 2, l[0] == size, let n = Int(l[1]) { count = n + 1 }
+                if l.count >= 2, l[0] == size, let n = Int(l[1]) {
+                    if l.count >= 3, let last = Double(l[2]),
+                       now.timeIntervalSince1970 - last < Store.transientCountSpacing {
+                        return false   // same outage: neither counted nor re-stamped
+                    }
+                    count = n + 1
+                }
             }
-            write("\(size)\n\(count)\n", marker(base, "transientfail"))
+            write("\(size)\n\(count)\n\(Int(now.timeIntervalSince1970))\n", marker(base, "transientfail"))
             guard count >= cap else { return false }
             write("\(message) (failed \(count) times in a row)\n\(size)\n", marker(base, "unreadable"))
             return true

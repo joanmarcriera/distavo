@@ -109,11 +109,14 @@ final class DriveDFindingsTests: XCTestCase {
                      summarise: { _, _, _, _ in PipelineTests.validNote }, audioDurationSeconds: { _ in nil })
     }
 
-    /// A transient failure is retried per launch, but not for ever: the fifth in a row is terminal.
+    /// A transient failure is retried, but not for ever: the fifth in a row, each at least
+    /// `transientCountSpacing` apart, is terminal.
     func testTransientConvertFailureBecomesTerminalAtTheCap() async throws {
         let (input, cfg) = try env()
         let d = failingDeps(URLError(.timedOut))
-        for n in 1...4 {
+        // Five quick deferred retries (60 s, 120 s, ... backoff) are ONE outage, not five failures: an offline NAS
+        // must not turn terminal after a quarter of an hour (j-branch review 2026-11-09).
+        for n in 1...6 {
             let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
             // h-chain review 2026-11-09: retryable means DEFERRED (retried by the scan with backoff); a
             // `.failed` marker is only cleared by the user's Retry, so the file would sit there for good.
@@ -121,9 +124,17 @@ final class DriveDFindingsTests: XCTestCase {
             XCTAssertFalse(try store(cfg).isFailed("demo"), "failure \(n) must not write a failed marker")
             XCTAssertTrue(try store(cfg).unreadableBases().isEmpty, "failure \(n) must stay retryable")
         }
-        let fifth = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
+        // Four counted failures hours apart, then one more now: terminal.
+        let (input2, cfg2) = try env()
+        let size = (try FileManager.default.attributesOfItem(atPath: input2.path)[.size] as? Int)
+        let st = try store(cfg2)
+        for h in [5.0, 4.0, 3.0, 2.0] {
+            XCTAssertFalse(st.recordTransientConvertFailure("demo", message: "timed out", fileSize: size,
+                                                            now: Date().addingTimeInterval(-h * 3600)))
+        }
+        let fifth = await Pipeline.processOne(path: input2, config: cfg2, deps: d, stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(fifth.status, .failed)
-        XCTAssertEqual(try store(cfg).unreadableBases().count, 1, "five transient failures in a row are terminal")
+        XCTAssertEqual(try store(cfg2).unreadableBases().count, 1, "five spaced transient failures in a row are terminal")
         XCTAssertTrue(fifth.message.contains("not retried again"), fifth.message)
     }
 
@@ -256,12 +267,27 @@ final class DriveDFindingsTests: XCTestCase {
     func testTransientCountRestartsOnANewFileAndRetryClearsIt() throws {
         let (_, cfg) = try env()
         let st = try store(cfg)
-        for _ in 0..<4 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 10)) }
-        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11), "new size restarts")
-        for _ in 0..<3 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11)) }
-        XCTAssertTrue(st.recordTransientConvertFailure("b", message: "full", fileSize: 11))
+        // One counted failure per hour (`transientCountSpacing`); `hour` hands out a later clock each call.
+        var h = 0.0
+        func hour() -> Date { h += 1; return Date(timeIntervalSince1970: 1_800_000_000 + h * 3600) }
+        for _ in 0..<4 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 10, now: hour())) }
+        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11, now: hour()), "new size restarts")
+        for _ in 0..<3 { XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11, now: hour())) }
+        XCTAssertTrue(st.recordTransientConvertFailure("b", message: "full", fileSize: 11, now: hour()))
         st.retryUnreadable()
         XCTAssertTrue(st.unreadableBases().isEmpty)
-        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11), "count cleared by retry")
+        XCTAssertFalse(st.recordTransientConvertFailure("b", message: "full", fileSize: 11, now: hour()), "count cleared by retry")
+    }
+
+    /// Failures closer together than `transientCountSpacing` are one outage: they do not add to the run.
+    func testQuickRepeatsDoNotAddToTheTransientRun() throws {
+        let (_, cfg) = try env()
+        let st = try store(cfg)
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        for m in 0..<20 {   // a failure every minute for 20 minutes
+            XCTAssertFalse(st.recordTransientConvertFailure("q", message: "busy", fileSize: 5,
+                                                            now: t.addingTimeInterval(Double(m) * 60)))
+        }
+        XCTAssertTrue(st.unreadableBases().isEmpty)
     }
 }

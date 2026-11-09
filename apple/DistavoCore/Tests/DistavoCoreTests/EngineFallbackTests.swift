@@ -40,9 +40,9 @@ final class EngineFallbackTests: XCTestCase {
         let d = deps(
             transcribe: { _, _ in ["segments": [["speaker": "SPEAKER_00", "text": "hello world"]]] },
             summarise: { _, _, _, _ in
-                // What the embedded adapters do with a tiny window: map the driver's error.
+                // What the Apple adapter does while the model reports a 0-token window.
                 let error = SummaryDriverError.contextTooSmall
-                if let deferral = error.deferral { throw deferral }
+                if let deferral = error.deferral(contextSize: 0) { throw deferral }
                 throw error
             })
         let r = await Pipeline.processOne(path: input, config: cfg, deps: d, stableChecks: 1, stableDelay: 0)
@@ -52,9 +52,17 @@ final class EngineFallbackTests: XCTestCase {
     }
 
     func testOtherDriverErrorsStayHardFailures() {
-        XCTAssertNil(SummaryDriverError.emptyResult.deferral)
-        XCTAssertNil(SummaryDriverError.promptTooLong(measured: 5000, contextSize: 4096).deferral)
-        XCTAssertNotNil(SummaryDriverError.contextTooSmall.deferral)
+        XCTAssertNil(SummaryDriverError.emptyResult.deferral(contextSize: 0))
+        XCTAssertNil(SummaryDriverError.promptTooLong(measured: 5000, contextSize: 4096).deferral(contextSize: 4096))
+        XCTAssertNotNil(SummaryDriverError.contextTooSmall.deferral(contextSize: 0))
+    }
+
+    /// Review of the h chain (2026-11-09): with a real 4096-token window, "context too small" comes from
+    /// the recording's own prompt (vocabulary, Quick Notes, template) and never changes on retry. Deferring
+    /// it re-transcribed the file every 30 minutes for ever with no note and no error: it must fail.
+    func testContextTooSmallWithARealWindowIsAHardFailure() {
+        XCTAssertNil(SummaryDriverError.contextTooSmall.deferral(contextSize: 4096))
+        XCTAssertNil(SummaryDriverError.contextTooSmall.deferral(contextSize: 600))
     }
 
     // MARK: Parakeet empty -> WhisperKit once (b)

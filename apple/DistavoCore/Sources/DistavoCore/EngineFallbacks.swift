@@ -4,14 +4,16 @@ import Foundation
 // Both are pure so they are tested through the `PipelineDeps` seam; the app target wires them in.
 
 extension SummaryDriverError {
-    /// A context window that cannot hold the instructions plus an answer is a condition of the model's
-    /// current state (Apple's model reports a size of 0 while it is not ready, #1793), not of the recording:
-    /// it DEFERS, like any absent dependency, instead of being failed for good (8 Oct log line).
+    /// "Context too small" DEFERS only while the model reports no usable window (`contextSize` <= 0:
+    /// Apple's model says "available" with a size of 0 while it is not ready, #1793), like any absent
+    /// dependency. With a real window the error comes from this recording's own prompt (vocabulary,
+    /// Quick Notes, template) and would recur on every retry, so it stays a hard failure (h-chain review
+    /// 2026-11-09: deferring it re-transcribed the file every 30 minutes for ever, with no note and no error).
     /// nil for every other driver error, which stay hard failures.
     /// Sole production caller: the Apple Foundation Models path (`EmbeddedSummariser`). The Gemma path
     /// treats the same error as a hard failure on purpose (`GemmaSummariser.mapDriverError`, #5405).
-    public var deferral: RetryableDependencyError? {
-        guard case .contextTooSmall = self else { return nil }
+    public func deferral(contextSize: Int) -> RetryableDependencyError? {
+        guard case .contextTooSmall = self, contextSize <= 0 else { return nil }
         return RetryableDependencyError(
             "The on-device summary model's context window is too small right now - will retry. "
             + "Switch summarisation to Ollama in Settings if this keeps happening.")

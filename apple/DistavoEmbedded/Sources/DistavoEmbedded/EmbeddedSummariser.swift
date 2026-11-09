@@ -162,14 +162,15 @@ public enum EmbeddedSummariser {
             customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees, template: template,
             scratchpad: scratchpad)
         request.endOfTurnBlock = template == nil ? EndOfTurnBlock.onDevice : EndOfTurnBlock.onDeviceTemplated   // #1793
+        let generator = FoundationModelsGenerator()
         do {
-            return try await SummaryDriver.run(
-                request, generator: FoundationModelsGenerator(), onProgress: report)
+            return try await SummaryDriver.run(request, generator: generator, onProgress: report)
         } catch let error as SummaryDriverError {
             switch error {
             case .contextTooSmall:
-                // #5284: a window that cannot hold anything is the model's state, not the recording's: defer.
-                if let deferral = error.deferral { throw deferral }
+                // #5284: only a window the model reports as 0 (not ready) defers; a real window that
+                // cannot hold this recording's prompt would fail the same way on every retry.
+                if let deferral = error.deferral(contextSize: generator.contextSize) { throw deferral }
                 throw EmbeddedSummariserError.contextTooSmall
             case .emptyResult:
                 throw EmbeddedSummariserError.emptyResult

@@ -24,6 +24,12 @@ public enum RoleTermPacks {
                     "Companies House", "corporation tax"]),
     ]
 
+    /// True when `text` is just a role trigger word ("accountant"), which is never a name worth seeding.
+    public static func isRoleWord(_ text: String, packs: [RoleTermPack] = all) -> Bool {
+        let w = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return packs.contains { $0.triggers.contains(w) }
+    }
+
     /// Terms of every pack whose trigger appears as a whole word in `text`, deduplicated, capped.
     /// Common-word brand names (Tide, Starling, Mettle) are deliberately not listed: a summariser would bend
     /// "tied"/"starting" toward them.

@@ -39,7 +39,10 @@ public struct SpeakerHints: Codable, Equatable {
         for raw in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "\n" }) {
             var piece = String(raw)
             if let open = piece.firstIndex(of: "("), let close = piece[open...].firstIndex(of: ")") {
-                terms.append(String(piece[piece.index(after: open)..<close]))
+                // "(accountant for Example Ltd)": a role is not a name, only the organisation after "for" is.
+                var inner = String(piece[piece.index(after: open)..<close])
+                if let r = inner.range(of: " for ") { inner = String(inner[r.upperBound...]) }
+                if !RoleTermPacks.isRoleWord(inner) { terms.append(inner) }
                 piece.removeSubrange(open...close)
             }
             for sep in [" \u{2014} ", " \u{2013} ", " - ", " for "] {

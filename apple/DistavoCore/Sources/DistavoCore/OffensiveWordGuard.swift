@@ -22,7 +22,9 @@ public enum OffensiveWordGuard {
     /// ROT13 stems of the flagged words (an optional plural "s" is handled by the pattern).
     private static let encodedStems = ["avttre"]
     /// Words that, right after a flagged word, mean the speaker said a monitoring product.
-    private static let toolContext = "plugins?|checks?|core|server|monitoring|agents?|nrpe|xi"
+    private static let toolContext = "plugins?|checks?|core|server|monitoring|agents?|nrpe|xi|scripts?|alerts?|dashboards?|config|configs|configuration|style|based|hosts?|(?:and|or|vs|versus)\\W+(?:icinga|checkmk|zabbix|prometheus)"
+    /// Sibling monitoring tools that, right BEFORE a flagged word, mean the same.
+    private static let precedingTool = "(?<=(?:icinga|zabbix|checkmk|prometheus)(?:\\W{1,3}(?:and|or|vs|versus))?\\W{1,3})"
     public static let placeholder = "[word removed]"
 
     private static func rot13(_ s: String) -> String {
@@ -39,7 +41,7 @@ public enum OffensiveWordGuard {
         encodedStems.compactMap { enc in
             let stem = NSRegularExpression.escapedPattern(for: rot13(enc))
             let word = "\\b\(stem)s?\\b"
-            guard let ctx = try? NSRegularExpression(pattern: "\(word)(?=\\W+(?:\(toolContext))\\b)",
+            guard let ctx = try? NSRegularExpression(pattern: "(?:\(word)(?=\\W+(?:\(toolContext))\\b)|\(precedingTool)\(word))",
                                                      options: [.caseInsensitive]),
                   let plain = try? NSRegularExpression(pattern: word, options: [.caseInsensitive])
             else { return nil }

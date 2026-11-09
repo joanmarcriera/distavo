@@ -22,6 +22,22 @@ final class OffensiveWordGuardTests: XCTestCase {
         XCTAssertEqual(r.text, "Nagios plugins and a snigger"); XCTAssertEqual(r.flagged, 0)
         _ = t
     }
+    /// Wider monitoring vocabulary (#3951): more words after, and a sibling tool right before or after.
+    func testWiderToolContextBecomesNagios() {
+        for tail in ["scripts", "alerts", "dashboard", "config", "style checks", "and Icinga", "or CheckMK", "XI"] {
+            let r = OffensiveWordGuard.apply("we ran \(slur) \(tail) there")
+            XCTAssertEqual(r.text, "we ran Nagios \(tail) there", tail)
+            XCTAssertEqual(r.flagged, 1, tail)
+        }
+        for head in ["Icinga and", "Zabbix or", "CheckMK,", "Checkmk vs"] {
+            let r = OffensiveWordGuard.apply("we compared \(head) \(slur) yesterday")
+            XCTAssertEqual(r.text, "we compared \(head) Nagios yesterday", head)
+        }
+    }
+    func testNoContextStillRemoved() {
+        let r = OffensiveWordGuard.apply("the \(slur) alone and then nothing about tools")
+        XCTAssertTrue(r.text.contains(OffensiveWordGuard.placeholder))
+    }
     func testSegmentsAreGuarded() throws {
         let json = #"{"segments":[{"start":0,"end":1,"text":"the \#(slur)s plugins"}]}"#
         let segs = try XCTUnwrap(TranscriptSegments(whisperXResult: try XCTUnwrap(

@@ -591,7 +591,7 @@ public enum Pipeline {
                 noteOwner: config.noteOwner,
                 // Channel labels put the owner (left, microphone) on SPEAKER_00 whatever label the owner typed
                 // for the diariser's numbering.
-                userSpeaker: channelLabelled ? "SPEAKER_00" : config.userSpeaker,
+                userSpeaker: channelLabelled ? "SPEAKER_00" : OwnerSpeakerLabel.effective(configured: config.userSpeaker, transcript: clean),   // #3857
                 participants: participants, meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.

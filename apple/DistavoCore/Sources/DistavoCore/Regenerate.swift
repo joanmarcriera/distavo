@@ -217,7 +217,8 @@ extension Pipeline {
             options: options, config: cfg, workDir: workDir, sourceBase: sourceBase, sourcePath: sourcePath,
             participants: renamed.participants, transcript: transcript)
         var context = NoteContext(
-            noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
+            noteOwner: cfg.noteOwner, userSpeaker: OwnerSpeakerLabel.effective(configured: renamed.userSpeaker, transcript: transcript),   // #3857
+            participants: renamed.participants,
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             // The user's instruction, plus the title/tags request when #2954 asks for it.

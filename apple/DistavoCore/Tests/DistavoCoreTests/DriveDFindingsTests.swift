@@ -40,6 +40,13 @@ final class DriveDFindingsTests: XCTestCase {
         return WordSpeakerAligner.whisperXDictionary(words: words, turns: [SpeakerTurn(speaker: 0, start: 0, end: 4)])
     }
 
+    /// Two diarised voices, so a configured SPEAKER_01 is a label of the transcript (#3857 keeps only those).
+    private func twoVoiceResult() -> [String: Any] {
+        let spans: [(Double, Double)] = [(0.1, 0.5), (0.6, 1.0), (1.1, 1.8), (2.1, 2.5), (2.6, 3.0), (3.1, 3.8)]
+        let words = spans.enumerated().map { TimedWord(text: "w\($0.offset)", start: $0.element.0, end: $0.element.1) }
+        return WordSpeakerAligner.whisperXDictionary(words: words, turns: [SpeakerTurn(speaker: 0, start: 0, end: 2), SpeakerTurn(speaker: 1, start: 2, end: 4)])
+    }
+
     // MARK: regenerate keeps the channel-labelled owner
 
     func testRegenerateOfChannelLabelledNoteNamesSpeaker00AsOwner() async throws {
@@ -72,7 +79,7 @@ final class DriveDFindingsTests: XCTestCase {
         var cfg = c
         cfg.userSpeaker = "SPEAKER_01"
         let box = Box()
-        let result = engineResult()
+        let result = twoVoiceResult()
         let d = PipelineDeps(
             convertToWav: { _, dest in
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)

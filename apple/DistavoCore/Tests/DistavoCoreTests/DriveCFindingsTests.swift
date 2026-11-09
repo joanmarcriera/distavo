@@ -98,16 +98,23 @@ final class DriveCFindingsTests: XCTestCase {
         return WordSpeakerAligner.whisperXDictionary(words: words, turns: [SpeakerTurn(speaker: 0, start: 0, end: 4)])
     }
 
+    /// Two diarised voices, so a configured SPEAKER_01 is a label of the transcript (#3857 keeps only those).
+    private func twoVoiceResult() -> [String: Any] {
+        let spans: [(Double, Double)] = [(0.1, 0.5), (0.6, 1.0), (1.1, 1.8), (2.1, 2.5), (2.6, 3.0), (3.1, 3.8)]
+        let words = spans.enumerated().map { TimedWord(text: "w\($0.offset)", start: $0.element.0, end: $0.element.1) }
+        return WordSpeakerAligner.whisperXDictionary(words: words, turns: [SpeakerTurn(speaker: 0, start: 0, end: 2), SpeakerTurn(speaker: 1, start: 2, end: 4)])
+    }
+
     private final class Box: @unchecked Sendable { var context: NoteContext? }
 
-    private func channelRun(userSpeaker: String, flag: Bool = true, channels: StereoChannels? = nil) async throws -> (NoteContext?, Int, URL) {
+    private func channelRun(userSpeaker: String, flag: Bool = true, channels: StereoChannels? = nil, twoVoices: Bool = false) async throws -> (NoteContext?, Int, URL) {
         let (_, input, c) = try env()
         var cfg = c
         cfg.transcribe.channelSpeakers = flag
         cfg.userSpeaker = userSpeaker
         cfg.compactRecordingsAfterNote = true
         let box = Box()
-        let result = engineResult()
+        let result = twoVoices ? twoVoiceResult() : engineResult()
         let chans = channels ?? stereo()
         let d = PipelineDeps(
             convertToWav: { _, dest in
@@ -139,7 +146,7 @@ final class DriveCFindingsTests: XCTestCase {
 
     /// Controls: with the flag off nothing about the owner label or compaction changes.
     func testFlagOffKeepsConfiguredSpeakerAndStillCompacts() async throws {
-        let (ctx, size, _) = try await channelRun(userSpeaker: "SPEAKER_01", flag: false)
+        let (ctx, size, _) = try await channelRun(userSpeaker: "SPEAKER_01", flag: false, twoVoices: true)
         XCTAssertEqual(ctx?.userSpeaker, "SPEAKER_01")
         XCTAssertEqual(size, 1, "compaction still happens when channel speakers is off")
     }
@@ -152,7 +159,7 @@ final class DriveCFindingsTests: XCTestCase {
         cfg.userSpeaker = "SPEAKER_01"
         cfg.compactRecordingsAfterNote = true
         let box = Box()
-        let result = engineResult()
+        let result = twoVoiceResult()
         let d = PipelineDeps(
             convertToWav: { _, dest in
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)

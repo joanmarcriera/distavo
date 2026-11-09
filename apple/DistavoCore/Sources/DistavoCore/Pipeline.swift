@@ -68,6 +68,8 @@ public struct ProcessResult: Equatable {
     /// transcribed in" for `EmbeddedModelCatalog.nextBigger` without
     /// re-deriving it from `detectedLanguages`' display string (Vikunja #2205).
     public var dominantLanguageCode: String?
+    /// Seconds per phase of a finished file (convert, transcribe, summarise); nil on every other outcome (#4018).
+    public var timings: PhaseTimings?
 
     public init(status: ProcessStatus, base: String, message: String,
                 notePath: URL? = nil, transcriptPath: URL? = nil,
@@ -441,6 +443,9 @@ public enum Pipeline {
             try? FileManager.default.removeItem(at: TranscriptSegments.url(workDir: workDir, base: base))
             TranscriptEditStore.removeOriginals(workDir: workDir, base: base)   // #2951: edits belonged to the old transcript
             let wavPath = workDir.appendingPathComponent("\(base).wav")
+            var timings = PhaseTimings()   // #4018: one line per file saying where the time went
+            var phaseStart = Date()
+            func lap(_ name: String) { timings.add(name, seconds: Date().timeIntervalSince(phaseStart)); phaseStart = Date() }
             deps.onPhase?(.converting)
 
             // A prior attempt (e.g. one that later hit a RetryableDependencyError
@@ -491,8 +496,10 @@ public enum Pipeline {
                 return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
             }
 
+            lap("convert")
             deps.onPhase?(.transcribing)
             var result = try await deps.transcribe(wavPath, transcribeConfig)
+            lap("transcribe")
             var channelLabelled = false   // owner is SPEAKER_00 by construction (ChannelSpeakerLabeller)
             var stereoNeeded = false      // a stereo original that a reprocess would read again
             // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
@@ -796,9 +803,13 @@ public enum Pipeline {
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }
-            return ProcessResult(status: .done, base: base, message: message,
+            lap("summarise")
+            print("[Distavo] " + timings.logLine)
+            var finished = ProcessResult(status: .done, base: base, message: message,
                                  notePath: notePath, transcriptPath: transcriptPath,
                                  detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+            finished.timings = timings
+            return finished
         } catch let retry as RetryableDependencyError {
 
             // I2: grow the wait with each consecutive deferral (60 s, 120 s,

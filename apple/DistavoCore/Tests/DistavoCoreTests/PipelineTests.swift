@@ -73,6 +73,18 @@ final class PipelineTests: XCTestCase {
             onPhase: onPhase, audioDurationSeconds: duration)
     }
 
+    // MARK: Phase timings (Vikunja #4018)
+
+    /// A finished file reports where the time went: convert, transcribe, summarise, in that order, as numbers only.
+    func testDoneResultCarriesPhaseTimings() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let names = result.timings?.steps.map(\.name)
+        XCTAssertEqual(names, ["convert", "transcribe", "summarise"])
+        XCTAssertTrue(result.timings?.logLine.hasPrefix("Timing: convert ") ?? false)
+    }
+
     // MARK: Too-short recordings (Vikunja #2185)
 
     /// A 4-second take is set aside — no transcription, no note, no `.failed`

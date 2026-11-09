@@ -52,4 +52,12 @@ final class RoleTermPacksTests: XCTestCase {
         XCTAssertEqual(SpeakerHints(participants: "Bong Cha (Lightning AI) - interviewer").participantTerms,
                        ["Lightning AI", "Bong Cha"])
     }
+
+    /// Review of the role-phrase fix: "for" inside an organisation name is kept, case does not matter.
+    func testForInsideOrganisationNameAndCase() {
+        XCTAssertEqual(SpeakerHints(participants: "Bong Cha (Centre for Computational Biology)").participantTerms,
+                       ["Centre for Computational Biology", "Bong Cha"])
+        XCTAssertEqual(SpeakerHints(participants: "Sam (Accountant For Acme Ltd)").participantTerms, ["Acme Ltd", "Sam"])
+        XCTAssertEqual(SpeakerHints(participants: "Sam (CFO), Pat (the accountant)").participantTerms, ["Sam", "Pat"])
+    }
 }

@@ -40,9 +40,13 @@ public struct SpeakerHints: Codable, Equatable {
             var piece = String(raw)
             if let open = piece.firstIndex(of: "("), let close = piece[open...].firstIndex(of: ")") {
                 // "(accountant for Example Ltd)": a role is not a name, only the organisation after "for" is.
+                // Only split on "for" when what precedes it is a role, so "Centre for Computational Biology" stays whole.
                 var inner = String(piece[piece.index(after: open)..<close])
-                if let r = inner.range(of: " for ") { inner = String(inner[r.upperBound...]) }
-                if !RoleTermPacks.isRoleWord(inner) { terms.append(inner) }
+                if let r = inner.range(of: " for ", options: .caseInsensitive),
+                   Self.isRole(String(inner[..<r.lowerBound])) {
+                    inner = String(inner[r.upperBound...])
+                }
+                if !inner.trimmingCharacters(in: .whitespaces).isEmpty, !Self.isRole(inner) { terms.append(inner) }
                 piece.removeSubrange(open...close)
             }
             for sep in [" \u{2014} ", " \u{2013} ", " - ", " for "] {
@@ -53,6 +57,13 @@ public struct SpeakerHints: Codable, Equatable {
         return Vocabulary.normalisedTerms(terms).filter {
             $0.count >= 2 && $0.split(separator: " ").count <= 4 && $0.lowercased() != "me"
         }
+    }
+
+    /// A role description ("accountant", "the CFO", "CEO"): a pack trigger word or a phrase opening with a role word.
+    private static func isRole(_ text: String) -> Bool {
+        if RoleTermPacks.isRoleWord(text) { return true }
+        let first = text.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map { $0.lowercased() } ?? ""
+        return roleWords.contains(first)
     }
 
     /// True when there is nothing worth passing on.

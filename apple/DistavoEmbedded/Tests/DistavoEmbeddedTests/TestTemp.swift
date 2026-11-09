@@ -32,7 +32,14 @@ enum TestTemp {
         lock.lock(); defer { lock.unlock() }
         if !observing {
             observing = true
-            XCTestObservationCenter.shared.addTestObserver(observer)
+            // XCTest allows observer registration on the main thread only, and an `async` test body runs
+            // off it. Off main, register asynchronously: if the observer misses this test's end, the next
+            // test's end removes `current` all the same (cleanup removes whatever dir is current).
+            if Thread.isMainThread {
+                register()
+            } else {
+                DispatchQueue.main.async { TestTemp.register() }
+            }
         }
         if let current { return current }
         let dir = base.appendingPathComponent("distavo-test-\(UUID().uuidString)", isDirectory: true)
@@ -45,6 +52,8 @@ enum TestTemp {
         current = dir
         return dir
     }
+
+    private static func register() { XCTestObservationCenter.shared.addTestObserver(observer) }
 
     /// Removes the current test's directory (called by the observer after each test).
     static func cleanup() {

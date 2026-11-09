@@ -21,7 +21,9 @@ import Foundation
 //       folded: "30,000" vs a quote of "35 and 40,000" fails); otherwise the row is REMOVED, or only
 //       marked [unverified] when its interpretation says "interpreted" (the speech-to-text dropped digits);
 //   (d) the speaker field is CORRECTED to the speaker of the transcript turn that holds the quote, but
-//       only when the field names a speaker label the transcript actually uses;
+//       only when the field names a speaker the transcript uses: a label, the first name of a renamed
+//       label, or a real name the OTHER rows of this ledger consistently put on one label (learned from
+//       >= 2 rows, a majority, no second name on that label);
 //   (e) trivia is DROPPED: a fact made only of a generic product/vendor name ("Teams", "AI"), a clock time
 //       or an age, and rows whose interpretation is "unclear"/"none"/"possible transcription error";
 //   (f) at most `maxRows` rows are kept (the first ones, in the model's order).
@@ -70,6 +72,7 @@ public enum LedgerVerifier {
         let index = TokenIndex(source)
 
         let turns = Turn.parse(transcript)
+        let names = learnNames(rows: lines[(start + 1)..<end].compactMap { Row($0) }, turns: turns)
 
         var out = Array(lines[...start])
         var removed = 0, flagged = 0, dropped = 0, corrected = 0, kept = 0
@@ -84,7 +87,7 @@ public enum LedgerVerifier {
             if kept >= maxRows { dropped += 1; continue }
             kept += 1
             var text = line
-            if let fixed = speakerFix(row, turns: turns) { text = fixed; corrected += 1 }
+            if let fixed = speakerFix(row, turns: turns, names: names) { text = fixed; corrected += 1 }
             if verdict == .flag {
                 flagged += 1
                 if !text.hasSuffix(unverifiedMarker) { text = trimmedTrailing(text) + unverifiedMarker }
@@ -158,18 +161,72 @@ public enum LedgerVerifier {
         return wanted.contains { !have.contains($0) }
     }
 
-    /// The line with its speaker field replaced, when the quote sits only in turns of one other known speaker.
-    static func speakerFix(_ row: Row, turns: [Turn]) -> String? {
-        let labels = Set(turns.map { $0.label.lowercased() })
-        guard row.fields.count >= 3, labels.contains(row.who.lowercased()) else { return nil }
+    /// Names the ledger uses for speakers the transcript only labels (`SPEAKER_00`), learned from the rows.
+    struct SpeakerNames {
+        var labelByName: [String: String] = [:]      // lower-cased name -> transcript label
+        var display: [String: String] = [:]          // lower-cased name -> spelling as first written
+        func spelling(of label: String) -> String? {
+            labelByName.first { $0.value == label }.flatMap { display[$0.key] }
+        }
+    }
+
+    /// The transcript turn label that is the only holder of the row's quote (nil when none or several).
+    static func soleHolder(_ row: Row, turns: [Turn]) -> String? {
+        guard row.fields.count >= 3 else { return nil }
         let q = tokens(row.quote.components(separatedBy: "...").first ?? row.quote)
         guard q.count >= 3 else { return nil }
         let holders = turns.filter { $0.index.bestCoverage(of: q) >= quoteThreshold }
-        let holderLabels = Set(holders.map { $0.label.lowercased() })
-        guard holderLabels.count == 1, let label = holders.first?.label,
-              !holderLabels.contains(row.who.lowercased()) else { return nil }
+        guard Set(holders.map { $0.label.lowercased() }).count == 1 else { return nil }
+        return holders.first?.label
+    }
+
+    /// The transcript label a speaker field names: the label itself, the one label whose first word is that
+    /// name ("Marc" -> "Marc Riera"), or the label the other rows consistently put that name on. nil if unknown.
+    static func labelFor(_ who: String, labels: [String], names: SpeakerNames) -> String? {
+        let w = who.lowercased()
+        if let exact = labels.first(where: { $0.lowercased() == w }) { return exact }
+        let byFirstWord = Set(labels.filter { $0.lowercased().split(separator: " ").first.map(String.init) == w })
+        if byFirstWord.count == 1 { return byFirstWord.first }
+        return names.labelByName[w]
+    }
+
+    /// Learn name -> label for the names the transcript does not use, from rows whose quote has one holder:
+    /// a name needs at least two such rows, more than half of them on one label, and no other name may claim
+    /// that label (two spellings of one person, or a mixed-up pair, are left alone).
+    static func learnNames(rows: [Row], turns: [Turn]) -> SpeakerNames {
+        let labels = turns.map(\.label)
+        var votes: [String: [String: Int]] = [:]
+        var names = SpeakerNames()
+        for row in rows where row.fields.count >= 3 {
+            guard labelFor(row.who, labels: labels, names: SpeakerNames()) == nil,
+                  let holder = soleHolder(row, turns: turns) else { continue }
+            let key = row.who.lowercased()
+            votes[key, default: [:]][holder, default: 0] += 1
+            if names.display[key] == nil { names.display[key] = row.who }
+        }
+        var claimed: [String: String] = [:]
+        for (name, perLabel) in votes {
+            let total = perLabel.values.reduce(0, +)
+            guard total >= 2, let top = perLabel.max(by: { $0.value < $1.value }), top.value * 2 > total else { continue }
+            claimed[name] = top.key
+        }
+        var claims: [String: Int] = [:]
+        for l in claimed.values { claims[l, default: 0] += 1 }
+        names.labelByName = claimed.filter { claims[$0.value] == 1 }
+        return names
+    }
+
+    /// The line with its speaker field replaced, when the quote sits only in turns of one other known speaker.
+    /// `who` may be a label, the first name of a renamed label, or (#4017) a name learned from the other rows.
+    static func speakerFix(_ row: Row, turns: [Turn], names: SpeakerNames = SpeakerNames()) -> String? {
+        let labels = turns.map(\.label)
+        guard row.fields.count >= 3,
+              let current = labelFor(row.who, labels: labels, names: names),
+              let holder = soleHolder(row, turns: turns),
+              holder.lowercased() != current.lowercased() else { return nil }
         var fields = row.fields
-        fields[1] = label
+        // Written the way the ledger spells that speaker (a learned name), else as the transcript label.
+        fields[1] = names.spelling(of: holder) ?? holder
         return row.isTable ? "| " + fields.joined(separator: " | ") + " |" : row.bullet + fields.joined(separator: " | ")
     }
 

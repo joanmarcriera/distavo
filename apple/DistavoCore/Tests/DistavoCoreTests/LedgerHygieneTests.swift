@@ -69,6 +69,64 @@ final class LedgerHygieneTests: XCTestCase {
         XCTAssertTrue(r.text.contains("| Marc |"))
     }
 
+    // Real names (#4017, the 4 Nov "60,000 under Marc and under Ahmed" case): the transcript has labels only,
+    // the model wrote names. The name->label map is learned from the rows whose quote has one clear holder.
+    private let advice = """
+    [SPEAKER_00]
+    I have put about forty thousand pounds into the pension so far this year and I would like to know more.
+
+    [SPEAKER_01]
+    The annual allowance for pension contributions is sixty thousand pounds for most people, and the carry forward rules help.
+
+    [SPEAKER_00]
+    My salary is ninety five thousand pounds before tax and the bonus comes in March every single year.
+
+    [SPEAKER_01]
+    You can carry forward unused allowance from the last three tax years if you were a member of a scheme.
+    """
+
+    func testRealNameSpeakerIsCorrectedFromLearnedMapping() {
+        let r = LedgerVerifier.verify(ledger([
+            "- £40,000 into the pension | Marc | \"about forty thousand pounds into the pension so far this year\" | paid in",
+            "- £95,000 salary | Marc | \"My salary is ninety five thousand pounds before tax\" | salary",
+            "- £60,000 allowance | Ahmed | \"annual allowance for pension contributions is sixty thousand pounds\" | limit",
+            "- £60,000 allowance limit | Marc | \"allowance for pension contributions is sixty thousand pounds for most people\" | limit",
+            "- carry forward 3 years | Ahmed | \"carry forward unused allowance from the last three tax years\" | rule",
+        ]), transcript: advice)
+        XCTAssertEqual(r.corrected, 1, r.text)
+        XCTAssertTrue(r.text.contains("- £60,000 allowance limit | Ahmed |"), r.text)
+        XCTAssertTrue(r.text.contains("- £95,000 salary | Marc |"))
+    }
+
+    func testRealNameWithoutEnoughEvidenceIsLeftAlone() {
+        let r = LedgerVerifier.verify(ledger([
+            "- £60,000 allowance limit | Marc | \"allowance for pension contributions is sixty thousand pounds for most people\" | limit",
+        ]), transcript: advice)
+        XCTAssertEqual(r.corrected, 0)
+        XCTAssertTrue(r.text.contains("| Marc |"))
+    }
+
+    func testTwoNamesOnOneLabelAreAmbiguousAndLeftAlone() {
+        let r = LedgerVerifier.verify(ledger([
+            "- £40,000 | Marc | \"about forty thousand pounds into the pension so far this year\" | a",
+            "- £95,000 | Marc | \"My salary is ninety five thousand pounds before tax\" | b",
+            "- £40,000 again | Mark | \"about forty thousand pounds into the pension so far this year\" | c",
+            "- £95,000 again | Mark | \"My salary is ninety five thousand pounds before tax\" | d",
+            "- £60,000 | Marc | \"allowance for pension contributions is sixty thousand pounds for most people\" | e",
+        ]), transcript: advice)
+        XCTAssertEqual(r.corrected, 0, r.text)
+    }
+
+    func testFirstNameMatchesRenamedLabel() {
+        let t = advice.replacingOccurrences(of: "SPEAKER_00", with: "Marc Riera")
+            .replacingOccurrences(of: "SPEAKER_01", with: "Ahmed Khan")
+        let r = LedgerVerifier.verify(ledger([
+            "- £60,000 allowance limit | Marc | \"allowance for pension contributions is sixty thousand pounds for most people\" | limit",
+        ]), transcript: t)
+        XCTAssertEqual(r.corrected, 1, r.text)
+        XCTAssertTrue(r.text.contains("| Ahmed Khan |"), r.text)
+    }
+
     func testTriviaIsDropped() {
         let q = "\"we use Teams for all the calls with the vendor team\""
         let r = LedgerVerifier.verify(ledger([

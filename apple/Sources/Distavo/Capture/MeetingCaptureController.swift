@@ -457,13 +457,20 @@ final class MeetingCaptureController: ObservableObject {
     /// excluded) and stops. A call never seen, or an unreadable capture state, never stops anything.
     private func checkCallEnded(at now: TimeInterval) {
         let detection = configProvider().meetingDetection
-        guard isRecording, CallEndStop.isArmed(detection) else { return }
+        guard isRecording else { return }
+        guard CallEndStop.isArmed(detection) else {
+            // Disarmed (switched off in Settings): forget what was seen, so switching it back on later in the
+            // same recording cannot stop at once on a stale release time (review of p).
+            callEndPolicy = CallEndStop.policy()
+            return
+        }
         let signal = CallEndStop.callActive(capturing: MeetingDetectionController.capturingBundleIDs(),
                                             config: detection)
         guard callEndPolicy.observe(now: now, callActive: signal) == .stop else { return }
         log("The call released the microphone 60 s ago - stopping the recording")
-        notify("Recording stopped", "The call ended, so Distavo stopped and saved the recording.")
         stop(reason: .callEnded)
+        // Only once the stop really happened (a bail-out in stop() must not notify every second).
+        if !isRecording { notify("Recording stopped", "The call ended, so Distavo stopped the recording.") }
     }
 
     /// Once a second: refresh the policy from Settings (changes apply live),

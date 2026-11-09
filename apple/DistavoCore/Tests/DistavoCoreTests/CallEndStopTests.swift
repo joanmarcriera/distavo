@@ -88,6 +88,22 @@ final class CallEndStopTests: XCTestCase {
         XCTAssertNil(run(&p, from: 140, seconds: 600, capturing: ["com.microsoft.teams2"], config: c))
     }
 
+    /// Review of p: a brief mic use (a voice clip, dictation in a browser) during an in-person recording must
+    /// not arm the stop; only 90 s of unbroken capture does.
+    func testBriefCaptureNeverArmsTheStop() {
+        var c = MeetingDetectionConfig(enabled: true, stopWhenCallEnds: true); c.browserDetection = true
+        var p = CallEndStop.policy()
+        XCTAssertNil(run(&p, from: 0, seconds: 600, capturing: [], config: c))
+        for burst in 0..<5 {   // five 30 s clips with gaps: never 90 s in a row
+            let t = 600 + burst * 200
+            XCTAssertNil(run(&p, from: t, seconds: 30, capturing: ["com.google.Chrome.helper"], config: c))
+            XCTAssertNil(run(&p, from: t + 30, seconds: 170, capturing: [], config: c))
+        }
+        // A real call (over 90 s unbroken) then arms it.
+        XCTAssertNil(run(&p, from: 2000, seconds: 120, capturing: ["us.zoom.xos"], config: c))
+        XCTAssertEqual(run(&p, from: 2120, seconds: 120, capturing: [], config: c), 2180)
+    }
+
     func testUnreadableCaptureStateNeverStops() {
         let c = MeetingDetectionConfig(enabled: true, stopWhenCallEnds: true)
         var p = CallEndStop.policy()

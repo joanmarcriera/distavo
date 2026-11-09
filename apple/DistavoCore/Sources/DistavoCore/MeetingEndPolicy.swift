@@ -35,15 +35,24 @@ public struct MeetingEndPolicy: Equatable, Sendable {
     /// Scheduled end of the calendar event (same clock as `now`), a hint only.
     public var scheduledEnd: TimeInterval?
 
+    /// How long a call app must hold the mic WITHOUT a break before it counts as a call that can end (rule 5).
+    /// 0 = the first `true` (the calendar path). The recorder uses 90 s (`CallEndStop.policy`) so a voice clip or
+    /// a dictation site used during an in-person meeting never arms the stop (review of p, 2026-11-09).
+    public var minCallHold: TimeInterval
+
     private var releasedSince: TimeInterval?
     private var nextAsk: TimeInterval?
-    /// A call app has held the mic at least once during this recording (rule 5).
+    /// Start of the current unbroken stretch of `true` (for `minCallHold`).
+    private var callSince: TimeInterval?
+    /// A call app has held the mic for `minCallHold` during this recording (rule 5).
     private var sawCall = false
 
-    public init(scheduledEnd: TimeInterval?, releaseGrace: TimeInterval = 60, askDelay: TimeInterval = 600) {
+    public init(scheduledEnd: TimeInterval?, releaseGrace: TimeInterval = 60, askDelay: TimeInterval = 600,
+                minCallHold: TimeInterval = 0) {
         self.scheduledEnd = scheduledEnd
         self.releaseGrace = releaseGrace
         self.askDelay = askDelay
+        self.minCallHold = minCallHold
         self.nextAsk = scheduledEnd.map { $0 + askDelay }
     }
 
@@ -51,9 +60,15 @@ public struct MeetingEndPolicy: Equatable, Sendable {
     /// released call only after a `true` was seen in this recording, rule 5), nil = there is no call signal
     /// (in person, or detection off).
     public mutating func observe(now: TimeInterval, callActive: Bool?) -> Event? {
+        if callActive == true {
+            let since = callSince ?? now
+            callSince = since
+            if now - since >= minCallHold { sawCall = true }
+        } else {
+            callSince = nil
+        }
         switch callActive.flatMap({ $0 || sawCall ? $0 : nil }) {
         case .some(true):
-            sawCall = true
             releasedSince = nil
             return nil
         case .some(false):
@@ -86,10 +101,14 @@ public enum CallEndStop {
 
     /// The policy for a recording started from the menu or a detection offer: no calendar end, so rule 3
     /// (ask) never fires and only a call that was SEEN and then released for the grace period stops it
-    /// (rules 2, 4 and 5).
+    /// (rules 2, 4 and 5). A call counts only after 90 s of unbroken capture: a voice clip, a dictation site or a
+    /// test of the mic in a listed app during an in-person recording never arms the stop.
     public static func policy() -> MeetingEndPolicy {
-        MeetingEndPolicy(scheduledEnd: nil)
+        MeetingEndPolicy(scheduledEnd: nil, minCallHold: minCallHold)
     }
+
+    /// Unbroken capture a call app needs before its release can stop the recording.
+    public static let minCallHold: TimeInterval = 90
 
     /// Call signal for `MeetingEndPolicy.observe`: nil when the per-process capture state is unreadable (no
     /// signal, never a stop), true when a listed call app (or, with browser detection on, a watched browser)

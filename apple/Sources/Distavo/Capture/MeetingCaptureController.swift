@@ -223,6 +223,7 @@ final class MeetingCaptureController: ObservableObject {
         guard #available(macOS 14.4, *) else { return }
 
         let recorder = MeetingRecorder()
+        recorder.storageFormat = configProvider().recording.storageFormat   // #6670
         do {
             // Creating the tap fires the System Audio Recording prompt on
             // first use (macOS shows a purple indicator while recording).

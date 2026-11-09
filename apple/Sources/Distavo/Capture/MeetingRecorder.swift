@@ -29,6 +29,8 @@ final class MeetingRecorder {
     private var aggregateID: AudioObjectID = .unknown
     private var ioProcID: AudioDeviceIOProcID?
     private var file: AVAudioFile?
+    /// On-disk sample format (`recording.storage_format`, #6670); set by the controller before `start`.
+    var storageFormat: RecordingStorageFormat = .full
     private var partURL: URL?
     private var outputBuffer: AVAudioPCMBuffer?
     private var micChannelCount = 1
@@ -103,13 +105,7 @@ final class MeetingRecorder {
             }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appendingPathComponent(Self.fileName())
-            let settings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVSampleRateKey: sampleRate,
-                AVNumberOfChannelsKey: 2,
-                AVLinearPCMBitDepthKey: 32,
-                AVLinearPCMIsFloatKey: true,
-            ]
+            let settings = storageFormat.fileSettings(sampleRate: sampleRate)
             // Record under a .part name the folder scanner ignores; stop()
             // balances the channels and renames to the final .wav, so the
             // pipeline can never pick up a half-written or unbalanced file.

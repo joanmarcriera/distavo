@@ -12,6 +12,9 @@
 #                + the edition gates on the products (needs >= 15 GB free)
 #     vX.Y.Z     the tag to be created; default v<MARKETING_VERSION from apple/project.yml>
 #
+# Read-only on the tree: `swift test` and xcodegen rewrite Package.resolved files, so their
+# content is snapshotted at start and put back on exit (2026-11-09, #2679 finding of 24 Oct).
+#
 # Exit 0 = every check passed, 1 = at least one FAIL (all are listed), 2 = usage error.
 # Optional env: BUILD_LOCK=<dir>  mkdir-lock held around --full builds (the estate drive's
 #               one-build-at-a-time rule); it is removed again on exit.
@@ -19,6 +22,20 @@
 # The gates mirror CLAUDE.md "Editions": App Store and Setapp contain no Sparkle; the App
 # Store build has no Lemon Squeezy donate link and no "Run in Terminal" helper.
 set -Eeuo pipefail
+
+# Snapshot every tracked Package.resolved; restore_resolved puts them back byte for byte.
+RESOLVED_SNAP="$(mktemp -d)"
+RESOLVED_FILES=()
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  RESOLVED_FILES+=("$f"); mkdir -p "$RESOLVED_SNAP/$(dirname "$f")"; cp -p "$f" "$RESOLVED_SNAP/$f"
+done < <(git ls-files -- '*Package.resolved' 2>/dev/null || true)
+restore_resolved() {
+  local f
+  for f in ${RESOLVED_FILES[@]+"${RESOLVED_FILES[@]}"}; do cp -p "$RESOLVED_SNAP/$f" "$f" 2>/dev/null || true; done
+  rm -rf -- "$RESOLVED_SNAP"
+}
+trap restore_resolved EXIT
 
 MODE=default; TAG=""
 for a in "$@"; do
@@ -89,10 +106,10 @@ FREE="$(df -g / | awk 'NR==2{print $4}')"
 if [[ "$FREE" -lt 15 ]]; then fail "only ${FREE} GB free; need >= 15 for --full"; echo "== $FAILS failure(s)"; exit 1; fi
 if [[ -n "${BUILD_LOCK:-}" ]]; then
   mkdir "$BUILD_LOCK" 2>/dev/null || { fail "build lock $BUILD_LOCK is held; try later"; exit 1; }
-  trap 'rmdir "$BUILD_LOCK" 2>/dev/null || true' EXIT
+  trap 'restore_resolved; rmdir "$BUILD_LOCK" 2>/dev/null || true' EXIT
 fi
 command -v xcodegen >/dev/null || { fail "xcodegen not installed (brew install xcodegen)"; exit 1; }
-OUT="$(mktemp -d)"; trap 'rm -rf -- "$OUT"; [[ -n "${BUILD_LOCK:-}" ]] && rmdir "$BUILD_LOCK" 2>/dev/null || true' EXIT
+OUT="$(mktemp -d)"; trap 'restore_resolved; rm -rf -- "$OUT"; [[ -n "${BUILD_LOCK:-}" ]] && rmdir "$BUILD_LOCK" 2>/dev/null || true' EXIT
 (cd apple && xcodegen generate >/dev/null) && ok "xcodegen generate" || { fail "xcodegen generate"; exit 1; }
 
 for edition in Direct Setapp AppStore; do

@@ -418,7 +418,8 @@ public enum Pipeline {
         // This meeting's own terms come first, then the global vocabulary (#3584); the enabled replacement
         // packs follow the user's own rules.
         // Names from the participants line are seeded too (#3950).
-        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
+        // Then the role packs of the participants line (accountant -> UK tax terms, RoleTermPacks).
+        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? []) + (hints?.roleTerms ?? [])
         if !meetingTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
         }

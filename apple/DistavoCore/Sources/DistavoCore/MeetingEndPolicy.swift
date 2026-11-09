@@ -14,6 +14,8 @@
 //     "Still in the meeting?" once; "Keep recording" (`keepRecording`) postpones the next question by
 //     `askDelay`. A forgotten recorder is left to the silence auto-stop (#2665).
 //  4. No scheduled end and no call signal: never an event (silence auto-stop is the only stop).
+//  5. `false` before any `true` (Record pressed, call not joined yet; or the call never started) is no call
+//     signal: rule 3 applies. Only a call that WAS seen can end (review of k, 2026-11-09).
 // Not wired to the controller yet: it needs the scheduled-start work (Auto-record 2/4/6) and an off-by-default
 // config switch, per the "inert until switched on" rule.
 import Foundation
@@ -33,6 +35,8 @@ public struct MeetingEndPolicy: Equatable, Sendable {
 
     private var releasedSince: TimeInterval?
     private var nextAsk: TimeInterval?
+    /// A call app has held the mic at least once during this recording (rule 5).
+    private var sawCall = false
 
     public init(scheduledEnd: TimeInterval?, releaseGrace: TimeInterval = 60, askDelay: TimeInterval = 600) {
         self.scheduledEnd = scheduledEnd
@@ -41,11 +45,13 @@ public struct MeetingEndPolicy: Equatable, Sendable {
         self.nextAsk = scheduledEnd.map { $0 + askDelay }
     }
 
-    /// One tick. `callActive`: true = a call app holds the mic, false = a call was seen and has released it,
-    /// nil = there is no call signal (in person, or detection off).
+    /// One tick. `callActive`: true = a call app holds the mic, false = no call app holds it (counted as a
+    /// released call only after a `true` was seen in this recording, rule 5), nil = there is no call signal
+    /// (in person, or detection off).
     public mutating func observe(now: TimeInterval, callActive: Bool?) -> Event? {
-        switch callActive {
+        switch callActive.flatMap({ $0 || sawCall ? $0 : nil }) {
         case .some(true):
+            sawCall = true
             releasedSince = nil
             return nil
         case .some(false):

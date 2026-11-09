@@ -59,6 +59,28 @@ final class MeetingEndPolicyTests: XCTestCase {
         XCTAssertTrue(run(&p, from: 0, to: 4 * 3600, call: nil).isEmpty)
     }
 
+    /// Review of k (2026-11-09): Record pressed at 09:00, the Meet call joined at 09:05. Until a call app has
+    /// held the mic, "nobody holds it" is no call signal, not a call that ended: it must not stop after 60 s.
+    func testNoMicBeforeTheCallStartsIsNotAnEndedCall() {
+        var p = MeetingEndPolicy(scheduledEnd: 30 * min)
+        var events = run(&p, from: 0, to: 5 * min - 10, call: false)
+        XCTAssertFalse(events.contains { $0.1 == .stop }, "\(events)")
+        events = run(&p, from: 5 * min, to: 45 * min, call: true)
+        XCTAssertTrue(events.isEmpty, "\(events)")
+        events = run(&p, from: 45 * min + 10, to: 47 * min, call: false)
+        XCTAssertEqual(events.first.map(\.1), .stop)
+        XCTAssertEqual(try XCTUnwrap(events.first?.0), 46 * min + 10, accuracy: 0.1)
+    }
+
+    /// The call never started (no call app ever held the mic): behave like an in-person meeting and ask.
+    func testCallThatNeverStartedAsksInsteadOfStopping() {
+        var p = MeetingEndPolicy(scheduledEnd: 30 * min)
+        let events = run(&p, from: 0, to: 45 * min, call: false)
+        XCTAssertFalse(events.contains { $0.1 == .stop }, "\(events)")
+        XCTAssertEqual(events.first.map(\.1), .askStillInMeeting)
+        XCTAssertEqual(try XCTUnwrap(events.first?.0), 40 * min, accuracy: 0.1)
+    }
+
     func testCalendarEndAloneNeverStops() {
         var p = MeetingEndPolicy(scheduledEnd: 30 * min)
         let events = run(&p, from: 0, to: 3 * 3600, call: nil)

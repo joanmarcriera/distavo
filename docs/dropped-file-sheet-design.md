@@ -25,7 +25,17 @@ Core is done and tested: `apple/DistavoCore/Sources/DistavoCore/DroppedFileSheet
 5. **Edition gate**: none; the sheet touches only the work dir. The sidecar beside the file needs the watch-folder bookmark
    (App Store), which already exists.
 
+## Known interaction (review finding, decide before building the UI)
+`Pipeline.processOne` calls `DuplicateCallLink.register`, which copies a same-call twin sheet into `<base>.speakers.json`
+without asking; after that `decide` returns `.skip(.answered)` and the owner never confirms the copied names. Either call
+`decide`/`prefill` BEFORE `processOne` reaches `register` (offer first, process after the answer or a short grace), or have
+`register` write a `copiedFrom` marker that `decide` treats as "offer, prefilled". `markOffered` returns false when the marker
+cannot be written; keep an in-memory set of offered bases as the fallback. The UI should also sit behind an opt-in key
+(inert-until-switched-on) so existing users are not notified for every dropped file.
+
 ## Still open (not core)
+- `SpeakerHints.load(workDir:base:source:)` returns an EMPTY work-dir sheet before a non-empty `<name>.speakers.json` beside the
+  file; make it fall through when the work-dir copy is empty before the UI saves an empty answer.
 - Filename hint (`interview-15-10-2026-16.00` -> interview template) and owner inference without a sheet overlap
   https://familia.riera.co.uk/tasks/3857; `OwnerSpeakerLabel` already returns "unknown" for a label that is not in the file.
 - Found while writing this: the recorder sheet writes `Alex (Alex, me): role` for a named owner, but

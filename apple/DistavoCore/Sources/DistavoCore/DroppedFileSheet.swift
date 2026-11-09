@@ -5,7 +5,7 @@
 // names, roles and glossary were all guessed. This decides WHEN the sheet is worth offering and WHAT it
 // starts with; the app renders it and saves the answer with `SpeakerHints.save` like the recorder does.
 //
-// Rules (all pure, nothing here reads the clock, a calendar or the microphone):
+// Rules (all pure, nothing here reads a calendar, and the clock only through the defaulted `at:` of `markOffered` or the microphone):
 // - Offer only when there is no answer yet: not in the work dir, not a `<name>.speakers.json` beside the file
 //   (`SpeakerHints.load(workDir:base:source:)`), not a live capture (it has its own sheet), and not offered
 //   before (`<base>.sheet-offered.json`, so a skipped sheet is not asked again on every scan).
@@ -45,15 +45,21 @@ public enum DroppedFileSheet {
     }
 
     /// Remember that the sheet was shown (answered or dismissed) so it is not offered again.
-    public static func markOffered(workDir: URL, base: String, at date: Date = Date()) {
-        try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-        let stamp = ISO8601DateFormatter().string(from: date)
-        try? Data("{\"offered_at\":\"\(stamp)\"}".utf8).write(to: offeredURL(workDir, base), options: .atomic)
+    /// Returns false when the marker could not be written (disk full, no permission): the caller then keeps
+    /// the base in an in-memory set so the sheet is not offered again on every scan.
+    @discardableResult
+    public static func markOffered(workDir: URL, base: String, at date: Date = Date()) -> Bool {
+        do {
+            try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+            let stamp = ISO8601DateFormatter().string(from: date)
+            try Data("{\"offered_at\":\"\(stamp)\"}".utf8).write(to: offeredURL(workDir, base), options: .atomic)
+            return true
+        } catch { return false }
     }
 
     /// What the sheet starts with. `record` is the dropped file's container time and duration (nil when
     /// unknown: only the history can help then). `owner` is `notes`/config `note_owner`.
-    public static func prefill(workDir: URL, record: CallRecord?, owner: String = "Me") -> Prefill {
+    public static func prefill(workDir: URL, base: String, record: CallRecord?, owner: String = "Me") -> Prefill {
         if let record {
             let sheets = Set(DuplicateCallLink.otherRecords(workDir: workDir, excluding: record.base).map(\.base).filter {
                 SpeakerHints.load(workDir: workDir, base: $0).map { !$0.isEmpty } ?? false })
@@ -64,7 +70,7 @@ public enum DroppedFileSheet {
                 return Prefill(hints: hints, source: .twin(base: m.record.base))
             }
         }
-        let history = SpeakerSuggestions.recentHistory(workDir: workDir, excluding: record?.base)
+        let history = SpeakerSuggestions.recentHistory(workDir: workDir, excluding: base)
         let s = SpeakerSuggestions.make(history: history, calendarOthers: "")
         let line = participantsLine(owner: owner, role: s.role ?? "", inPerson: false, others: s.others)
         guard line != nil || !s.terms.isEmpty else { return Prefill(hints: SpeakerHints(), source: .none) }

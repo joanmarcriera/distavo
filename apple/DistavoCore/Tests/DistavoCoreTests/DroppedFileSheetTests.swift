@@ -47,10 +47,17 @@ final class DroppedFileSheetTests: XCTestCase {
     }
 
     func testOfferedOnceOnly() {
-        DroppedFileSheet.markOffered(workDir: work, base: "interview-x")
+        XCTAssertTrue(DroppedFileSheet.markOffered(workDir: work, base: "interview-x"))
         XCTAssertEqual(DroppedFileSheet.decide(workDir: work, base: "interview-x", source: src, isLiveCapture: false),
                        .skip(.alreadyOffered))
         XCTAssertEqual(DroppedFileSheet.decide(workDir: work, base: "other", source: src, isLiveCapture: false), .offer)
+    }
+
+    func testMarkOfferedReportsAFailedWrite() throws {
+        // A regular file where the work dir should be: the directory cannot be created.
+        let blocker = dir.appendingPathComponent("blocker")
+        try Data().write(to: blocker)
+        XCTAssertFalse(DroppedFileSheet.markOffered(workDir: blocker.appendingPathComponent("w"), base: "x"))
     }
 
     // MARK: prefill
@@ -61,7 +68,7 @@ final class DroppedFileSheetTests: XCTestCase {
         try SpeakerHints(count: 2, participants: "Alex (me): candidate. Other participants: Sam", terms: ["Zeta"])
             .save(workDir: work, base: "Meeting_x")
         let dropped = CallRecord(base: "interview-x", time: t0.addingTimeInterval(30), durationSeconds: 2390, isLiveCapture: false)
-        let p = DroppedFileSheet.prefill(workDir: work, record: dropped)
+        let p = DroppedFileSheet.prefill(workDir: work, base: dropped.base, record: dropped)
         XCTAssertEqual(p.source, .twin(base: "Meeting_x"))
         XCTAssertEqual(p.hints.participants, "Alex (me): candidate. Other participants: Sam")
         XCTAssertEqual(p.hints.count, 2)
@@ -74,16 +81,35 @@ final class DroppedFileSheetTests: XCTestCase {
         try DuplicateCallLink.saveRecord(
             CallRecord(base: "Meeting_x", time: t0, durationSeconds: 2400, isLiveCapture: true), workDir: work)
         try SpeakerHints(participants: "Other participants: Sam").save(workDir: work, base: "Meeting_x")
-        let dropped = CallRecord(base: "memo", time: t0.addingTimeInterval(300), durationSeconds: 1800, isLiveCapture: true)
-        let p = DroppedFileSheet.prefill(workDir: work, record: dropped)
-        if case .twin = p.source { XCTFail("copied a sheet from a recording that started 5 minutes apart") }
+        let dropped = CallRecord(base: "memo", time: t0.addingTimeInterval(300), durationSeconds: 1800, isLiveCapture: false)
+        let p = DroppedFileSheet.prefill(workDir: work, base: dropped.base, record: dropped)
+        XCTAssertEqual(p.source, .recent, "names come as a suggestion only")
+        XCTAssertNil(p.hints.count, "the speaker count of the other call is not copied")
+    }
+
+    func testASheetlessBetterOverlapDoesNotHideTheTwinWithASheet() throws {
+        try DuplicateCallLink.saveRecord(
+            CallRecord(base: "nosheet", time: t0, durationSeconds: 3000, isLiveCapture: true), workDir: work)
+        try DuplicateCallLink.saveRecord(
+            CallRecord(base: "Meeting_y", time: t0.addingTimeInterval(60), durationSeconds: 2400, isLiveCapture: true), workDir: work)
+        try SpeakerHints(count: 3, participants: "Other participants: Kim").save(workDir: work, base: "Meeting_y")
+        let dropped = CallRecord(base: "d", time: t0, durationSeconds: 2900, isLiveCapture: false)
+        XCTAssertEqual(DroppedFileSheet.prefill(workDir: work, base: "d", record: dropped).source, .twin(base: "Meeting_y"))
+    }
+
+    func testATwinWithAnEmptySheetIsNotUsed() throws {
+        try DuplicateCallLink.saveRecord(
+            CallRecord(base: "Meeting_x", time: t0, durationSeconds: 2400, isLiveCapture: true), workDir: work)
+        try SpeakerHints().save(workDir: work, base: "Meeting_x")
+        let dropped = CallRecord(base: "interview-x", time: t0, durationSeconds: 2400, isLiveCapture: false)
+        XCTAssertEqual(DroppedFileSheet.prefill(workDir: work, base: "interview-x", record: dropped).source, .none)
     }
 
     func testATwinWithoutAnAnswerIsNotUsed() throws {
         try DuplicateCallLink.saveRecord(
             CallRecord(base: "Meeting_x", time: t0, durationSeconds: 2400, isLiveCapture: true), workDir: work)
         let dropped = CallRecord(base: "interview-x", time: t0, durationSeconds: 2400, isLiveCapture: false)
-        let p = DroppedFileSheet.prefill(workDir: work, record: dropped)
+        let p = DroppedFileSheet.prefill(workDir: work, base: dropped.base, record: dropped)
         XCTAssertEqual(p.source, .none)
         XCTAssertTrue(p.hints.isEmpty)
         XCTAssertNil(p.sourceLine)
@@ -91,7 +117,7 @@ final class DroppedFileSheetTests: XCTestCase {
 
     func testWithoutATwinTheRecentSheetsFillTheOwnerRoleAndPeople() throws {
         try SpeakerHints(participants: "Alex (me): candidate. Other participants: Sam, Robin").save(workDir: work, base: "older")
-        let p = DroppedFileSheet.prefill(workDir: work, record: CallRecord(
+        let p = DroppedFileSheet.prefill(workDir: work, base: "interview-x", record: CallRecord(
             base: "interview-x", time: t0, durationSeconds: 900, isLiveCapture: false))
         XCTAssertEqual(p.source, .recent)
         XCTAssertEqual(SpeakerSuggestions.others(in: p.hints.participants), "Sam, Robin")
@@ -100,14 +126,14 @@ final class DroppedFileSheetTests: XCTestCase {
     }
 
     func testNoRecordAndNoHistoryGivesAnEmptyPrefill() {
-        let p = DroppedFileSheet.prefill(workDir: work, record: nil)
+        let p = DroppedFileSheet.prefill(workDir: work, base: "x", record: nil)
         XCTAssertEqual(p.source, .none)
         XCTAssertTrue(p.hints.isEmpty)
     }
 
     func testPrefillNeverSuggestsFromItsOwnBase() throws {
         try SpeakerHints(participants: "Other participants: Pat").save(workDir: work, base: "interview-x")
-        let p = DroppedFileSheet.prefill(workDir: work, record: CallRecord(
+        let p = DroppedFileSheet.prefill(workDir: work, base: "interview-x", record: CallRecord(
             base: "interview-x", time: t0, durationSeconds: 900, isLiveCapture: false))
         // The base has its own answer; decide() would have skipped, and prefill must not echo it as "recent".
         XCTAssertEqual(p.source, .none)
@@ -115,7 +141,7 @@ final class DroppedFileSheetTests: XCTestCase {
 
     // MARK: participants line (same wording the recorder sheet writes)
 
-    func testParticipantsLineMatchesTheRecorderSheet() {
+    func testParticipantsLineUsesTheMeFormThatRoleInReads() {
         XCTAssertEqual(DroppedFileSheet.participantsLine(owner: "Alex", role: "candidate", inPerson: false, others: "Sam"),
                        "Alex (me): candidate. Other participants: Sam")
         XCTAssertEqual(DroppedFileSheet.participantsLine(owner: "Me", role: "host", inPerson: false, others: ""),

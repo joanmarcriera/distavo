@@ -160,6 +160,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
+- `.sheet-offered.json` — `DroppedFileSheet.markOffered`: the participants sheet was offered for a dropped file (core only until the UI lands, #4012).
 - `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
 - `reminders-exported.json` — ledger of reminders already sent (one per work dir, not per base; `RemindersLedger`).
 - In the **notes** folder: `<note>.prev-<yyyyMMdd-HHmmss>.md` backups (`NoteVersions`, from Regenerate and speaker rename); every scan/listing skips them via `NoteVersions.isBackupName`.

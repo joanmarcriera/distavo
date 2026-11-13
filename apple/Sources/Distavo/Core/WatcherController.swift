@@ -1117,6 +1117,9 @@ final class WatcherController: ObservableObject {
     }
 
     private func persist() {
-        try? Config.save(config, to: Config.defaultConfigURL)
+        // A failed save (disk full, permissions) used to be dropped silently, so a change looked
+        // saved until the next launch reverted it. Keep the in-memory config; record the failure.
+        do { try Config.save(config, to: Config.defaultConfigURL) }
+        catch { log("Could not save settings: \(error.localizedDescription)") }
     }
 }

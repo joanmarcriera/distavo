@@ -45,7 +45,7 @@ public enum RecordingStorageFormat: String, Codable, CaseIterable, Equatable, Se
     /// Label for Settings.
     public var displayName: String {
         switch self {
-        case .full: return "Full quality (32-bit float, about 1.4 GB per hour)"
+        case .full: return "Full quality (32-bit, about 1.4 GB per hour)"
         case .int16: return "Compact (16-bit, about 0.7 GB per hour)"
         }
     }

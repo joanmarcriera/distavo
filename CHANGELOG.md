@@ -155,6 +155,8 @@ edit it by hand. Task numbers link to the Vikunja board.
 - **settings**: Cancel the folder walk, cache it 60 s, hide size line without a recorder ([#6670](https://familia.riera.co.uk/tasks/6670))
 - **speakers**: Seed the note owner's name and never infer the owner from "standing in for" ([#6772](https://familia.riera.co.uk/tasks/6772))
 - **speakers**: Owner never creates a transcriber prompt, softer rule, capped merge ([#6772](https://familia.riera.co.uk/tasks/6772))
+- **pipeline**: One await per statement in noteStart and duplicate-call registration
+- **pipeline**: No awaited real-async dependency defaults; pure noteStart (CI abort on macOS 26)
 
 
 ### Tooling
@@ -204,6 +206,7 @@ edit it by hand. Task numbers link to the Vikunja board.
 - Keep the already-published Setapp listing draft and trademark note
 - **claude**: Long recordings, crash-loop guard, recording cap and part caches ([#6759](https://familia.riera.co.uk/tasks/6759))
 - **state**: Checkpoint of the 2026-11-14 feedback drive
+- **changelog**: 1.21.0
 
 
 ### Tests

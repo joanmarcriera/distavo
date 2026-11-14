@@ -160,6 +160,8 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
+- `.part-NN.json` — one transcribed part of a long recording (`LongRecording`, keyed to the work WAV and the transcribe
+  settings); `.part-NN.wav` exists only while that part is transcribed. Removed once the note is written.
 - `.sheet-offered.json` — `DroppedFileSheet.markOffered`: the participants sheet was offered for a dropped file (core only until the UI lands, #4012).
 - `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
 - `reminders-exported.json` — ledger of reminders already sent (one per work dir, not per base; `RemindersLedger`).
@@ -182,8 +184,21 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   partitions input; the reduce step reuses `Prompt.build`, so an on-device note has the same shape as Ollama.
   The feature is a kill switch: with `summarise.embedded_enabled` false, `backend == "embedded"` falls back
   to Ollama (does not fail), and Settings does not offer it.
-- **Stale markers at startup:** leftover `.processing` markers mean a prior crash; they're cleared so files
-  become pending again. `.failed` markers persist until "Process now" clears them.
+- **Stale markers at startup never crash-loop (#6759):** a normal quit clears this process's `.processing`
+  markers (`applicationWillTerminate` -> `clearProcessingMarkers`, markers carry the pid), so one left at launch
+  means Distavo died on that file: `setAsideInterrupted` marks it `.failed` with `interruptedReason` and the app
+  notifies; it is never retried at launch. A marker whose pid is alive (another edition on the same data folder)
+  is left alone. `.failed` markers persist until "Process now" clears them.
+- **Long recordings are transcribed in bounded parts (#6759, `LongRecording.swift`):** a work WAV over 90 min is cut
+  at the quietest second near every 30-min boundary (streamed), silent parts are skipped, each part goes through
+  `deps.transcribe`, and the results are stitched (absolute times, speakers renumbered per part by talk time, a footer
+  line via `LongRecording.notesKey`). Finished parts are cached for resume; a network/server error stops the run like
+  a whole-file run, an error about one part's audio leaves that part out and says so. An Ollama transcript over
+  `num_ctx` is summarised in parts and merged (`Pipeline.longTranscriptInput`, also in Regenerate). Shorter recordings
+  take the unchanged whole-file path.
+- **Recording cap (`RecordingDurationCap`):** `recording.max_duration_hours` (default 8, also for configs predating it;
+  0 = off) stops the built-in recorder through the normal stop path, without the speakers question, after a warning
+  10 minutes before; fed monotonic elapsed time.
 - **Too short is not failed:** a recording under `min_recording_seconds` (default 15) gets a `.tooshort` marker
   (never `.failed`) and is never transcribed; the menu offers to move it to the Bin, "Process now" clears the
   marker. Duration comes through the `audioDurationSeconds` seam in `PipelineDeps`.

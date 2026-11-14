@@ -6,6 +6,10 @@ import Foundation
 // which the prompt already frames as a spelling aid and never as facts, so a term that is not in the
 // transcript never reaches the note. Role terms are kept out of the fuzzy vocabulary post-pass (Pipeline), so
 // a word is only ever suggested to the transcriber, never rewritten.
+//
+// The packs are English (UK tax and finance). A vocabulary prompt in the wrong language is what collapses the
+// Barcelona Supercomputing Center Catalan chunks (#3579), so they apply only when the meeting is English or its
+// language is not pinned (`RoleTermPacks.appliesTo`; drive review C, 2026-11-09).
 
 public struct RoleTermPack: Equatable, Sendable {
     public let id: String
@@ -16,6 +20,22 @@ public struct RoleTermPack: Equatable, Sendable {
 
 public enum RoleTermPacks {
     public static let maxTerms = 12
+
+    /// True when the English role packs may be added for this recording.
+    /// - `override`: the per-recording `LanguageOverride`; its SPOKEN `code` (when set) is the owner's own answer
+    ///   and decides alone: English -> yes, anything else -> no. A note-only override says nothing about speech.
+    /// - `configured`: `transcribe.language`. "auto" or empty (not pinned) keeps the packs; "en" / "en-GB" keep
+    ///   them; any other code ("ca", "es", ...) drops them.
+    public static func appliesTo(configuredLanguage configured: String, override: LanguageOverride? = nil) -> Bool {
+        if let code = override?.code, !code.isEmpty { return isEnglish(code) }
+        let c = configured.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c.isEmpty || c == "auto" || isEnglish(c)
+    }
+
+    private static func isEnglish(_ code: String) -> Bool {
+        let c = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return c == "en" || c.hasPrefix("en-") || c.hasPrefix("en_")
+    }
 
     public static let all: [RoleTermPack] = [
         RoleTermPack(
@@ -44,4 +64,9 @@ public enum RoleTermPacks {
 extension SpeakerHints {
     /// Field-specific spelling terms implied by the roles in the participants line.
     public var roleTerms: [String] { RoleTermPacks.terms(forParticipants: participants) }
+
+    /// `roleTerms` when the meeting's language allows the English packs (`RoleTermPacks.appliesTo`), else none.
+    public func roleTerms(configuredLanguage: String, override: LanguageOverride?) -> [String] {
+        RoleTermPacks.appliesTo(configuredLanguage: configuredLanguage, override: override) ? roleTerms : []
+    }
 }

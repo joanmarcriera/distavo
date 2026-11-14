@@ -76,7 +76,7 @@ of the original Python module (noted in its header).
 1.17 feature groups (each file's header comment is the spec; all pure and unit-tested, the app target only renders them):
 - **Settings panes** — `SettingsPanes.swift`: which panes exist per edition, sidebar search, remembered selection.
 - **Note language** — `NoteLanguage.swift` (`summarise.note_language`: `en` | `auto` | a Whisper code; unknown = `en`).
-- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript.
+- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript. `RoleTermPacks.swift` seeds English UK-tax/finance terms from a role in the participants line, but only when the meeting is English or its language is not pinned (`RoleTermPacks.appliesTo`: skipped for a non-English `transcribe.language` or per-recording `LanguageOverride.code`), because an English vocabulary prompt collapses Catalan chunks (#3579).
 - **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; the default prompt carries NO domain examples (#3578: an 8B model copies them into the ledger) — UK contracting/HPC rules live only in the opt-in `uk_contracting` template (`ledgerRules`/`notesRules`); `ActionItemsPrompt.swift`
   expresses `summarise.action_items` as a template; `ActionItems.swift` lists/ticks `- [ ]` across notes;
   `RemindersExport.swift` decides what to send (EventKit sink lives in the app target).

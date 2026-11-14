@@ -426,7 +426,10 @@ public enum Pipeline {
         // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
         // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
         let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
-        let roleTerms = hints?.roleTerms ?? []
+        // English packs only for an English or unpinned meeting (drive review C): never into a Catalan vocabulary prompt.
+        let roleTerms = hints?.roleTerms(
+            configuredLanguage: transcribeConfig.language,
+            override: LanguageOverride.load(workDir: workDir, base: LanguageOverride.sourceBase(from: sourceBase))) ?? []
         if !meetingTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
         }

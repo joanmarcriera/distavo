@@ -212,8 +212,8 @@ public struct PipelineDeps {
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
         calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
-        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) },
-        containerCreationDate: @escaping (URL) async -> Date? = { await Pipeline.containerCreation($0) },
+        recordingStart: @escaping (URL) async -> Date? = { Pipeline.recordingStartEvidenceSync($0) },
+        containerCreationDate: @escaping (URL) async -> Date? = { Pipeline.creationDateMetadataSync($0) },
         stereoChannels: @escaping (URL) async -> StereoChannels? = { StereoChannels.read(from: $0) }
     ) {
         self.stereoChannels = stereoChannels
@@ -615,9 +615,16 @@ public enum Pipeline {
             // The template actually used, by name, so the log answers "why is this note shaped like that" (#6667).
             print("[Distavo] " + StopSheetTemplate.logLine(
                 base: base, template: resolvedTemplate.template, autoNote: resolvedTemplate.note))
-            let noteDate: Date?
-            if let calendarStart = calendarMatch?.recordingStart { noteDate = calendarStart }
-            else { noteDate = await noteStart(for: path, deps: deps) }
+            // A plain var, not a `let` initialised in an if/else with an await in one branch: that shape aborted the
+            // test process on the macOS 26 runtime with Xcode 26.4-26.6 ("freed pointer was not the last allocation").
+            var noteDate = calendarMatch?.recordingStart
+            if noteDate == nil { noteDate = Pipeline.noteStartFromName(path) }
+            if noteDate == nil {
+                // The awaits stay in processOne (see `noteStart(for:created:duration:)`).
+                let created = await deps.containerCreationDate(path)
+                let duration = created == nil ? nil : await deps.audioDurationSeconds(path)
+                noteDate = Pipeline.noteStart(for: path, created: created, duration: duration)
+            }
             var context = NoteContext(
                 noteOwner: config.noteOwner,
                 // Channel labels put the owner (left, microphone) on SPEAKER_00 whatever label the owner typed
@@ -938,28 +945,53 @@ public enum Pipeline {
     }
 
     /// Start of the recording for NOTE dating (#4018), in order of evidence: the recorder's or a phone's
-    /// name stamp, the container `creation_time` minus the duration, the file system date.
+    /// name stamp, the container `creation_time` minus the duration, the file system date. Async convenience over
+    /// the pure `noteStart(for:created:duration:)`; `processOne` does the two awaits itself (see there).
     static func noteStart(for url: URL, deps: PipelineDeps, timeZone: TimeZone = .current) async -> Date? {
-        let stem = url.deletingPathExtension().lastPathComponent
-        if let date = recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone) {
-            return date
-        }
-        // One await per statement (see the duplicate-call registration in `processOne`): two awaited dependency
-        // closures in one `if let` list aborted the test process on the macOS 26 runtime with Xcode 26.4-26.6.
+        if let named = noteStartFromName(url, timeZone: timeZone) { return named }
         let created = await deps.containerCreationDate(url)
-        if let created {
-            let duration = await deps.audioDurationSeconds(url)
-            if let duration, let start = RecordingStamp.start(creation: created, duration: duration) { return start }
+        let duration = created == nil ? nil : await deps.audioDurationSeconds(url)
+        return noteStart(for: url, created: created, duration: duration, timeZone: timeZone)
+    }
+
+    /// The name-stamp step of `noteStart` alone (recorder name, then a phone's stamp).
+    static func noteStartFromName(_ url: URL, timeZone: TimeZone = .current) -> Date? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        return recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone)
+    }
+
+    /// `noteStart` once the container date and the duration are known (pure). No await inside: an async
+    /// `noteStart` awaiting a real async dependency aborted the test process on the macOS 26 runtime with
+    /// Xcode 26.4-26.6 ("freed pointer was not the last allocation" at its first await, CI 2026-11-14).
+    static func noteStart(for url: URL, created: Date?, duration: Double?, timeZone: TimeZone = .current) -> Date? {
+        if let named = noteStartFromName(url, timeZone: timeZone) { return named }
+        if let created, let duration, let start = RecordingStamp.start(creation: created, duration: duration) {
+            return start
         }
         return meetingDate(for: url, timeZone: timeZone)
     }
 
     /// The media's embedded creation date (AVAsset), nil when absent.
     public static func containerCreation(_ url: URL) async -> Date? {
+        await creationDateMetadata(url)
+    }
+
+    /// The asset's `creationDate` metadata, nil when absent or unreadable.
+    ///
+    /// Synchronous on purpose: awaiting AVFoundation's `asset.load(.creationDate)` aborted the process on the
+    /// macOS 26 runtime with Xcode 26.4-26.6 ("freed pointer was not the last allocation" at the await that called
+    /// it, bisected and backtraced on CI 2026-11-14), which would crash a release built there whenever a dropped
+    /// file without a name stamp is dated. The deprecated synchronous properties read the same metadata.
+    static func creationDateMetadata(_ url: URL) async -> Date? {
+        // Off the Swift task entirely: AVFoundation runs on a plain GCD thread with no current task.
+        await withCheckedContinuation { (cont: CheckedContinuation<Date?, Never>) in
+            DispatchQueue.global(qos: .utility).async { cont.resume(returning: creationDateMetadataSync(url)) }
+        }
+    }
+
+    public static func creationDateMetadataSync(_ url: URL) -> Date? {
         let asset = AVURLAsset(url: url)
-        guard let item = try? await asset.load(.creationDate),
-              let date = try? await item.load(.dateValue) else { return nil }
-        return date
+        return asset.creationDate?.dateValue
     }
 
     /// The start time in a recorder-style name, exactly as before #2946 (any
@@ -991,10 +1023,12 @@ public enum Pipeline {
     /// filesystem dates and any other file name are NOT evidence.
     public static func recordingStartEvidence(_ url: URL) async -> Date? {
         if let d = exactRecorderNameDate(url) { return d }
-        let asset = AVURLAsset(url: url)
-        guard let item = try? await asset.load(.creationDate),
-              let date = try? await item.load(.dateValue) else { return nil }
-        return date
+        return await creationDateMetadata(url)
+    }
+
+    /// `recordingStartEvidence` without an await, for the `PipelineDeps` default (see `creationDateMetadata`).
+    public static func recordingStartEvidenceSync(_ url: URL) -> Date? {
+        exactRecorderNameDate(url) ?? creationDateMetadataSync(url)
     }
 
     /// The router's detections from the transcribe result, formatted for the

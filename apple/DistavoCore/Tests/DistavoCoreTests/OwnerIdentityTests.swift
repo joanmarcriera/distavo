@@ -15,22 +15,30 @@ final class OwnerIdentityTests: XCTestCase {
         XCTAssertEqual(OwnerIdentity.terms(noteOwner: "  Marc  "), ["Marc"])
     }
 
+    func testLeadingTitleIsSkippedWhenTakingTheFirstName() {
+        XCTAssertEqual(OwnerIdentity.terms(noteOwner: "Dr Marc Riera"), ["Dr Marc Riera", "Marc"])
+        XCTAssertEqual(OwnerIdentity.terms(noteOwner: "Prof. Ana Puig"), ["Prof. Ana Puig", "Ana"])
+        XCTAssertEqual(OwnerIdentity.terms(noteOwner: "Sra Ana Puig"), ["Sra Ana Puig", "Ana"])
+        XCTAssertEqual(OwnerIdentity.terms(noteOwner: "Mr Smith"), ["Mr Smith", "Smith"])
+        XCTAssertEqual(OwnerIdentity.terms(noteOwner: "Dr"), ["Dr"], "a title alone is kept as the name, no first name")
+    }
+
     func testUnsetOwnerSeedsNothing() {
-        for unset in ["", "  ", "Me", "me", "unknown", "I", "The note owner"] {
+        for unset in ["", "  ", "Me", "me", "unknown", "I", "The note owner", "you", "Owner", "USER"] {
             XCTAssertEqual(OwnerIdentity.terms(noteOwner: unset), [], "\"\(unset)\"")
             XCTAssertFalse(OwnerIdentity.isConfigured(unset), "\"\(unset)\"")
         }
         XCTAssertEqual(OwnerIdentity.terms(noteOwner: Config().noteOwner), [], "the shipped default is unset")
     }
 
-    private func makeConfig(owner: String?) throws -> (Config, URL) {
+    private func makeConfig(owner: String?, vocabulary: [String] = ["GlobalTerm"]) throws -> (Config, URL) {
         let dir = TestTemp.root.appendingPathComponent("distavo-owner-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = dir.appendingPathComponent("rec").path
         cfg.notesDir = dir.appendingPathComponent("notes").path
         cfg.workDir = dir.appendingPathComponent("work").path
         if let owner { cfg.noteOwner = owner }
-        cfg.transcribe.vocabulary = ["GlobalTerm"]
+        cfg.transcribe.vocabulary = vocabulary
         cfg.transcribe.fuzzyVocabulary = true
         for d in [cfg.recordingsDir, cfg.notesDir, cfg.workDir] {
             try FileManager.default.createDirectory(atPath: d, withIntermediateDirectories: true)
@@ -38,8 +46,9 @@ final class OwnerIdentityTests: XCTestCase {
         return (cfg, dir)
     }
 
-    private func run(owner: String?, participants: String?) async throws -> (vocab: [String], glossary: [String], fuzzy: String) {
-        let (cfg, dir) = try makeConfig(owner: owner)
+    private func run(owner: String?, participants: String?, vocabulary: [String] = ["GlobalTerm"])
+        async throws -> (vocab: [String], glossary: [String], fuzzy: String) {
+        let (cfg, dir) = try makeConfig(owner: owner, vocabulary: vocabulary)
         defer { try? FileManager.default.removeItem(at: dir) }
         let input = URL(fileURLWithPath: cfg.recordingsDir).appendingPathComponent("demo.opus")
         try Data(repeating: 1, count: 64).write(to: input)
@@ -75,6 +84,21 @@ final class OwnerIdentityTests: XCTestCase {
         XCTAssertEqual(out.glossary, out.vocab)
         // The fuzzy post-pass (#3950) snaps a near-miss spelling to the seeded full name (it only takes terms of 5+ letters).
         XCTAssertTrue(out.fuzzy.contains("Marc Riera for joining"), out.fuzzy)
+    }
+
+    /// #3579: a vocabulary prompt collapses some chunks (BSC Catalan), so the owner must never CREATE one.
+    func testOwnerNeverCreatesATranscriberPromptButStillFeedsGlossaryAndFuzzyPass() async throws {
+        let out = try await run(owner: "Marc Riera", participants: nil, vocabulary: [])
+        XCTAssertEqual(out.vocab, [], "no vocabulary was set, so the transcriber still gets none")
+        XCTAssertEqual(out.glossary, ["Marc Riera", "Marc"], "the summary glossary always has the owner")
+        XCTAssertTrue(out.fuzzy.contains("Marc Riera for joining"), "the fuzzy post-pass too: \(out.fuzzy)")
+    }
+
+    func testOwnerJoinsAnExistingTranscriberVocabularyAfterParticipantNames() async throws {
+        let withParticipant = try await run(owner: "Marc Riera", participants: "Annika", vocabulary: [])
+        XCTAssertEqual(withParticipant.vocab, ["Annika", "Marc Riera", "Marc"])
+        let withGlobal = try await run(owner: "Marc Riera", participants: nil, vocabulary: ["GlobalTerm"])
+        XCTAssertEqual(withGlobal.vocab, ["Marc Riera", "Marc", "GlobalTerm"])
     }
 
     func testUnsetOwnerLeavesTheVocabularyAsBefore() async throws {
@@ -128,7 +152,14 @@ final class OwnerIdentityTests: XCTestCase {
             XCTAssertTrue(rule.contains("\"\(phrase)\""), phrase)
         }
         XCTAssertTrue(rule.contains("Marc"))
-        XCTAssertTrue(rule.contains("never a separate person or task owner"))
+        XCTAssertTrue(rule.contains("is not evidence of who the note owner is"))
+        // The owner is identified by the label the prompt already gives, as SummaryGuards' "SPEAKER_xx IS <owner>" does.
+        XCTAssertTrue(rule.contains("only by the known speaker label or by the configured name"))
+        // A misheard name is "most likely" the owner, unless the participants line names that person separately.
+        XCTAssertTrue(rule.contains("most likely Marc misheard"))
+        XCTAssertTrue(rule.contains("unless the participants line names that person separately"))
+        XCTAssertFalse(rule.contains("never a separate person"), "no absolute claim about a misheard name")
+        XCTAssertLessThan(rule.count, 450)
         XCTAssertNil(OwnerIdentity.instruction(noteOwner: "Me"))
         XCTAssertNil(OwnerIdentity.instruction(noteOwner: ""))
     }
@@ -139,7 +170,7 @@ final class OwnerIdentityTests: XCTestCase {
         for style in [Prompt.Style.classic, .factsFirst] {
             let p = Prompt.build(transcript: fixture, noteOwner: "Marc", userSpeaker: "unknown", style: style,
                                  customInstruction: instruction)
-            XCTAssertTrue(p.contains("never a separate person or task owner"), "\(style)")
+            XCTAssertTrue(p.contains("is not evidence of who the note owner is"), "\(style)")
             // It is the last thing the model reads, after the transcript that says "standing in for Sam".
             XCTAssertLessThan(p.range(of: "I'm standing in for Sam")!.lowerBound,
                               p.range(of: "\"standing in for\"")!.lowerBound, "\(style)")
@@ -157,6 +188,13 @@ final class OwnerIdentityTests: XCTestCase {
                 .replacingOccurrences(of: "{note_owner}", with: owner)
                 .replacingOccurrences(of: "{user_speaker}", with: "unknown")
                 .replacingOccurrences(of: "{transcript_text}", with: fixture), "classic \"\(owner)\"")
+            let facts = Prompt.build(transcript: fixture, noteOwner: owner, userSpeaker: "unknown", style: .factsFirst,
+                                     customInstruction: OwnerIdentity.merged(nil, noteOwner: owner, notes: notes))
+            XCTAssertEqual(facts, Prompt.factsFirstTemplate
+                .replacingOccurrences(of: "{meeting_datetime}", with: Prompt.meetingDateText(nil))
+                .replacingOccurrences(of: "{note_owner}", with: owner)
+                .replacingOccurrences(of: "{user_speaker}", with: "unknown")
+                .replacingOccurrences(of: "{transcript_text}", with: fixture), "facts-first \"\(owner)\"")
         }
         notes = notesAskingForMetadata()
         XCTAssertEqual(OwnerIdentity.merged(nil, noteOwner: "Me", notes: notes), NoteMeta.requestText(notes))
@@ -168,10 +206,43 @@ final class OwnerIdentityTests: XCTestCase {
         let notes = notesAskingForMetadata()
         let long = String(repeating: "Focus on the risks and the budget. ", count: 60)
         let merged = try XCTUnwrap(OwnerIdentity.merged(long, noteOwner: "Marc", notes: notes))
-        XCTAssertLessThanOrEqual(merged.count, Prompt.maxCustomInstructionChars)
+        XCTAssertLessThanOrEqual(merged.count, Prompt.maxCustomInstructionChars - OwnerIdentity.retryReserve)
         XCTAssertTrue(merged.contains(try XCTUnwrap(OwnerIdentity.instruction(noteOwner: "Marc"))), "owner rule kept whole")
         XCTAssertTrue(merged.contains(NoteMeta.requestText(notes)), "title request kept whole")
         XCTAssertTrue(merged.contains("Focus on the risks"), "user text keeps the room that is left")
+        XCTAssertTrue(merged.hasPrefix(try XCTUnwrap(OwnerIdentity.instruction(noteOwner: "Marc"))), "the rule comes first")
+    }
+
+    /// A Catalan/Spanish note that comes back in the wrong language is retried with `retryInstruction` appended to
+    /// the instruction (Pipeline); the prompt cuts the instruction from its END, so room must be left for it.
+    func testLanguageRetryInstructionStillFitsAfterAFullLengthUserInstruction() throws {
+        let notes = notesAskingForMetadata()
+        let user = String(repeating: "x", count: 1000)
+        let merged = try XCTUnwrap(OwnerIdentity.merged(user, noteOwner: "Marc", notes: notes))
+        for lang in ["ca", "es"] {
+            let retry = NoteLanguageCheck.retryInstruction(requested: lang)
+            let block = Prompt.customInstructionBlock(merged + "\n" + retry)
+            XCTAssertTrue(block.contains(retry), "retry cut for \(lang)")
+            XCTAssertTrue(block.contains(NoteMeta.requestText(notes)), "title request cut for \(lang)")
+        }
+    }
+
+    func testUserRoomIsWhatTheMergeActuallyLeaves() throws {
+        let notes = notesAskingForMetadata()
+        for n in [NotesConfig(), notes] {
+            let room = OwnerIdentity.userRoom(noteOwner: "Marc", notes: n)
+            let at = try XCTUnwrap(OwnerIdentity.merged(String(repeating: "u", count: room), noteOwner: "Marc", notes: n))
+            let over = try XCTUnwrap(OwnerIdentity.merged(String(repeating: "u", count: room + 50), noteOwner: "Marc", notes: n))
+            XCTAssertEqual(at, over, "text beyond the room is cut")
+            XCTAssertTrue(at.contains(String(repeating: "u", count: room)), "the user's text uses the whole room")
+            XCTAssertFalse(at.contains(String(repeating: "u", count: room + 1)))
+            XCTAssertLessThanOrEqual(at.count, Prompt.maxCustomInstructionChars - OwnerIdentity.retryReserve)
+        }
+        // No owner: the old arithmetic, nothing reserved.
+        XCTAssertEqual(OwnerIdentity.userRoom(noteOwner: "Me", notes: NotesConfig()), Prompt.maxCustomInstructionChars)
+        XCTAssertEqual(OwnerIdentity.userRoom(noteOwner: "Me", notes: notes),
+                       Prompt.maxCustomInstructionChars - NoteMeta.requestText(notes).count - 2)
+        XCTAssertLessThan(OwnerIdentity.userRoom(noteOwner: "Marc", notes: NotesConfig()), Prompt.maxCustomInstructionChars)
     }
 
     func testProcessOneAndRegenerateHandTheRuleToTheSummariser() async throws {
@@ -190,7 +261,7 @@ final class OwnerIdentityTests: XCTestCase {
                                           config: cfg, deps: deps)
         XCTAssertEqual(r.status, .done, r.message)
         let regenerated = try XCTUnwrap(seen.value)
-        XCTAssertTrue(regenerated.contains("never a separate person or task owner"), regenerated)
+        XCTAssertTrue(regenerated.contains("is not evidence of who the note owner is"), regenerated)
         XCTAssertTrue(regenerated.contains("Be brief."), regenerated)
 
         // processOne: the same, from a fresh recording.
@@ -208,7 +279,32 @@ final class OwnerIdentityTests: XCTestCase {
             audioDurationSeconds: { _ in 60 })
         let p = await Pipeline.processOne(path: input, config: cfg, deps: live, stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(p.status, .done, p.message)
-        XCTAssertTrue(try XCTUnwrap(seen.value).contains("never a separate person or task owner"))
+        XCTAssertTrue(try XCTUnwrap(seen.value).contains("is not evidence of who the note owner is"))
+    }
+
+    func testRegenerateWithNoOwnerKeepsTheInstructionAndGlossaryAsBefore() async throws {
+        let (cfg, dir) = try makeConfig(owner: nil)   // "Me"
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let work = URL(fileURLWithPath: cfg.workDir)
+        try "[SPEAKER_00]\nhello there\n".write(to: Pipeline.cachedTranscriptURL(workDir: work, base: "demo"),
+                                               atomically: true, encoding: .utf8)
+        try "# Meeting notes\n\nOLD".write(to: URL(fileURLWithPath: cfg.notesDir).appendingPathComponent("demo.md"),
+                                           atomically: true, encoding: .utf8)
+        let instruction = Box<String?>("sentinel"), glossary = Box<[String]>([])
+        let deps = PipelineDeps(
+            convertToWav: { _, _ in }, transcribe: { _, _ in [:] }, ollamaReachable: { _ in true },
+            summarise: { _, _, _, context in
+                instruction.set(context.customInstruction); glossary.set(context.glossary)
+                return PipelineTests.validNote
+            })
+        var r = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg, deps: deps)
+        XCTAssertEqual(r.status, .done, r.message)
+        XCTAssertNil(instruction.value)
+        XCTAssertEqual(glossary.value, ["GlobalTerm"])
+        r = await Pipeline.regenerate(base: "demo", options: RegenerateOptions(customInstruction: "Be brief."),
+                                      config: cfg, deps: deps)
+        XCTAssertEqual(r.status, .done, r.message)
+        XCTAssertEqual(instruction.value, "Be brief.", "the user's own instruction is untouched")
     }
 
     func testUnsetOwnerLeavesTheSummariserInstructionNil() async throws {

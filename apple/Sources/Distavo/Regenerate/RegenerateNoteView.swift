@@ -120,8 +120,13 @@ struct RegenerateNoteView: View {
                         .font(.body)
                         .frame(height: 70)
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(.quaternary))
-                    Text("e.g. “Focus on action items and owners” or “Write it for a client”. \(instruction.count)/\(Prompt.maxCustomInstructionChars)")
-                        .font(.caption).foregroundStyle(instruction.count > Prompt.maxCustomInstructionChars ? .orange : .secondary)
+                    // With a note owner configured the owner rule and a retry reserve share the 1000 characters (#6772),
+                    // so the counter shows the room actually left; without one it is the old limit.
+                    let room = OwnerIdentity.isConfigured(config.noteOwner)
+                        ? OwnerIdentity.userRoom(noteOwner: config.noteOwner, notes: config.notes)
+                        : Prompt.maxCustomInstructionChars
+                    Text("e.g. “Focus on action items and owners” or “Write it for a client”. \(instruction.count)/\(room)")
+                        .font(.caption).foregroundStyle(instruction.count > room ? .orange : .secondary)
                 }
                 if usesAppleModel {
                     // 2947.8: measured on this model, an instruction asking for an added line was

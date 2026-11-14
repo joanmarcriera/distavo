@@ -423,16 +423,23 @@ public enum Pipeline {
         // Then the role packs of the participants line (accountant -> UK tax terms, RoleTermPacks).
         // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
         // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
-        // The owner's own name (full and first, #6772) rides with the participants: a misheard "Marc" must not become
-        // a second person. Unset owner adds nothing.
-        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? []) + OwnerIdentity.terms(noteOwner: config.noteOwner)
+        // The owner's own name (full and first, #6772): a misheard "Marc" must not become a second person. It always
+        // feeds the summary glossary and the fuzzy post-pass, but joins the TRANSCRIBER vocabulary only when that
+        // already has terms: a vocabulary prompt triggers #3579 (BSC Catalan chunks collapse), so the owner never
+        // creates one. Unset owner adds nothing.
+        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
+        let ownerTerms = OwnerIdentity.terms(noteOwner: config.noteOwner)
         let roleTerms = hints?.roleTerms ?? []
-        if !meetingTerms.isEmpty {
-            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
+        let transcriberHasTerms = !Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary).isEmpty
+        let transcriberTerms = meetingTerms + (transcriberHasTerms ? ownerTerms : [])
+        if !transcriberTerms.isEmpty {
+            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcriberTerms + transcribeConfig.vocabulary)
         }
-        let fuzzyTerms = transcribeConfig.vocabulary
+        let fuzzyTerms = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + ownerTerms)
+        var summaryGlossary = fuzzyTerms   // what the summary prompt's spelling aid lists
         if !roleTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + roleTerms)
+            summaryGlossary = Vocabulary.normalisedTerms(summaryGlossary + roleTerms)
         }
         transcribeConfig.replacements = transcribeConfig.effectiveReplacements
         // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
@@ -610,7 +617,7 @@ public enum Pipeline {
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
                 customInstruction: OwnerIdentity.merged(nil, noteOwner: config.noteOwner, notes: config.notes),   // #6772 owner rule + #2954
-                glossary: transcribeConfig.vocabulary,
+                glossary: summaryGlossary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.
                 template: ActionItemsPrompt.effectiveTemplate(resolvedTemplate.template,

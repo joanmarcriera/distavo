@@ -409,11 +409,16 @@ public enum Pipeline {
         // Only when `notes.link_duplicate_calls` is on (off for configs that predate it): off writes no sidecar,
         // no footer line and copies no sheet.
         var alsoCaptured: AlsoCaptured?
-        if variant == nil, config.notes.linkDuplicateCalls, let time = await deps.recordingStart(path),
-           let seconds = await deps.audioDurationSeconds(path), seconds > 0 {
-            alsoCaptured = DuplicateCallLink.register(
-                CallRecord(base: sourceBase, time: time, durationSeconds: seconds,
-                           isLiveCapture: exactRecorderNameDate(path) != nil), workDir: workDir)
+        if variant == nil, config.notes.linkDuplicateCalls {
+            // One await per statement: two awaited dependency closures in one condition list aborted the test
+            // process on the macOS 26 runtime ("freed pointer was not the last allocation", CI 2026-11-14).
+            let time = await deps.recordingStart(path)
+            let seconds = time == nil ? nil : await deps.audioDurationSeconds(path)
+            if let time, let seconds, seconds > 0 {
+                alsoCaptured = DuplicateCallLink.register(
+                    CallRecord(base: sourceBase, time: time, durationSeconds: seconds,
+                               isLiveCapture: exactRecorderNameDate(path) != nil), workDir: workDir)
+            }
         }
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase, source: path)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
@@ -939,10 +944,12 @@ public enum Pipeline {
         if let date = recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone) {
             return date
         }
-        if let created = await deps.containerCreationDate(url),
-           let duration = await deps.audioDurationSeconds(url),
-           let start = RecordingStamp.start(creation: created, duration: duration) {
-            return start
+        // One await per statement (see the duplicate-call registration in `processOne`): two awaited dependency
+        // closures in one `if let` list aborted the test process on the macOS 26 runtime with Xcode 26.4-26.6.
+        let created = await deps.containerCreationDate(url)
+        if let created {
+            let duration = await deps.audioDurationSeconds(url)
+            if let duration, let start = RecordingStamp.start(creation: created, duration: duration) { return start }
         }
         return meetingDate(for: url, timeZone: timeZone)
     }

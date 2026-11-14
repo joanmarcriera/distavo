@@ -47,7 +47,7 @@ public enum SettingsPane: String, CaseIterable, Identifiable, Sendable {
         case .general:
             return ["folder", "watch", "interval", "notes folder", "work folder", "login", "startup", "getting started"]
         case .recording:
-            return ["record", "silence", "stop", "short", "shrink", "compact", "speakers", "when done",
+            return ["record", "silence", "stop", "limit", "hours", "length", "short", "shrink", "compact", "speakers", "when done",
                     "open note", "open transcript", "retry", "bigger", "meeting detection", "detect", "call",
                     "zoom", "teams", "facetime", "snooze",
                     "key moment", "bookmark", "marker", "hotkey", "shortcut", "clip", "export clip"]

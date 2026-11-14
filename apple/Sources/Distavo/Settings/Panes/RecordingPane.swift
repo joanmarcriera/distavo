@@ -31,6 +31,14 @@ struct RecordingPane: View {
                         .disabled(!model.draft.autoStopOnSilence)
                     HelpButton(text: "Ends the recording, saves it and processes it as usual after this many minutes of silence on both the microphone and the meeting audio. It only applies once something has been heard, so waiting in a silent lobby never stops it. A very quiet meeting or a long pause can trigger it; choose Keep recording on the suggestion to prevent that.")
                 }
+                // Longest recording (RecordingDurationCap): on at 8 h for everyone, 0 = no limit.
+                HStack {
+                    Stepper(model.draft.recording.maxDurationHours == 0
+                                ? "Never stop a recording because of its length"
+                                : "Stop a recording after \(model.draft.recording.maxDurationHours) hours",
+                            value: $model.draft.recording.maxDurationHours, in: RecordingDurationCap.hoursRange)
+                    HelpButton(text: "A safety net for a forgotten Stop. When a recording reaches this length Distavo stops it, saves it and transcribes it as usual, and tells you; ten minutes before, a notification says it is coming. Set it to 0 for no limit.")
+                }
                 if model.draft.suggestStopOnSilence, model.draft.autoStopOnSilence,
                    model.draft.autoStopSilenceMinutes <= model.draft.suggestStopSilenceMinutes {
                     SettingCaption("This stops the recording before the suggestion would appear.")

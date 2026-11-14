@@ -45,19 +45,77 @@ public enum DistavoState {
     /// Subfolder-aware base name so same-named files in different folders don't
     /// collide, preserving internal dots (e.g. dated file names).
     public static func baseFor(recordingsDir: URL, path: URL) -> String {
-        let root = recordingsDir.standardizedFileURL.path
-        let full = path.standardizedFileURL.path
-        let relative: String
-        if full == root {
-            relative = path.lastPathComponent
-        } else if full.hasPrefix(root + "/") {
-            relative = String(full.dropFirst(root.count + 1))
-        } else {
-            relative = path.lastPathComponent
-        }
+        let relative = relativePath(recordingsDir: recordingsDir, path: path)
         let noExt = (relative as NSString).deletingPathExtension
         let parts = noExt.split(separator: "/").map(String.init)
         return parts.map(sanitizeJoined).joined(separator: "__")
+    }
+
+    /// `path` relative to `recordingsDir` (the file name alone when it is not
+    /// under it) — the string `baseFor` sanitises.
+    static func relativePath(recordingsDir: URL, path: URL) -> String {
+        let root = recordingsDir.standardizedFileURL.path
+        let full = path.standardizedFileURL.path
+        if full != root, full.hasPrefix(root + "/") {
+            return String(full.dropFirst(root.count + 1))
+        }
+        return path.lastPathComponent
+    }
+
+    // MARK: Same-base collisions (trust memo row 1)
+    //
+    // Sanitising is lossy: `a b.wav` and `a_b.wav` both reduce to the base
+    // `a_b`, so one `.done` marker (or note) hides the other recording for
+    // ever. `disambiguatedBases` resolves collisions only: every path whose
+    // `baseFor` result is unique keeps exactly that base (existing bases are
+    // never renamed); among colliding paths the first by sorted relative path
+    // keeps the legacy base and each other one gets `-<8 hex>` derived from its
+    // relative path (FNV-1a, no randomness, no clock), so the answer is the
+    // same on every call and for any input order.
+
+    /// The base to use for each of `paths` (the recordings of one folder),
+    /// keyed by the path's relative path under `recordingsDir`.
+    public static func disambiguatedBases(recordingsDir: URL, paths: [URL]) -> [String: String] {
+        var byRelative: [String: String] = [:]   // relative path -> legacy base
+        for path in paths {
+            byRelative[relativePath(recordingsDir: recordingsDir, path: path)] =
+                baseFor(recordingsDir: recordingsDir, path: path)
+        }
+        var groups: [String: [String]] = [:]     // legacy base -> relative paths
+        for (relative, base) in byRelative { groups[base, default: []].append(relative) }
+
+        var result: [String: String] = [:]
+        var taken = Set(groups.keys)
+        // Colliding groups in base order so a suffix that happens to clash is
+        // resolved the same way every time.
+        for base in groups.keys.sorted() {
+            let members = groups[base]!.sorted()
+            result[members[0]] = base
+            for relative in members.dropFirst() {
+                let hash = fnv1a64(relative)
+                var candidate = "\(base)-\(String(format: "%08llx", hash >> 32))"
+                if taken.contains(candidate) {
+                    candidate = "\(base)-\(String(format: "%016llx", hash))"
+                }
+                var n = 2
+                let stem = candidate
+                while taken.contains(candidate) { candidate = "\(stem)-\(n)"; n += 1 }
+                taken.insert(candidate)
+                result[relative] = candidate
+            }
+        }
+        return result
+    }
+
+    /// 64-bit FNV-1a over the UTF-8 bytes: stable across runs and machines
+    /// (unlike `Hasher`, which is seeded per process).
+    static func fnv1a64(_ s: String) -> UInt64 {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in s.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
     }
 
     /// Wait until a file's size stops changing. Testable via injected providers.

@@ -48,6 +48,52 @@ final class StateTests: XCTestCase {
             "Sub__a.b")
     }
 
+    // MARK: Same-base collisions (trust memo row 1)
+
+    func testCollidingNamesGetDistinctBases() {
+        let rec = URL(fileURLWithPath: "/recordings")
+        let spaced = rec.appendingPathComponent("a b.wav")
+        let underscored = rec.appendingPathComponent("a_b.wav")
+        // The bug: both reduce to the same legacy base.
+        XCTAssertEqual(DistavoState.baseFor(recordingsDir: rec, path: spaced), "a_b")
+        XCTAssertEqual(DistavoState.baseFor(recordingsDir: rec, path: underscored), "a_b")
+
+        let bases = DistavoState.disambiguatedBases(recordingsDir: rec, paths: [spaced, underscored])
+        XCTAssertEqual(bases.count, 2)
+        XCTAssertNotEqual(bases["a b.wav"], bases["a_b.wav"])
+        // First by sorted relative path keeps the legacy base; the other gets
+        // a suffix derived from its own relative path (FNV-1a, top 32 bits).
+        XCTAssertEqual(bases["a b.wav"], "a_b")
+        XCTAssertEqual(bases["a_b.wav"], "a_b-80f18cb7")
+    }
+
+    func testNonCollidingFolderKeepsLegacyBases() {
+        let rec = URL(fileURLWithPath: "/recordings")
+        let paths = ["demo.opus", "Anglia-water/recording.opus", "call.2026.01.15.opus",
+                     "call.2026.01.16.opus", "Sub/a.b.opus", "WhatsApp Audio 2026.opus"]
+            .map { rec.appendingPathComponent($0) }
+        let bases = DistavoState.disambiguatedBases(recordingsDir: rec, paths: paths)
+        XCTAssertEqual(bases.count, paths.count)
+        for (path, rel) in zip(paths, ["demo.opus", "Anglia-water/recording.opus", "call.2026.01.15.opus",
+                                       "call.2026.01.16.opus", "Sub/a.b.opus", "WhatsApp Audio 2026.opus"]) {
+            XCTAssertEqual(bases[rel], DistavoState.baseFor(recordingsDir: rec, path: path), rel)
+        }
+    }
+
+    func testDisambiguatedBasesStableAcrossCallsAndOrder() {
+        let rec = URL(fileURLWithPath: "/recordings")
+        let paths = ["a b.wav", "a_b.wav", "a-b.wav", "a  b.wav", "x/y.wav", "x__y.wav", "solo.m4a"]
+            .map { rec.appendingPathComponent($0) }
+        let first = DistavoState.disambiguatedBases(recordingsDir: rec, paths: paths)
+        XCTAssertEqual(DistavoState.disambiguatedBases(recordingsDir: rec, paths: paths), first)
+        XCTAssertEqual(DistavoState.disambiguatedBases(recordingsDir: rec, paths: paths.reversed()), first)
+        XCTAssertEqual(DistavoState.disambiguatedBases(recordingsDir: rec, paths: paths.shuffled()), first)
+        // Every path has its own base.
+        XCTAssertEqual(Set(first.values).count, paths.count)
+        XCTAssertEqual(first["solo.m4a"], "solo")
+        XCTAssertEqual(first["a-b.wav"], "a-b")
+    }
+
     func testBaseForNotUnderDirFallsBackToName() {
         let rec = URL(fileURLWithPath: "/recordings")
         XCTAssertEqual(

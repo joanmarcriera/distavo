@@ -208,6 +208,8 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   action items, meeting detection, key-moment hotkey…) decodes to off/empty for a config predating it, and
   `recommendedForThisMac()` leaves them off too unless a comment says otherwise. With them unset `Prompt.build` and the note
   are byte-identical to before (pinned by `PromptTests`/`SummaryTemplateTests`); don't add a prompt line that changes the unset digest.
+  Keys that change a note but are on for FRESH installs only (off on decode; `recommendedForThisMac()` sets them): `summarise.apply_corrections`
+  (applies the note's "Possible transcription corrections" to its body; never rewrites Highlights or facts-ledger quotes), `summarise.neutral_default`.
 - **Note section order is fixed** (`NoteAssembly`): frontmatter → model body (incl. Highlights) → `## Key moments` → `## Tracked terms` → provenance footer.
   Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
 - **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions

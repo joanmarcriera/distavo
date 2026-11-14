@@ -42,11 +42,17 @@ public enum RecordingStorageFormat: String, Codable, CaseIterable, Equatable, Se
         Int(sampleRate) * channels * (bitDepth / 8) * 3600
     }
 
+    /// Decimal GB per hour at the recorder's 48 kHz stereo, one decimal ("1.4", "0.7"). The one place the
+    /// figures in Settings come from, so a change to the format changes every label with it.
+    public var gbPerHourLabel: String {
+        String(format: "%.1f", Double(bytesPerHour(sampleRate: 48_000)) / 1e9)
+    }
+
     /// Label for Settings.
     public var displayName: String {
         switch self {
-        case .full: return "Full quality (32-bit float, about 1.4 GB per hour)"
-        case .int16: return "Compact (16-bit, about 0.7 GB per hour)"
+        case .full: return "Full quality (32-bit, about \(gbPerHourLabel) GB per hour)"
+        case .int16: return "Compact (16-bit, about \(gbPerHourLabel) GB per hour)"
         }
     }
 }

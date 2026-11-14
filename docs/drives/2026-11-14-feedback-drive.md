@@ -48,7 +48,7 @@ that must not fail because of their size, then an automatic stop at 8 hours, the
 ## Things worth knowing
 
 - **Public history kept clean.** The drive chain carried internal market memos (CEO/CFO/COO, pricing), store-copy
-  drafts, the real-meeting findings (which mention job-search calls) and metrics. They were removed from every commit
+  drafts, the real-meeting findings and metrics. They were removed from every commit
   of the release range before the first push to GitHub (`git filter-branch --index-filter`, code byte-identical); they
   stay on the private Forgejo drive branches (`marc/distavo-work`). Initials of a person from a client meeting in the
   #6772 tests were replaced the same way.

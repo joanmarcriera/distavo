@@ -447,6 +447,8 @@ public enum Pipeline {
             var phaseStart = Date()
             func lap(_ name: String) { timings.add(name, seconds: Date().timeIntervalSince(phaseStart)); phaseStart = Date() }
             func withTimings(_ r: ProcessResult) -> ProcessResult {
+                // Every `.done` exit comes through here: the long-recording part caches (#6759) have served.
+                if r.status == .done { LongRecording.removeCaches(workDir: workDir, base: base) }
                 lap("summarise+note")
                 print("[Distavo] " + timings.logLine)
                 var r = r; r.timings = timings; return r
@@ -503,7 +505,13 @@ public enum Pipeline {
 
             lap("convert")
             deps.onPhase?(.transcribing)
-            var result = try await deps.transcribe(wavPath, transcribeConfig)
+            // #6759: a long recording goes to the engine in bounded parts (memory and CoreML buffers grew with the
+            // length of the file; 4 h 21 min aborted the app), then the parts are stitched back together.
+            let longParts = LongRecording.plan(wav: wavPath)
+            var result = longParts.isEmpty
+                ? try await deps.transcribe(wavPath, transcribeConfig)
+                : try await LongRecording.transcribe(wav: wavPath, parts: longParts, base: base, workDir: workDir,
+                                                     config: transcribeConfig, transcribe: deps.transcribe)
             lap("transcribe")
             var channelLabelled = false   // owner is SPEAKER_00 by construction (ChannelSpeakerLabeller)
             var stereoNeeded = false      // a stereo original that a reprocess would read again
@@ -539,6 +547,7 @@ public enum Pipeline {
             let clean = guarded.text
             GuardReport.store(guarded.flagged, workDir: workDir, base: base)
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                LongRecording.removeCaches(workDir: workDir, base: base)   // nothing in them worth resuming
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")
             }
@@ -607,6 +616,8 @@ public enum Pipeline {
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            // #6759: "transcribed in N parts" and any part that is missing, whatever engine ran.
+            context.summaryNotes += (result[LongRecording.notesKey] as? [String]) ?? []
             // Key moments (#2950) are the owner's own live markers: they belong in every note, also the
             // transcript-only one below.
             let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
@@ -691,6 +702,21 @@ public enum Pipeline {
                 return (withMoments + footer, checked.failures + SummaryValidator.validate(cleaned + footer))
             }
 
+            // Part notes for `parts`, merged into one input for the final pass; nil when no part produced a usable
+            // note. A part that fails or is rejected is left out (logged); a retryable error or a cancel stops all.
+            func summariseInParts(_ parts: [String]) async throws -> String? {
+                try await Pipeline.summariseInParts(parts, target: target, options: summaryOptions, context: context,
+                                                    summarise: deps.summarise)
+            }
+
+            // #6759: a transcript longer than the Ollama context window is summarised part by part and the part
+            // notes merged; sent whole, Ollama silently drops the start of the prompt. The on-device engines plan
+            // their own chunks (`SummaryGenerator`), so only the Ollama target is checked.
+            if let long = try await Pipeline.longTranscriptInput(clean, target: target, options: summaryOptions,
+                                                                 context: context, summarise: deps.summarise) {
+                summariseInput = long.input
+                context.summaryNotes.append(Pipeline.partedSummaryNote(parts: long.parts))
+            }
             var (noteText, failures) = try await summariseAttempt()
             // A truncated/empty response gets one retry with the same
             // prompt — Ollama occasionally cuts a response short with no
@@ -715,21 +741,9 @@ public enum Pipeline {
             if collapsed {
                 let parts = Pipeline.collapseParts(of: clean)
                 if parts.count >= 2 {
-                    var partNotes: [String] = []
-                    for (i, part) in parts.enumerated() {
-                        try Task.checkCancellation()
-                        do {
-                            let raw = try await deps.summarise(part, target, summaryOptions, context)
-                            let note = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
-                            if SummaryValidator.validate(note).isEmpty { partNotes.append(note) }
-                            else { print("[Distavo] part \(i + 1)/\(parts.count) rejected; left out of the merge") }
-                        } catch is CancellationError { throw CancellationError()
-                        } catch let retry as RetryableDependencyError { throw retry
-                        } catch { print("[Distavo] part \(i + 1)/\(parts.count) failed (\(error.localizedDescription)); left out of the merge") }
-                    }
-                    if !partNotes.isEmpty {
+                    if let merged = try await summariseInParts(parts) {
                         // Kept set through the language check below; every path that still fails returns the fallback.
-                        summariseInput = EmbeddedSummaryPrompt.merge(partials: partNotes)
+                        summariseInput = merged
                         do {
                             (noteText, failures) = try await summariseAttempt()
                         } catch is CancellationError { throw CancellationError()
@@ -1034,6 +1048,74 @@ public enum Pipeline {
     static let collapsePartTokens = 3000
     static func collapseParts(of transcript: String) -> [String] {
         EmbeddedSummaryPlanner.chunks(transcript: transcript, budgetTokens: collapsePartTokens)
+    }
+
+    /// Largest transcript share of one part when a long transcript is summarised in parts (#6759): about an
+    /// hour of talk, short enough for an 8B model to keep track of, long enough that few parts are needed.
+    static let longPartMaxTokens = 16_000
+
+    /// The parts of a transcript too long for the Ollama context window (`num_ctx`), or nil when it fits (or
+    /// the target is on-device, which chunks for itself). Fits = the estimated prompt plus the reply budget
+    /// (`num_predict`) is within `num_ctx`; each part leaves the same room for the instructions and the reply.
+    static func longTranscriptParts(_ transcript: String, target: SummariseTarget,
+                                    options: SummariseOptions, context: NoteContext) -> [String]? {
+        guard case .ollama = target, options.numCtx > 0 else { return nil }
+        let instructions = EmbeddedSummaryTokens.estimate(context.prompt(transcript: ""))
+        let whole = instructions + EmbeddedSummaryTokens.estimate(transcript)
+        guard whole + max(0, options.numPredict) > options.numCtx else { return nil }
+        let room = options.numCtx - max(0, options.numPredict) - instructions - 256   // 256: chunk-join slack
+        let budget = min(longPartMaxTokens, max(1_000, room))
+        let parts = EmbeddedSummaryPlanner.chunks(transcript: transcript, budgetTokens: budget)
+        return parts.count >= 2 ? parts : nil
+    }
+
+    /// Part notes for `parts`, merged into one input for the final pass; nil when no part produced a usable note.
+    /// A part that fails or is rejected is left out (logged); a retryable error or a cancel stops all.
+    static func summariseInParts(
+        _ parts: [String], target: SummariseTarget, options: SummariseOptions, context: NoteContext,
+        summarise: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String
+    ) async throws -> String? {
+        var partNotes: [String] = []
+        for (i, part) in parts.enumerated() {
+            try Task.checkCancellation()
+            do {
+                let raw = try await summarise(part, target, options, context)
+                let note = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                if SummaryValidator.validate(note).isEmpty { partNotes.append(note) }
+                else { print("[Distavo] part \(i + 1)/\(parts.count) rejected; left out of the merge") }
+            } catch is CancellationError { throw CancellationError()
+            } catch let retry as RetryableDependencyError { throw retry
+            } catch { print("[Distavo] part \(i + 1)/\(parts.count) failed (\(error.localizedDescription)); left out of the merge") }
+        }
+        return partNotes.isEmpty ? nil : EmbeddedSummaryPrompt.merge(partials: partNotes)
+    }
+
+    /// For a transcript too long for the Ollama context (#6759): the merged part notes to summarise instead,
+    /// and how many parts the transcript was cut into; nil when it fits (or no part note came back, in which
+    /// case the caller sends the transcript as before). Merged notes that still overflow are merged in parts
+    /// again, at most twice. Shared by `processOne` and `regenerate`.
+    static func longTranscriptInput(
+        _ transcript: String, target: SummariseTarget, options: SummariseOptions, context: NoteContext,
+        summarise: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String
+    ) async throws -> (input: String, parts: Int)? {
+        guard let parts = longTranscriptParts(transcript, target: target, options: options, context: context) else {
+            return nil
+        }
+        print("[Distavo] long transcript (\(EmbeddedSummaryTokens.estimate(transcript)) tokens est.): summarising in \(parts.count) parts")
+        guard var merged = try await summariseInParts(parts, target: target, options: options, context: context,
+                                                     summarise: summarise) else { return nil }
+        for _ in 0..<2 {
+            guard let again = longTranscriptParts(merged, target: target, options: options, context: context),
+                  let remerged = try await summariseInParts(again, target: target, options: options, context: context,
+                                                            summarise: summarise) else { break }
+            merged = remerged
+        }
+        return (merged, parts.count)
+    }
+
+    /// Footer line of a note summarised in parts (#6759).
+    static func partedSummaryNote(parts: Int) -> String {
+        "The transcript was too long for the summary model in one go, so it was summarised in \(parts) parts and the part notes merged."
     }
 
     /// Body of the fallback note written when the summary collapsed twice (#4011).

@@ -263,8 +263,15 @@ extension Pipeline {
             var noteMeta: NoteMeta.Extracted?   // the model's title/tags (#2954)
             var noteBody = "", footer = provenance
             var languageRetried = false   // #3585
+            // #6759: a transcript longer than the Ollama context is summarised in parts, as in `processOne`.
+            var summariseInput = transcript
+            if let long = try await Pipeline.longTranscriptInput(transcript, target: target, options: cfg.summarise.options,
+                                                                 context: context, summarise: deps.summarise) {
+                summariseInput = long.input
+                context.summaryNotes.append(Pipeline.partedSummaryNote(parts: long.parts))
+            }
             func attempt() async throws -> (text: String, failures: [String]) {
-                let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
+                let raw = try await deps.summarise(summariseInput, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
                 if cfg.notes.asksModelForMetadata {
                     noteMeta = NoteMeta.extract(from: cleaned)

@@ -1,3 +1,11 @@
-• Summarise together: select two to ten notes in the Notes window and choose "Summarise Together…" to get one project note. Every bullet cites the meeting it came from, and any bullet the notes do not support is dropped.
-• Tidier vocabulary: when you change the participants or the language of a recording, Distavo offers to clear the custom terms that were not heard, so old jargon does not leak into the next meeting.
-• Includes everything from 1.19: better Catalan and Spanish notes, fewer invented facts, recovered dropped speech, an automatic summary template and in-person meeting mode.
+• Long meetings: recordings of several hours are now transcribed in parts, so a four-hour meeting gets a transcript and a note instead of stopping Distavo.
+• A forgotten recording stops itself after 8 hours, is saved and transcribed, and Distavo tells you. Change the limit in Settings, Recording.
+• If Distavo ever stops while processing a recording, that recording is set aside and you are told, instead of it being tried again at every launch.
+• Safer notes: leaked working steps are removed, a summary that loops is retried and never lost, and every facts-ledger row is checked against the transcript.
+• A recording that stops mid-conversation is flagged, and the summary says so instead of inventing next steps.
+• Settings, Recording: an optional compact recording format (about half the size) and how much space your recordings use.
+• Your own name now reaches the summary, so a misheard name or a colleague "standing in for" someone is not taken for you.
+• Recordings dropped from a phone are dated from their file name or their own metadata.
+• A warning when your microphone is silent while the call is audible, with the likely reason, and an optional switch to another microphone.
+• An optional keyboard shortcut starts and stops a recording.
+• Return now keeps the recording in the delete confirmation, and System Settings no longer opens by itself after Save.

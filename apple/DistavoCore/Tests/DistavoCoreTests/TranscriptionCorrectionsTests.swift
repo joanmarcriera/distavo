@@ -103,7 +103,8 @@ final class TranscriptionCorrectionsTests: XCTestCase {
     }
 
     func testSummaryChecksAppliesAndReportsFooterNote() {
-        let out = SummaryChecks.apply(summary: note, transcript: transcript, context: NoteContext(noteOwner: "A", userSpeaker: "S"))
+        let out = SummaryChecks.apply(summary: note, transcript: transcript, context: NoteContext(noteOwner: "A", userSpeaker: "S"),
+                                      applyCorrections: true)
         XCTAssertTrue(out.text.contains("Acme Banc card"))
         XCTAssertTrue(out.notes.contains { $0.contains("3 transcription corrections applied") })
     }
@@ -141,11 +142,68 @@ final class TranscriptionCorrectionsTests: XCTestCase {
         XCTAssertFalse(out.notes.contains { $0.contains("correction") })
     }
 
-    func testApplyCorrectionsFlagDefaultsOnAndRoundTrips() throws {
-        XCTAssertTrue(SummariseConfig().applyCorrections)
+    /// Review A (drive-review-2026-11-09): a key that changes behaviour decodes to off for a config that predates it;
+    /// only a fresh install (`recommendedForThisMac`) gets it on.
+    func testApplyCorrectionsIsOffForOldConfigsAndOnForFreshInstalls() throws {
+        XCTAssertFalse(SummariseConfig().applyCorrections)
         let old = try JSONDecoder().decode(SummariseConfig.self, from: Data("{}".utf8))
-        XCTAssertTrue(old.applyCorrections)
+        XCTAssertFalse(old.applyCorrections)
+        let oldFull = try JSONDecoder().decode(Config.self, from: Data("{\"summarise\":{\"backend\":\"server\"}}".utf8))
+        XCTAssertFalse(oldFull.summarise.applyCorrections)
+        let on = try JSONDecoder().decode(SummariseConfig.self, from: Data("{\"apply_corrections\":true}".utf8))
+        XCTAssertTrue(on.applyCorrections)
         let off = try JSONDecoder().decode(SummariseConfig.self, from: Data("{\"apply_corrections\":false}".utf8))
         XCTAssertFalse(off.applyCorrections)
+        for supported in [true, false] {
+            XCTAssertTrue(Config.recommendedForThisMac(embeddedSupported: supported, memoryBytes: 16 << 30)
+                .summarise.applyCorrections, "embeddedSupported=\(supported)")
+        }
+        let enc = try JSONEncoder().encode(SummariseConfig())
+        XCTAssertTrue(String(decoding: enc, as: UTF8.self).contains("\"apply_corrections\":false"))
+    }
+
+    /// Review A: facts-ledger rows quote the transcript verbatim and were verified against it by `LedgerVerifier`;
+    /// a correction must not rewrite them (a rewritten quote no longer matches what was said), while the same word
+    /// in the prose is still corrected.
+    func testLedgerQuotesAreNeverRewritten() {
+        let withLedger = """
+        ## Executive summary
+        Open Acme Bank first.
+
+        ## Facts ledger
+        - Open the account | SPEAKER_00 | "We should open the Acme Bank account." | stated
+        | Card arrives Monday | SPEAKER_01 | "The Acme Bank card arrives Monday." | stated |
+
+        ## Decisions
+        - Open Acme Bank first.
+
+        ## Possible transcription corrections
+        - heard "Acme Bank", probably "Acme Banc"
+        """
+        let r = TranscriptionCorrections.apply(withLedger, transcript: transcript)
+        XCTAssertTrue(r.text.contains("\"We should open the Acme Bank account.\""), r.text)
+        XCTAssertTrue(r.text.contains("\"The Acme Bank card arrives Monday.\""), r.text)
+        XCTAssertTrue(r.text.contains("Open Acme Banc first."), r.text)
+        XCTAssertFalse(r.text.contains("- Open Acme Bank first."), r.text)
+        XCTAssertEqual(r.applied.map(\.heard), ["Acme Bank"])
+    }
+
+    /// Same guarantee through the shared entry point, with the verifier in front of it (facts-first style).
+    func testLedgerQuoteSurvivesSummaryChecksWithCorrectionsOn() {
+        var ctx = NoteContext(noteOwner: "A", userSpeaker: "S"); ctx.promptStyle = .factsFirst
+        let longTranscript = transcript + " " + String(repeating: "We keep talking about the plan for the week. ", count: 6)
+        let text = """
+        ## Executive summary
+        Open Acme Bank first.
+
+        ## Facts ledger
+        - Open the account | SPEAKER_00 | "We should open the Acme Bank account." | stated
+
+        ## Possible transcription corrections
+        - heard "Acme Bank", probably "Acme Banc"
+        """
+        let out = SummaryChecks.apply(summary: text, transcript: longTranscript, context: ctx, applyCorrections: true)
+        XCTAssertTrue(out.text.contains("\"We should open the Acme Bank account.\""), out.text)
+        XCTAssertTrue(out.text.contains("Open Acme Banc first."), out.text)
     }
 }

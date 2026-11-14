@@ -406,8 +406,10 @@ public enum Pipeline {
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
         // Same call captured twice (#4014): note a time record for this recording, link a twin already seen
         // and reuse its sheet when this one has none. Needs trustworthy time evidence; nil means no record.
+        // Only when `notes.link_duplicate_calls` is on (off for configs that predate it): off writes no sidecar,
+        // no footer line and copies no sheet.
         var alsoCaptured: AlsoCaptured?
-        if variant == nil, let time = await deps.recordingStart(path),
+        if variant == nil, config.notes.linkDuplicateCalls, let time = await deps.recordingStart(path),
            let seconds = await deps.audioDurationSeconds(path), seconds > 0 {
             alsoCaptured = DuplicateCallLink.register(
                 CallRecord(base: sourceBase, time: time, durationSeconds: seconds,
@@ -424,7 +426,10 @@ public enum Pipeline {
         // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
         // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
         let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
-        let roleTerms = hints?.roleTerms ?? []
+        // English packs only for an English or unpinned meeting (drive review C): never into a Catalan vocabulary prompt.
+        let roleTerms = hints?.roleTerms(
+            configuredLanguage: transcribeConfig.language,
+            override: LanguageOverride.load(workDir: workDir, base: LanguageOverride.sourceBase(from: sourceBase))) ?? []
         if !meetingTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
         }

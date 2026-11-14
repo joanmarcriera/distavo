@@ -228,7 +228,9 @@ extension Pipeline {
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
-            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? []) + cfg.transcribe.vocabulary + (hints?.roleTerms ?? [])),   // this meeting's terms first (#3584)
+            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? []) + cfg.transcribe.vocabulary + (hints?.roleTerms(
+                configuredLanguage: cfg.transcribe.language,
+                override: LanguageOverride.load(workDir: workDir, base: sourceBase)) ?? [])),   // this meeting's terms first (#3584)
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
                 resolvedTemplate.template,
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),

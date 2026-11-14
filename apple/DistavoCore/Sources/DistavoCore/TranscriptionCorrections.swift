@@ -5,7 +5,7 @@ import Foundation
 /// The summariser lists mishearings as `heard "X", probably "Y"` but leaves X elsewhere in the
 /// note. After the summary, each pair is applied when the transcript context supports it:
 /// X (or one `/`-separated alternative) must occur in the transcript AND in the body outside the
-/// section. Replacement is whole-word and case-sensitive. The section itself is kept unchanged as
+/// section (and outside Highlights, the facts ledger, code and URLs). Replacement is whole-word and case-sensitive. The section itself is kept unchanged as
 /// the audit list of what changed. Pure: no I/O. Called from `SummaryChecks.apply`, so
 /// `Pipeline.processOne` and `Pipeline.regenerate` both get it. `applied` also feeds the
 /// "add to vocabulary" offer (UI, separate step).
@@ -119,8 +119,19 @@ public enum TranscriptionCorrections {
         return out
     }
 
+    /// True for the facts-first "Facts ledger" heading (any level, bold, trailing colon, any case). Its rows hold
+    /// verbatim transcript quotes that `LedgerVerifier` already matched against the transcript, so a correction
+    /// that rewrote them would make the evidence say something nobody said.
+    static func isLedgerHeading(_ line: String) -> Bool {
+        guard isHeading(line) else { return false }
+        let title = line.trimmingCharacters(in: .whitespaces).drop(while: { $0 == "#" })
+            .trimmingCharacters(in: CharacterSet(charactersIn: " \t*_:#"))
+        return title.lowercased() == "facts ledger"
+    }
+
     /// `replace` over a body, skipping any section whose heading contains "highlight": those lines are the typed
-    /// Quick Notes of the owner (`ScratchpadNotes`) and are never rewritten. A section runs from its heading to the
+    /// Quick Notes of the owner (`ScratchpadNotes`) and are never rewritten; the facts ledger is skipped too
+    /// (review A, `isLedgerHeading`). A section runs from its heading to the
     /// next heading outside a code fence (so a sub-heading ends it). Known limit: a heading the model translated
     /// (e.g. "Destacats") is not recognised, and the model commentary under Highlights is protected too.
     private static func replaceOutsideHighlights(_ term: String, with new: String, in text: String) -> (text: String, changed: Bool) {
@@ -129,7 +140,7 @@ public enum TranscriptionCorrections {
         for line in text.components(separatedBy: "\n") {
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") { inFence.toggle() }
             if !inFence, isHeading(line) {
-                chunks.append(([line], line.lowercased().contains("highlight")))
+                chunks.append(([line], line.lowercased().contains("highlight") || isLedgerHeading(line)))
             } else {
                 chunks[chunks.count - 1].lines.append(line)
             }

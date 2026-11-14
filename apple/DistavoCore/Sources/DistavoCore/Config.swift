@@ -236,8 +236,9 @@ public struct SummariseConfig: Codable, Equatable {
     /// see `MeetingShapeGate` (Vikunja #4015). **false for any config predating the key**, never set by
     /// `recommendedForThisMac()`.
     public var nonMeetingGuard: Bool
-    /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). On by default;
-    /// false keeps the list as advice only.
+    /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). **false for any
+    /// config predating the key** (the list stays advice only); true only for fresh installs via
+    /// `recommendedForThisMac()` (drive review A, 2026-11-09). Never rewrites Highlights or facts-ledger quotes.
     public var applyCorrections: Bool
     /// When no summary template applies ("none", unset, or "auto" with nothing to go on) use the neutral
     /// section list instead of the stock one that carries Opportunity / Role expectations / Compensation
@@ -269,7 +270,7 @@ public struct SummariseConfig: Codable, Equatable {
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
                 actionItems: Bool = false, nonMeetingGuard: Bool = false,
-                applyCorrections: Bool = true, neutralDefault: Bool = false) {
+                applyCorrections: Bool = false, neutralDefault: Bool = false) {
         self.neutralDefault = neutralDefault
         self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
         self.applyCorrections = applyCorrections
@@ -571,6 +572,10 @@ public struct Config: Codable, Equatable {
         cfg.summarise.template = SummaryTemplateCatalog.autoID
         // ...and when nothing matches they get neutral sections, not the job-search layout (#6666).
         cfg.summarise.neutralDefault = true
+        // ...and apply the note's own transcription corrections to its body (#6354); old configs keep them as advice.
+        cfg.summarise.applyCorrections = true
+        // Fresh installs link the same call captured twice (#4014); old configs keep notes untouched.
+        cfg.notes.linkDuplicateCalls = true
         // Fresh installs let the recorder try other microphones when the first is silent (#4039).
         cfg.recording.micAutoSwitch = true
         if embeddedSupported {

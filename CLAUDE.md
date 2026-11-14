@@ -76,7 +76,7 @@ of the original Python module (noted in its header).
 1.17 feature groups (each file's header comment is the spec; all pure and unit-tested, the app target only renders them):
 - **Settings panes** — `SettingsPanes.swift`: which panes exist per edition, sidebar search, remembered selection.
 - **Note language** — `NoteLanguage.swift` (`summarise.note_language`: `en` | `auto` | a Whisper code; unknown = `en`).
-- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript.
+- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript. `RoleTermPacks.swift` seeds English UK-tax/finance terms from a role in the participants line, but only when the meeting is English or its language is not pinned (`RoleTermPacks.appliesTo`: skipped for a non-English `transcribe.language` or per-recording `LanguageOverride.code`), because an English vocabulary prompt collapses Catalan chunks (#3579).
 - **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; the default prompt carries NO domain examples (#3578: an 8B model copies them into the ledger) — UK contracting/HPC rules live only in the opt-in `uk_contracting` template (`ledgerRules`/`notesRules`); `ActionItemsPrompt.swift`
   expresses `summarise.action_items` as a template; `ActionItems.swift` lists/ticks `- [ ]` across notes;
   `RemindersExport.swift` decides what to send (EventKit sink lives in the app target).
@@ -157,7 +157,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.segments.json` — timed transcript; `Pipeline`. `.segments.orig.json`, `.transcript.clean.orig.txt`, `.segments.orig.speakers.json` — pristine copies made before the first transcript-editor save.
 - `.speakers.json` — participants/speaker count from the recorder question (`SpeakerHints`).
 - `.language.json` — `LanguageOverride`: spoken language `code`, plus `note_language` and `summary_template` for that recording; written by the recorder's confirm controls.
-- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`.
+- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`, written only when `notes.link_duplicate_calls` is on.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
 - `.part-NN.json` — one transcribed part of a long recording (`LongRecording`, keyed to the work WAV and the transcribe
@@ -223,6 +223,8 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   action items, meeting detection, key-moment hotkey…) decodes to off/empty for a config predating it, and
   `recommendedForThisMac()` leaves them off too unless a comment says otherwise. With them unset `Prompt.build` and the note
   are byte-identical to before (pinned by `PromptTests`/`SummaryTemplateTests`); don't add a prompt line that changes the unset digest.
+  Keys that change a note but are on for FRESH installs only (off on decode; `recommendedForThisMac()` sets them): `summarise.apply_corrections`
+  (applies the note's "Possible transcription corrections" to its body; never rewrites Highlights or facts-ledger quotes), `summarise.neutral_default`, `notes.link_duplicate_calls` (the same call captured twice: no `.call.json`/`.also-captured.json`, no footer line, no sheet copy when off).
 - **Note section order is fixed** (`NoteAssembly`): frontmatter → model body (incl. Highlights) → `## Key moments` → `## Tracked terms` → provenance footer.
   Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
 - **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions

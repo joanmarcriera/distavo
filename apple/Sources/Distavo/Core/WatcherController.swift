@@ -123,7 +123,9 @@ final class WatcherController: ObservableObject {
         self.config = cfg
         self.watchIntervalSeconds = cfg.watchIntervalSeconds
         self.allowLocalOllama = cfg.summarise.allowLocalFallback
-        clearStaleProcessing()
+        // #6759: a `.processing` marker that survived to launch means Distavo died on that recording (a normal
+        // quit clears them, `clearMarkersOnQuit`). Set it aside instead of retrying it into another crash.
+        interruptedAtLaunch = store()?.setAsideInterrupted() ?? []
         recentActivity = activityLog.recent(12)
         log("Distavo started")
         if let configProblem { log("Config problem: \(configProblem)") }
@@ -240,6 +242,7 @@ final class WatcherController: ObservableObject {
         }
         seedLastNoteFromDisk()
         refreshFailedRecordings()
+        announceInterrupted()   // #6759
         reconcileSearchIndex()   // #2942, background
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
@@ -300,7 +303,26 @@ final class WatcherController: ObservableObject {
             stateDir: workDir.appendingPathComponent(".state"), notesDir: notesDir)
     }
 
-    private func clearStaleProcessing() { store()?.clearStaleProcessing() }
+    /// Recordings set aside at launch because Distavo stopped while processing them (#6759); announced once
+    /// the notifier is ready (`runAfterLaunch`).
+    private var interruptedAtLaunch: [String] = []
+
+    /// A normal quit (#6759): drop the in-flight `.processing` marker, so only a crash leaves one for
+    /// `setAsideInterrupted` at the next launch. The file stays pending and is processed again next time.
+    func clearMarkersOnQuit() { store()?.clearStaleProcessing() }
+
+    private func announceInterrupted() {
+        guard !interruptedAtLaunch.isEmpty else { return }
+        for base in interruptedAtLaunch {
+            log("Set aside \(base): Distavo stopped while processing it last time; Process now tries it again")
+        }
+        let names = interruptedAtLaunch.prefix(2).joined(separator: ", ")
+            + (interruptedAtLaunch.count > 2 ? " and \(interruptedAtLaunch.count - 2) more" : "")
+        notifier.notify(title: "Recording set aside",
+                        body: "Distavo stopped while processing \(names). It was set aside so it cannot stop Distavo "
+                            + "again. Choose Process now in the menu to try once more.")
+        interruptedAtLaunch = []
+    }
 
     /// Re-read the failed set from disk so the menu reflects reality rather than
     /// only what happened since launch.

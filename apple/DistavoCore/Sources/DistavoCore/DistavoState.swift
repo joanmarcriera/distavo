@@ -366,9 +366,29 @@ public enum DistavoState {
             for url in items where url.pathExtension == suffix { remove(url) }
         }
 
-        /// Remove leftover `.processing` markers (call when nothing is running —
-        /// they indicate a prior crash mid-process).
+        /// Remove leftover `.processing` markers without a verdict (call when nothing is running). The app calls
+        /// it on a normal quit, so that only a crash leaves a marker for `setAsideInterrupted` to find.
         public func clearStaleProcessing() { removeMarkers(suffix: "processing") }
+
+        /// The reason a recording that was being processed when Distavo stopped is set aside (#6759).
+        public static let interruptedReason =
+            "Distavo stopped unexpectedly while processing this recording, so it was set aside instead of being "
+            + "tried again at launch. Choose Process now to try it once more."
+
+        /// At launch (#6759): every `.processing` marker left behind means Distavo crashed (or was killed) on
+        /// that recording, because a normal quit clears them (`clearStaleProcessing`). Retrying it at once is
+        /// how a 4 h 21 min file crash-looped the app on every relaunch, so each such recording gets a `.failed`
+        /// marker with `interruptedReason` and appears in the menu's failed list; "Process now" / Retry clear
+        /// it as for any failure. Returns the bases set aside, sorted, so the caller can say so.
+        @discardableResult
+        public func setAsideInterrupted() -> [String] {
+            let bases = markers(suffix: "processing").map(\.base)
+            for base in bases where !isDone(base) {
+                markFailed(base, Store.interruptedReason)   // also removes the `.processing` marker
+            }
+            removeMarkers(suffix: "processing")             // a done base keeps its note; just drop its marker
+            return bases.filter { !isDone($0) }
+        }
 
         /// Clear all `.failed` (and stale `.processing`, `.deferred` and
         /// `.tooshort`) markers so every recording gets retried right away

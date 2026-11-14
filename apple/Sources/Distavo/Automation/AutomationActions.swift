@@ -202,6 +202,12 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
         MainActor.assumeIsolated { TranscriptWindowController.shared.confirmTerminate() ? .terminateNow : .terminateCancel }
     }
 
+    /// A normal quit is not a crash (#6759): clear the in-flight `.processing` marker so the next launch does
+    /// not set that recording aside.
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { AutomationHub.shared.controller?.clearMarkersOnQuit() }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         for url in urls {
             guard let command = AutomationCommand.parse(url) else {

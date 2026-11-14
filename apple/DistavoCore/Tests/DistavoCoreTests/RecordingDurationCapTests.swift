@@ -44,6 +44,7 @@ final class RecordingDurationCapTests: XCTestCase {
         XCTAssertEqual(cap.observe(elapsed: 2 * 3600 - 300), .warn(minutesLeft: 5))
         cap.hours = 3                                   // the user is still in the meeting
         XCTAssertEqual(cap.observe(elapsed: 2 * 3600 + 1), .none)
+        XCTAssertEqual(cap.observe(elapsed: 3 * 3600 - 600), .warn(minutesLeft: 10), "the raised limit warns again")
         XCTAssertEqual(cap.observe(elapsed: 3 * 3600), .stop(hours: 3))
     }
 
@@ -82,6 +83,11 @@ final class RecordingDurationCapTests: XCTestCase {
         cfg.recording.maxDurationHours = 5
         let back = try JSONDecoder().decode(Config.self, from: JSONEncoder().encode(cfg))
         XCTAssertEqual(back.recording.maxDurationHours, 5)
+    }
+
+    func testHoursLabel() {
+        XCTAssertEqual(RecordingDurationCap.hoursLabel(1), "1 hour")
+        XCTAssertEqual(RecordingDurationCap.hoursLabel(8), "8 hours")
     }
 
     func testNotificationTextNamesTheLimitAndTheFile() {

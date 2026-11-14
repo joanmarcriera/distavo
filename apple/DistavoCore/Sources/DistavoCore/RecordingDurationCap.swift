@@ -28,7 +28,13 @@ public struct RecordingDurationCap: Equatable, Sendable {
     }
 
     /// Cap in whole hours; 0 = no limit.
-    public var hours: Int { didSet { hours = Self.clamp(hours) } }
+    public var hours: Int {
+        didSet {
+            hours = Self.clamp(hours)
+            // A raised limit earns a fresh warning before its own stop.
+            if hours == 0 || hours > oldValue { warned = false }
+        }
+    }
     private var warned = false
     private var stopped = false
 
@@ -62,6 +68,9 @@ public struct RecordingDurationCap: Equatable, Sendable {
          "This recording reaches the \(hours)-hour limit in \(minutesLeft) minutes and will then be saved and "
             + "transcribed. Change the limit in Settings, Recording.")
     }
+
+    /// "1 hour" / "8 hours" for the Settings stepper.
+    public static func hoursLabel(_ h: Int) -> String { h == 1 ? "1 hour" : "\(h) hours" }
 
     /// Notification text once the cap stopped the recording.
     public static func stoppedText(hours: Int, fileName: String) -> (title: String, body: String) {

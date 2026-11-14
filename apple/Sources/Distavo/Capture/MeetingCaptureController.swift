@@ -394,6 +394,12 @@ final class MeetingCaptureController: ObservableObject {
             let text = RecordingDurationCap.stoppedText(hours: capHours, fileName: savedURL.lastPathComponent)
             notify(text.title, text.body)
             log("Recording stopped automatically at the \(capHours)-hour limit")
+            // What the take is missing still has to be said (review of 92c1091).
+            if !outcome.systemAudioHeard { noSystemAudioNotice() }
+            else if !outcome.microphoneHeard {
+                notify("The microphone was silent in that recording",
+                       "Check the Microphone permission in System Settings → Privacy & Security, and your input device.")
+            }
         } else if !outcome.systemAudioHeard && ask {
             // decided after the question below
         } else if !outcome.systemAudioHeard {

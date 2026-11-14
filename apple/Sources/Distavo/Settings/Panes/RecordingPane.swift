@@ -35,7 +35,7 @@ struct RecordingPane: View {
                 HStack {
                     Stepper(model.draft.recording.maxDurationHours == 0
                                 ? "Never stop a recording because of its length"
-                                : "Stop a recording after \(model.draft.recording.maxDurationHours) hours",
+                                : "Stop a recording after \(RecordingDurationCap.hoursLabel(model.draft.recording.maxDurationHours))",
                             value: $model.draft.recording.maxDurationHours, in: RecordingDurationCap.hoursRange)
                     HelpButton(text: "A safety net for a forgotten Stop. When a recording reaches this length Distavo stops it, saves it and transcribes it as usual, and tells you; ten minutes before, a notification says it is coming. Set it to 0 for no limit.")
                 }

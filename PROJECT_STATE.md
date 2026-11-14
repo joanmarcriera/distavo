@@ -1,6 +1,16 @@
 # Project State
 
-## Next action (2026-11-14 00:35, feedback drive)
+## Resume here (2026-11-14 03:40)
+
+- **v1.21.0 (build 24) released** from `main` @ 756afe3 (PR #19), tag `v1.21.0` on origin.
+  Direct: https://github.com/joanmarcriera/distavo/releases/tag/v1.21.0 ; https://distavo.com/appcast.xml serves 1.21.0.
+  App Store: build 24 VALID; the submit-for-review job waits for Marc's approval (card https://familia.riera.co.uk/tasks/6858).
+- **Next action:** after Marc approves, confirm 1.21.0 reaches WAITING_FOR_REVIEW
+  (`scripts/submit-appstore-review.py --version 1.21.0 --build-number 24 --dry-run --until version`); then the backlog
+  left in `docs/drives/2026-11-14-feedback-drive.md` ("What is left").
+- CI: dispatch `ci.yml` on any release branch; it is green again after the macOS 26 runner fix.
+
+## Earlier checkpoint (2026-11-14 00:35, superseded)
 
 - Integration branch `feat/feedback-drive-2026-11-13` = the whole d..s drive chain (private docs stripped) + origin/main
   PR #16 + #6759 long recordings in parts / crash-loop guard + 8-hour recording cap. swift test 1711 / 0 failures,

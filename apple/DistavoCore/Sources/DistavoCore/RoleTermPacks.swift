@@ -10,6 +10,8 @@ import Foundation
 // The packs are English (UK tax and finance). A vocabulary prompt in the wrong language is what collapses the
 // Barcelona Supercomputing Center Catalan chunks (#3579), so they apply only when the meeting is English or its
 // language is not pinned (`RoleTermPacks.appliesTo`; drive review C, 2026-11-09).
+// Known residual: with the language on Automatic and no per-recording override, the spoken language is unknown before
+// transcription, so a Catalan meeting with an accountant still gets the pack (the #3579 risk stays on that path).
 
 public struct RoleTermPack: Equatable, Sendable {
     public let id: String
@@ -27,9 +29,12 @@ public enum RoleTermPacks {
     /// - `configured`: `transcribe.language`. "auto" or empty (not pinned) keeps the packs; "en" / "en-GB" keep
     ///   them; any other code ("ca", "es", ...) drops them.
     public static func appliesTo(configuredLanguage configured: String, override: LanguageOverride? = nil) -> Bool {
-        if let code = override?.code, !code.isEmpty { return isEnglish(code) }
+        // The language the transcriber will run with: the override counts only when the configured language is
+        // Automatic, exactly as `LanguageOverride.applying` does (review of 40538ca).
         let c = configured.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return c.isEmpty || c == "auto" || isEnglish(c)
+        let automatic = c.isEmpty || EmbeddedModelCatalog.isAutomatic(c)
+        if automatic, let code = override?.code, !code.isEmpty { return isEnglish(code) }
+        return automatic || isEnglish(c)
     }
 
     private static func isEnglish(_ code: String) -> Bool {

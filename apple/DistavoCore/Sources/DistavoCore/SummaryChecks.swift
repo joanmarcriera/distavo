@@ -29,7 +29,7 @@ public enum SummaryChecks {
     ///   - context: the note context the prompt was built from.
     ///   - applyCorrections: `summarise.apply_corrections`; false leaves the corrections list as advice only.
     public static func apply(summary: String, transcript: String, context: NoteContext,
-                             applyCorrections: Bool = true) -> SummaryCheckOutcome {
+                             applyCorrections: Bool = false) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
         // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
         let scrubbed = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)

@@ -103,7 +103,8 @@ final class TranscriptionCorrectionsTests: XCTestCase {
     }
 
     func testSummaryChecksAppliesAndReportsFooterNote() {
-        let out = SummaryChecks.apply(summary: note, transcript: transcript, context: NoteContext(noteOwner: "A", userSpeaker: "S"))
+        let out = SummaryChecks.apply(summary: note, transcript: transcript, context: NoteContext(noteOwner: "A", userSpeaker: "S"),
+                                      applyCorrections: true)
         XCTAssertTrue(out.text.contains("Acme Banc card"))
         XCTAssertTrue(out.notes.contains { $0.contains("3 transcription corrections applied") })
     }

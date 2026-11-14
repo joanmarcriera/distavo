@@ -64,16 +64,17 @@ final class RoleTermLanguageTests: XCTestCase {
         }
     }
 
-    func testNonEnglishOverrideWinsOverAutoAndOverEnglish() async throws {
-        for configured in ["auto", "en"] {
-            let v = try await vocabularySeen(language: configured, override: LanguageOverride(code: "ca"))
-            XCTAssertFalse(v.contains("PAYE"), "\(configured): \(v)")
-        }
+    func testNonEnglishOverrideOfAutomaticDropsThePack() async throws {
+        let v = try await vocabularySeen(language: "auto", override: LanguageOverride(code: "ca"))
+        XCTAssertFalse(v.contains("PAYE"), "\(v)")
     }
 
-    func testEnglishOverrideKeepsRoleTermsEvenWhenConfiguredNonEnglish() async throws {
+    func testOverrideDoesNotBeatAPinnedLanguage() async throws {
+        // The transcriber runs pinned to `ca` (an override only replaces Automatic), so no English pack.
         let v = try await vocabularySeen(language: "ca", override: LanguageOverride(code: "en"))
-        XCTAssertTrue(v.contains("PAYE"), "\(v)")
+        XCTAssertFalse(v.contains("PAYE"), "\(v)")
+        let w = try await vocabularySeen(language: "en", override: LanguageOverride(code: "ca"))
+        XCTAssertTrue(w.contains("PAYE"), "pinned English keeps the pack: \(w)")
     }
 
     func testNoteOnlyOverrideDoesNotChangeTheSpokenLanguage() async throws {
@@ -91,7 +92,9 @@ final class RoleTermLanguageTests: XCTestCase {
             XCTAssertFalse(RoleTermPacks.appliesTo(configuredLanguage: no), "configured \(no)")
         }
         XCTAssertFalse(RoleTermPacks.appliesTo(configuredLanguage: "auto", override: LanguageOverride(code: "ca")))
-        XCTAssertTrue(RoleTermPacks.appliesTo(configuredLanguage: "ca", override: LanguageOverride(code: "en")))
+        XCTAssertFalse(RoleTermPacks.appliesTo(configuredLanguage: "ca", override: LanguageOverride(code: "en")),
+                       "a pinned language beats the override, as in LanguageOverride.applying")
+        XCTAssertTrue(RoleTermPacks.appliesTo(configuredLanguage: "en", override: LanguageOverride(code: "ca")))
         XCTAssertTrue(RoleTermPacks.appliesTo(configuredLanguage: "auto", override: LanguageOverride(noteLanguage: "ca")))
         XCTAssertTrue(RoleTermPacks.appliesTo(configuredLanguage: "auto", override: nil))
     }

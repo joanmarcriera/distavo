@@ -35,6 +35,9 @@ final class MeetingCaptureController: ObservableObject {
         case silence(minutes: Int)
         /// The call app that held the microphone released it (#4007, `CallEndStop`). Behaves like a manual stop.
         case callEnded
+        /// The recording reached `recording.max_duration_hours` (`RecordingDurationCap`). Nobody may be at the
+        /// Mac, so like a silence stop it never asks the speakers question.
+        case durationCap(hours: Int)
     }
 
     /// The tap TCC category settled in macOS 14.4 — hide the feature below it.
@@ -60,6 +63,9 @@ final class MeetingCaptureController: ObservableObject {
     private var silenceMonitor: SilenceMonitor?
     /// Call-end stop (#4007): fed once a second only while `CallEndStop.isArmed`; reset per recording.
     private var callEndPolicy = CallEndStop.policy()
+    /// Longest-recording cap (8 h by default); fed the monotonic elapsed time once a second, reset per recording.
+    private var durationCap = RecordingDurationCap()
+    private var capStartUptime: TimeInterval = 0
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
     private var timer: Timer?
     private var startedAt: Date?
@@ -271,6 +277,8 @@ final class MeetingCaptureController: ObservableObject {
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
         callEndPolicy = CallEndStop.policy()
+        durationCap = RecordingDurationCap(hours: configProvider().recording.maxDurationHours)
+        capStartUptime = ProcessInfo.processInfo.systemUptime
         log("Meeting recording started → \(recorder.fileURL?.lastPathComponent ?? "?")")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             // A Timer fires from the main run loop, so run the tick in place
@@ -319,12 +327,14 @@ final class MeetingCaptureController: ObservableObject {
         liveInputName = nil
         var silenceMinutes: Int?
         if case .silence(let m) = reason { silenceMinutes = m }
+        var capHours: Int?
+        if case .durationCap(let h) = reason { capHours = h }
         let config = configProvider()
         // An automatic silence stop never asks: nobody is at the Mac, and the
         // blocking dialog would sit there (freezing other main-thread work)
         // while the recording waited, untranscribed. It behaves exactly like
         // answering Skip: no speakers sidecar, no language override.
-        let ask = config.askSpeakersOnStop && silenceMinutes == nil
+        let ask = config.askSpeakersOnStop && silenceMinutes == nil && capHours == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
         let recStart = recorder.startedAt ?? startedAt ?? Date()
@@ -341,13 +351,13 @@ final class MeetingCaptureController: ObservableObject {
         guard let outcome else { return }
         guard wantsCalendar else {
             finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                       ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
+                       capHours: capHours, ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
             return
         }
         Task { @MainActor [weak self] in
             let match = await CalendarRecordingStep.lookup(start: recStart, config: config)
             self?.finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                             ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
+                             capHours: capHours, ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
         }
     }
 
@@ -355,7 +365,7 @@ final class MeetingCaptureController: ObservableObject {
     /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup.
     @available(macOS 14.4, *)
     private func finishStop(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, config: Config,
-                            silenceMinutes: Int?, ask: Bool, recStart: Date,
+                            silenceMinutes: Int?, capHours: Int? = nil, ask: Bool, recStart: Date,
                             calendarMatch: CalendarMatch?, heldForCalendar: Bool) {
         // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
         var savedURL = outcome.url
@@ -379,7 +389,18 @@ final class MeetingCaptureController: ObservableObject {
             notify(PermissionNudgePolicy.title(kind), PermissionNudgePolicy.body(kind))
             log("Warning: recording contained no system audio (permission denied or nothing was playing)")
         }
-        if !outcome.systemAudioHeard && ask {
+        if let capHours {
+            // The cap message wins: it is the one thing the user must know (the meeting may still be going).
+            let text = RecordingDurationCap.stoppedText(hours: capHours, fileName: savedURL.lastPathComponent)
+            notify(text.title, text.body)
+            log("Recording stopped automatically at the \(capHours)-hour limit")
+            // What the take is missing still has to be said (review of 92c1091).
+            if !outcome.systemAudioHeard { noSystemAudioNotice() }
+            else if !outcome.microphoneHeard {
+                notify("The microphone was silent in that recording",
+                       "Check the Microphone permission in System Settings → Privacy & Security, and your input device.")
+            }
+        } else if !outcome.systemAudioHeard && ask {
             // decided after the question below
         } else if !outcome.systemAudioHeard {
             noSystemAudioNotice()
@@ -452,6 +473,24 @@ final class MeetingCaptureController: ObservableObject {
         warnIfSystemAudioSilent(after: seconds)
         checkSilence()
         checkCallEnded(at: ProcessInfo.processInfo.systemUptime)   // monotonic, like the silence monitor
+        checkDurationCap(at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Once a second: the longest-recording cap (`RecordingDurationCap`, 8 h by default). The limit follows
+    /// Settings live; the elapsed time is monotonic, so a clock change never stops or extends a take.
+    private func checkDurationCap(at now: TimeInterval) {
+        guard isRecording else { return }
+        durationCap.hours = configProvider().recording.maxDurationHours
+        switch durationCap.observe(elapsed: now - capStartUptime) {
+        case .none: break
+        case .warn(let minutesLeft):
+            let text = RecordingDurationCap.warningText(minutesLeft: minutesLeft, hours: durationCap.hours)
+            log("Recording reaches the \(durationCap.hours)-hour limit in \(minutesLeft) min")
+            notify(text.title, text.body)
+        case .stop(let hours):
+            log("Recording reached the \(hours)-hour limit - stopping it")
+            stop(reason: .durationCap(hours: hours))
+        }
     }
 
     /// Once a second, only with meeting detection and `stop_when_call_ends` on (#4007): stop 60 s after the

@@ -1,6 +1,15 @@
 # Project State
 
-## Next action (2026-11-09, drive review lane)
+## Next action (2026-11-14 00:35, feedback drive)
+
+- Integration branch `feat/feedback-drive-2026-11-13` = the whole d..s drive chain (private docs stripped) + origin/main
+  PR #16 + #6759 long recordings in parts / crash-loop guard + 8-hour recording cap. swift test 1711 / 0 failures,
+  Direct Debug build OK. Next: merge `fix/inert-defaults-review-abc` (review decisions A-C) after its review, three
+  edition Release builds, What's New, bump to 1.21.0 (24), git-cliff, PR to GitHub main, tag v1.21.0.
+  App Store gate clear: 1.20.0 READY_FOR_DISTRIBUTION (ASC dry run 2026-11-14 00:24).
+  Write-up: `docs/drives/2026-11-14-feedback-drive.md` (to come).
+
+## Previous next action (2026-11-09, drive review lane, superseded)
 
 - **p** (`feat/drive-distavo-p-2026-11-09`, from o a3199c1, on forgejo-work) is the newest branch: it contains o, n … j
   and every older drive branch. Merge order and exact commands: `docs/remote-direction.md` (origin = GitHub primary,

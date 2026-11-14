@@ -224,11 +224,12 @@ extension Pipeline {
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             // The user's instruction, plus the title/tags request when #2954 asks for it.
-            customInstruction: NoteMeta.mergedInstruction(options.customInstruction, notes: cfg.notes),
+            customInstruction: OwnerIdentity.merged(options.customInstruction, noteOwner: cfg.noteOwner, notes: cfg.notes),   // #6772
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
-            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? []) + cfg.transcribe.vocabulary + (hints?.roleTerms(
+            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? [])
+                + OwnerIdentity.terms(noteOwner: cfg.noteOwner) + cfg.transcribe.vocabulary + (hints?.roleTerms(
                 configuredLanguage: cfg.transcribe.language,
                 override: LanguageOverride.load(workDir: workDir, base: sourceBase)) ?? [])),   // this meeting's terms first (#3584)
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)

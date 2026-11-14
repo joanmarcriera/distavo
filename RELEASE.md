@@ -1,4 +1,11 @@
-# Releasing Distavo (next: 1.21.0)
+# Releasing Distavo (next: 1.22.0)
+
+> **Learned on 1.21.0 (2026-11-14):** (1) dispatch `ci.yml` on the release branch and wait for it before tagging:
+> `gh workflow run ci.yml --ref <branch>`. `main` had been red on macos-latest (macOS 26, Xcode 26.4-26.6) since
+> d6bd264 with nobody noticing, and the release workflows build on that same image; local tests run on a newer Xcode.
+> (2) Direct and Setapp Release builds share `build/Products/Release`: check the Setapp "no Sparkle" gate on a clean
+> derived-data folder. (3) 1.21.0 is the last release built with this runbook; its run links are in
+> `docs/drives/2026-11-14-feedback-drive.md`.
 
 One tag fires two workflows (Direct DMG and App Store upload). Total hands-on time: about 10 minutes
 plus about 30 minutes of CI. Written 2026-10-23 on `feat/drive-2026-10-23c`. **Nothing here has been run**:

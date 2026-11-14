@@ -10,7 +10,7 @@
 //   (`SpeakerHints.load(workDir:base:source:)`), not a live capture (it has its own sheet), and not offered
 //   before (`<base>.sheet-offered.json`, so a skipped sheet is not asked again on every scan).
 // - Prefill, strongest first: the sheet of a recording that overlaps this one in time and STARTED within
-//   `DuplicateCallLink.sheetCopyMaxStartSkew` (the same call captured twice); else the owner's role, people
+//   `DuplicateCallLink.sheetCopyMaxStartSkew` (the same call captured twice; only with `notes.link_duplicate_calls` on); else the owner's role, people
 //   and same-contact terms from recent sheets (`SpeakerSuggestions`); else nothing. The count is never guessed
 //   from history. Everything prefilled is editable and reaches a prompt only if the owner leaves it in.
 // - Never blocks: the pipeline does not wait for the sheet (a pending question is not a failure).
@@ -59,8 +59,9 @@ public enum DroppedFileSheet {
 
     /// What the sheet starts with. `record` is the dropped file's container time and duration (nil when
     /// unknown: only the history can help then). `owner` is `notes`/config `note_owner`.
-    public static func prefill(workDir: URL, base: String, record: CallRecord?, owner: String = "Me") -> Prefill {
-        if let record {
+    public static func prefill(workDir: URL, base: String, record: CallRecord?, linkDuplicateCalls: Bool, owner: String = "Me") -> Prefill {
+        // A twin's sheet is copied only when the owner has duplicate-call linking on (`notes.link_duplicate_calls`).
+        if linkDuplicateCalls, let record {
             let sheets = Set(DuplicateCallLink.otherRecords(workDir: workDir, excluding: record.base).map(\.base).filter {
                 SpeakerHints.load(workDir: workDir, base: $0).map { !$0.isEmpty } ?? false })
             let others = DuplicateCallLink.otherRecords(workDir: workDir, excluding: record.base).filter { sheets.contains($0.base) }

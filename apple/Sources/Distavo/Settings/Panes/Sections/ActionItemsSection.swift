@@ -14,6 +14,8 @@ struct ActionItemsSection: View {
             SettingCaption("Tasks as tickable checkboxes (owner, due date) plus a Decisions list. Open them from the menu bar: Open Action Items…")
             Toggle("Apply transcription corrections to the note", isOn: $model.draft.summarise.applyCorrections)
                 .withHelp("The summary ends with a ‘Possible transcription corrections’ list of words it thinks were misheard. When on (the default on a new install), each correction that the transcript supports is also applied to the rest of the note; links, code, web addresses, your Highlights and the quotes in the facts ledger are never changed, and the list itself stays as a record of what changed. Turn it off to keep the list as advice only.")
+            Toggle("Link a call captured twice", isOn: $model.draft.notes.linkDuplicateCalls)
+                .withHelp("When the same call is recorded twice (Distavo’s recorder on this Mac and a phone recording you drop into the folder), Distavo keeps a small record of each recording’s time and length, adds an ‘Also captured as …’ line to the note’s footer, and offers the first recording’s participants for the second. Only file names and times are kept, never audio or text. On for new installs; off by default for an existing setup.")
         }
     }
 }

@@ -406,8 +406,10 @@ public enum Pipeline {
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
         // Same call captured twice (#4014): note a time record for this recording, link a twin already seen
         // and reuse its sheet when this one has none. Needs trustworthy time evidence; nil means no record.
+        // Only when `notes.link_duplicate_calls` is on (off for configs that predate it): off writes no sidecar,
+        // no footer line and copies no sheet.
         var alsoCaptured: AlsoCaptured?
-        if variant == nil, let time = await deps.recordingStart(path),
+        if variant == nil, config.notes.linkDuplicateCalls, let time = await deps.recordingStart(path),
            let seconds = await deps.audioDurationSeconds(path), seconds > 0 {
             alsoCaptured = DuplicateCallLink.register(
                 CallRecord(base: sourceBase, time: time, durationSeconds: seconds,

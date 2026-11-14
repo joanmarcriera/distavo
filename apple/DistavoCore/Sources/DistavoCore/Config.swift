@@ -574,6 +574,8 @@ public struct Config: Codable, Equatable {
         cfg.summarise.neutralDefault = true
         // ...and apply the note's own transcription corrections to its body (#6354); old configs keep them as advice.
         cfg.summarise.applyCorrections = true
+        // Fresh installs link the same call captured twice (#4014); old configs keep notes untouched.
+        cfg.notes.linkDuplicateCalls = true
         // Fresh installs let the recorder try other microphones when the first is silent (#4039).
         cfg.recording.micAutoSwitch = true
         if embeddedSupported {

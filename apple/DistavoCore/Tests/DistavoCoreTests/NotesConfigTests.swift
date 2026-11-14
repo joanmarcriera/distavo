@@ -47,9 +47,13 @@ final class NotesConfigTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(Config.self, from: data).notes, c.notes)
     }
 
-    func testFreshInstallRecommendationLeavesEverythingOff() {
-        XCTAssertEqual(Config.recommendedForThisMac(embeddedSupported: true, memoryBytes: 32 << 30).notes, NotesConfig())
-        XCTAssertEqual(Config.recommendedForThisMac(embeddedSupported: false, memoryBytes: 8 << 30).notes, NotesConfig())
+    /// Everything is off on a fresh install except the duplicate-call link (review B, `LinkDuplicateCallsConfigTests`).
+    func testFreshInstallRecommendationLeavesEverythingOffExceptDuplicateCallLinking() {
+        for (supported, memory) in [(true, 32 << 30), (false, 8 << 30)] as [(Bool, UInt64)] {
+            var expected = NotesConfig()
+            expected.linkDuplicateCalls = true
+            XCTAssertEqual(Config.recommendedForThisMac(embeddedSupported: supported, memoryBytes: memory).notes, expected)
+        }
     }
 
     func testTermsAreNormalised() {

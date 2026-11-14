@@ -157,7 +157,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.segments.json` — timed transcript; `Pipeline`. `.segments.orig.json`, `.transcript.clean.orig.txt`, `.segments.orig.speakers.json` — pristine copies made before the first transcript-editor save.
 - `.speakers.json` — participants/speaker count from the recorder question (`SpeakerHints`).
 - `.language.json` — `LanguageOverride`: spoken language `code`, plus `note_language` and `summary_template` for that recording; written by the recorder's confirm controls.
-- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`.
+- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`, written only when `notes.link_duplicate_calls` is on.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
 - `.sheet-offered.json` — `DroppedFileSheet.markOffered`: the participants sheet was offered for a dropped file (core only until the UI lands, #4012).
@@ -209,7 +209,7 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   `recommendedForThisMac()` leaves them off too unless a comment says otherwise. With them unset `Prompt.build` and the note
   are byte-identical to before (pinned by `PromptTests`/`SummaryTemplateTests`); don't add a prompt line that changes the unset digest.
   Keys that change a note but are on for FRESH installs only (off on decode; `recommendedForThisMac()` sets them): `summarise.apply_corrections`
-  (applies the note's "Possible transcription corrections" to its body; never rewrites Highlights or facts-ledger quotes), `summarise.neutral_default`.
+  (applies the note's "Possible transcription corrections" to its body; never rewrites Highlights or facts-ledger quotes), `summarise.neutral_default`, `notes.link_duplicate_calls` (the same call captured twice: no `.call.json`/`.also-captured.json`, no footer line, no sheet copy when off).
 - **Note section order is fixed** (`NoteAssembly`): frontmatter → model body (incl. Highlights) → `## Key moments` → `## Tracked terms` → provenance footer.
   Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
 - **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions

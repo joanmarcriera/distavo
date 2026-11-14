@@ -309,7 +309,7 @@ final class WatcherController: ObservableObject {
 
     /// A normal quit (#6759): drop the in-flight `.processing` marker, so only a crash leaves one for
     /// `setAsideInterrupted` at the next launch. The file stays pending and is processed again next time.
-    func clearMarkersOnQuit() { store()?.clearStaleProcessing() }
+    func clearMarkersOnQuit() { store()?.clearProcessingMarkers() }
 
     private func announceInterrupted() {
         guard !interruptedAtLaunch.isEmpty else { return }

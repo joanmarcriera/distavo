@@ -135,6 +135,7 @@ public enum LongRecording {
                 if let words = seg["words"] as? [[String: Any]] {
                     seg["words"] = words.map { w in
                         var w = w
+                        if let spk = w["speaker"] as? String, let renamed = names[spk] { w["speaker"] = renamed }
                         if let ws = w["start"] as? Double { w["start"] = ws + offset }
                         if let we = w["end"] as? Double { w["end"] = we + offset }
                         return w
@@ -162,11 +163,18 @@ public enum LongRecording {
         }
         if !engines.isEmpty { out["engine"] = engines.joined(separator: " + ") }
         if !languagesUsed.isEmpty { out["language_used"] = languagesUsed.joined(separator: ", ") }
-        notes.append(partsFooterLine(outcomes.map(\.part)))
-        for o in outcomes { if let why = o.failure { notes.append(missingPartLine(o.part, reason: why)) } }
-        out["footer_notes"] = notes
+        if !notes.isEmpty { out["footer_notes"] = notes }
+        // Said in the note on every engine path: the provenance footer (`footer_notes`) is only written when the
+        // engine names itself, which the WhisperX server path never does.
+        var own = [partsFooterLine(outcomes.map(\.part))]
+        for o in outcomes { if let why = o.failure { own.append(missingPartLine(o.part, reason: why)) } }
+        out[notesKey] = own
         return out
     }
+
+    /// Result key holding the lines the note must carry about a recording transcribed in parts (#6759);
+    /// `Pipeline.processOne` adds them to the note's footer notes whatever engine ran.
+    public static let notesKey = "long_recording_notes"
 
     /// Per-part speaker labels -> `SPEAKER_00`, `SPEAKER_01`, ... in order of talk time (ties: label order).
     static func speakerRenumbering(_ segments: [[String: Any]]) -> [String: String] {
@@ -208,8 +216,13 @@ public enum LongRecording {
     public static func plan(wav: URL) -> [Part] {
         guard let file = try? AVAudioFile(forReading: wav) else { return [] }
         let rate = file.processingFormat.sampleRate
-        guard rate > 0, Double(file.length) / rate > thresholdSeconds,
-              let measured = try? RecordingSplit.windowRMS(of: wav) else { return [] }
+        let duration = rate > 0 ? Double(file.length) / rate : 0
+        guard duration > thresholdSeconds else { return [] }
+        // Loudness unreadable: cut at the nominal boundaries with every part treated as sounding. Falling back to
+        // the whole file would be the path that crashed.
+        guard let measured = try? RecordingSplit.windowRMS(of: wav), !measured.rms.isEmpty else {
+            return plan(windowRMS: [Float](repeating: 1, count: Int(duration.rounded(.up)) + 1), duration: duration)
+        }
         return plan(windowRMS: measured.rms, duration: measured.duration)
     }
 
@@ -223,7 +236,10 @@ public enum LongRecording {
         transcribe: (URL, TranscribeConfig) async throws -> [String: Any],
         log: (String) -> Void = { print("[Distavo] \($0)") }
     ) async throws -> [String: Any] {
-        let key = WavKey(wav)
+        // The owner's confirmed spoken language (`<base>.language.json`) is found by the work WAV's base, which a
+        // part file does not carry: resolve it once here, for every part (a no-op when the language is fixed).
+        let config = LanguageOverride.applying(to: config, workDir: workDir, wavBase: base)
+        let key = WavKey(wav, config: config)
         var outcomes: [PartOutcome] = []
         var firstError: Error?
         log("long recording \(base): \(parts.count) parts of about \(Int(partSeconds / 60)) min")
@@ -235,7 +251,15 @@ public enum LongRecording {
             }
             let partWav = workDir.appendingPathComponent("\(base).part-\(String(format: "%02d", part.index + 1)).wav")
             defer { try? FileManager.default.removeItem(at: partWav) }
-            try RecordingSplit.cut(source: wav, range: part.start...part.end, destination: partWav)
+            do {
+                try RecordingSplit.cut(source: wav, range: part.start...part.end, destination: partWav)
+            } catch {
+                // A full disk or a lost permission is the machine's problem: defer with the parts so far cached.
+                if Pipeline.isMachineLevelConvertFailure(error) {
+                    throw RetryableDependencyError("could not cut part \(part.index + 1): \(error.localizedDescription) - will retry")
+                }
+                throw error
+            }
             log("long recording \(base): part \(part.index + 1)/\(parts.count) (\(clock(part.start))-\(clock(part.end)))")
             do {
                 let result = try await transcribe(partWav, config)
@@ -250,28 +274,51 @@ public enum LongRecording {
                 outcomes.append(PartOutcome(part: part, result: none))
                 saveCache(none, workDir: workDir, base: base, part: part, key: key)
             } catch {
+                try Task.checkCancellation()   // a cancel the engine wrapped in its own error type
+                // A server or network failure says nothing about this part: stop as a whole-file run would (the
+                // pipeline decides retry or failure), keeping the finished parts cached. Only an error the engine
+                // raised about this audio is tolerated as one missing part.
+                if Self.isConnectionFailure(error) { throw error }
                 let reason = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
                 log("long recording \(base): part \(part.index + 1) failed: \(reason)")
                 if firstError == nil { firstError = error }
                 outcomes.append(PartOutcome(part: part, result: nil, failure: reason))
             }
         }
+        try Task.checkCancellation()
         let stitched = stitch(outcomes)
         if let firstError, ((stitched["segments"] as? [[String: Any]]) ?? []).isEmpty { throw firstError }
         return stitched
     }
 
+    /// The WhisperX server path and anything network-shaped: not a fault of one part.
+    static func isConnectionFailure(_ error: Error) -> Bool {
+        if error is WhisperXError || error is URLError { return true }
+        if NetworkScope.describesOfflineFailure(error) { return true }
+        if Pipeline.isMachineLevelConvertFailure(error) { return true }
+        let ns = error as NSError
+        return ns.domain == NSURLErrorDomain
+    }
+
     // MARK: Part caches
 
-    /// Identifies the work WAV a cache was made from: a re-conversion (new date or size) invalidates it.
+    /// Identifies what a cache was made from: the work WAV (a re-conversion changes its date or size) and the
+    /// transcription settings (engine, model, language, vocabulary, speakers...), so a retry after a settings
+    /// change never reuses a part transcribed the old way.
     struct WavKey: Equatable {
         var size: Int
         var modified: Double
-        init(size: Int, modified: Double) { self.size = size; self.modified = modified }
-        init(_ url: URL) {
+        var settings: String
+        init(size: Int, modified: Double, settings: String = "") {
+            self.size = size; self.modified = modified; self.settings = settings
+        }
+        init(_ url: URL, config: TranscribeConfig) {
             let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
             size = (attrs?[.size] as? Int) ?? -1
             modified = ((attrs?[.modificationDate] as? Date) ?? .distantPast).timeIntervalSince1970
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            settings = (try? encoder.encode(config)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
         }
     }
 
@@ -280,7 +327,7 @@ public enum LongRecording {
     }
 
     static func saveCache(_ result: [String: Any], workDir: URL, base: String, part: Part, key: WavKey) {
-        let envelope: [String: Any] = ["wav_size": key.size, "wav_modified": key.modified,
+        let envelope: [String: Any] = ["wav_size": key.size, "wav_modified": key.modified, "settings": key.settings,
                                        "start": part.start, "end": part.end, "result": result]
         // Best effort: a result that is not plain JSON (or a full disk) only costs the resume.
         guard JSONSerialization.isValidJSONObject(envelope),
@@ -293,6 +340,7 @@ public enum LongRecording {
               let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               (env["wav_size"] as? Int) == key.size,
               let modified = env["wav_modified"] as? Double, abs(modified - key.modified) < 0.001,
+              (env["settings"] as? String) == key.settings,
               let start = env["start"] as? Double, abs(start - part.start) < 0.001,
               let end = env["end"] as? Double, abs(end - part.end) < 0.001 else { return nil }
         return env["result"] as? [String: Any]

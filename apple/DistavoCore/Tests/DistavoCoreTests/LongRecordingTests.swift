@@ -55,7 +55,7 @@ final class LongRecordingTests: XCTestCase {
         let p2 = LongRecording.Part(index: 2, start: 3600, end: 5400, isSilent: false)
         let r0: [String: Any] = [
             "segments": [["text": "hello", "start": 1.0, "end": 11.0, "speaker": "SPEAKER_01",
-                          "words": [["word": "hello", "start": 1.0, "end": 1.5]]],
+                          "words": [["word": "hello", "start": 1.0, "end": 1.5, "speaker": "SPEAKER_01"]]],
                          ["text": "hi", "start": 12.0, "end": 13.0, "speaker": "SPEAKER_00"]],
             "engine": "Parakeet", "detections": [["code": "en", "probability": 0.9]],
             "footer_notes": ["recovered speech"]]
@@ -71,14 +71,16 @@ final class LongRecordingTests: XCTestCase {
         XCTAssertEqual(segs[1]["speaker"] as? String, "SPEAKER_01")
         XCTAssertEqual(segs[2]["start"] as? Double, 3605)
         XCTAssertEqual((segs[0]["words"] as! [[String: Any]])[0]["end"] as? Double, 1.5)
+        XCTAssertEqual((segs[0]["words"] as! [[String: Any]])[0]["speaker"] as? String, "SPEAKER_00", "word labels follow")
         XCTAssertEqual(out["engine"] as? String, "Parakeet")
         XCTAssertEqual(out["language"] as? String, "en", "unknown keys come from the first part that has them")
         let det = out["detections"] as! [[String: Any]]
         XCTAssertEqual(det.first?["code"] as? String, "en", "weighted by each part's speech: 11 s of en vs 1 s of ca")
         let notes = out["footer_notes"] as! [String]
-        XCTAssertEqual(notes.filter { $0 == "recovered speech" }.count, 1)
-        XCTAssertTrue(notes.last!.contains("3 parts"), notes.last!)
-        XCTAssertTrue(notes.last!.contains("1 silent, skipped"), notes.last!)
+        XCTAssertEqual(notes, ["recovered speech"], "engine notes deduplicated")
+        let own = out[LongRecording.notesKey] as! [String]
+        XCTAssertTrue(own[0].contains("3 parts"), own[0])
+        XCTAssertTrue(own[0].contains("1 silent, skipped"), own[0])
     }
 
     func testStitchNamesAMissingPart() {
@@ -86,7 +88,7 @@ final class LongRecordingTests: XCTestCase {
         let p1 = LongRecording.Part(index: 1, start: 1800, end: 3600, isSilent: false)
         let out = LongRecording.stitch([.init(part: p0, result: ["segments": [["text": "a", "start": 0.0, "end": 1.0]]]),
                                         .init(part: p1, result: nil, failure: "engine broke")])
-        let notes = out["footer_notes"] as! [String]
+        let notes = out[LongRecording.notesKey] as! [String]
         XCTAssertTrue(notes.contains { $0.hasPrefix("Part 2 (0:30:00-1:00:00) could not be transcribed") && $0.hasSuffix("engine broke") },
                       notes.description)
     }
@@ -100,8 +102,7 @@ final class LongRecordingTests: XCTestCase {
     }
 
     /// Mono 8 kHz Int16 WAV: speech-like tone 50 s of every minute, with `silent` (in seconds) all silent.
-    private static func writeSyntheticRecording(to url: URL, seconds: Int, silent: Range<Int>) throws {
-        let rate = 8000.0
+    private static func writeSyntheticRecording(to url: URL, seconds: Int, silent: Range<Int>, rate: Double = 8000) throws {
         let format = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: rate, channels: 1, interleaved: true)!
         let file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: .pcmFormatInt16, interleaved: true)
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate))!
@@ -115,6 +116,48 @@ final class LongRecordingTests: XCTestCase {
             else { tone.update(repeating: 0, count: Int(rate)) }
             try file.write(from: buffer)
         }
+    }
+
+    /// One 95-minute work WAV (16 kHz mono Int16, the converter's output format), written once and copied in
+    /// by `copyConverter`: the tests of resume, failures and language only need a long work WAV, and the live
+    /// converter is already proven by the 5 h test.
+    /// Outside `TestTemp.root` (cleaned after every test); removed by `tearDown()` of the class.
+    private static let fixtureDir = TestTemp.base
+        .appendingPathComponent("distavo-long-fixture-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    private static let workWav95: URL = {
+        let url = fixtureDir.appendingPathComponent("work95.wav")
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.createDirectory(at: fixtureDir, withIntermediateDirectories: true)
+            try! writeSyntheticRecording(to: url, seconds: 95 * 60, silent: 0..<0, rate: 16000)
+        }
+        return url
+    }()
+
+    override class func tearDown() {
+        try? FileManager.default.removeItem(at: fixtureDir)
+        super.tearDown()
+    }
+
+    private static let copyConverter: (URL, URL) async throws -> Void = { _, dest in
+        try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: dest)
+        try FileManager.default.copyItem(at: workWav95, to: dest)
+    }
+
+    /// A 95-minute recording whose conversion is the copy of `workWav95` (the source is a stand-in file).
+    private func makeFixture95(name: String) throws -> Fixture {
+        let root = TestTemp.root.appendingPathComponent("distavo-long-" + UUID().uuidString)
+        let rec = root.appendingPathComponent("recordings")
+        try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
+        var cfg = Config()
+        cfg.recordingsDir = rec.path
+        cfg.notesDir = root.appendingPathComponent("notes").path
+        cfg.workDir = root.appendingPathComponent("work").path
+        cfg.summarise.backend = "local"
+        let source = rec.appendingPathComponent(name)
+        try Data([0, 1, 2, 3]).write(to: source)
+        return Fixture(root: root, recordings: rec, notes: URL(fileURLWithPath: cfg.notesDir),
+                       work: URL(fileURLWithPath: cfg.workDir), config: cfg, source: source)
     }
 
     private func makeFixture(name: String, seconds: Int, silent: Range<Int>) throws -> Fixture {
@@ -147,15 +190,20 @@ final class LongRecordingTests: XCTestCase {
     private final class Calls: @unchecked Sendable {
         private let lock = NSLock()
         private var items: [(name: String, seconds: Double)] = []
+        private var langs: [String] = []
         func add(_ name: String, _ seconds: Double) { lock.lock(); items.append((name, seconds)); lock.unlock() }
+        func addLanguage(_ l: String) { lock.lock(); langs.append(l); lock.unlock() }
+        var languages: [String] { lock.lock(); defer { lock.unlock() }; return langs }
         var all: [(name: String, seconds: Double)] { lock.lock(); defer { lock.unlock() }; return items }
     }
 
     /// The fake engine: refuses anything longer than a part (as the real engines should never see), returns one
     /// segment per part saying which part it heard, with the labels the other way round on odd parts.
-    private func fakeEngine(_ calls: Calls, failOn: Set<Int> = [], retryOn: Set<Int> = [])
+    private func fakeEngine(_ calls: Calls, failOn: Set<Int> = [], retryOn: Set<Int> = [],
+                            serverDownOn: Set<Int> = [], engineName: String? = "Fake")
         -> (URL, TranscribeConfig) async throws -> [String: Any] {
-        { url, _ in
+        { url, config in
+            calls.addLanguage(config.language)
             let file = try AVAudioFile(forReading: url)
             let seconds = Double(file.length) / file.processingFormat.sampleRate
             calls.add(url.lastPathComponent, seconds)
@@ -165,18 +213,22 @@ final class LongRecordingTests: XCTestCase {
             let n = calls.all.count
             if retryOn.contains(n) { throw RetryableDependencyError("model still downloading") }
             if failOn.contains(n) { throw NSError(domain: "fake-engine", code: 2, userInfo: [NSLocalizedDescriptionKey: "engine broke"]) }
+            if serverDownOn.contains(n) { throw WhisperXError("WhisperX server unreachable") }
             let (owner, other) = n % 2 == 0 ? ("SPEAKER_01", "SPEAKER_00") : ("SPEAKER_00", "SPEAKER_01")
-            return ["segments": [
+            var out: [String: Any] = ["segments": [
                 ["text": "Heard \(url.lastPathComponent) for \(Int(seconds)) seconds.", "start": 1.0, "end": 40.0, "speaker": owner],
-                ["text": "Yes.", "start": 41.0, "end": 42.0, "speaker": other]],
-                "engine": "Fake"]
+                ["text": "Yes.", "start": 41.0, "end": 42.0, "speaker": other]]]
+            if let engineName { out["engine"] = engineName }
+            return out
         }
     }
 
     private func deps(_ engine: @escaping (URL, TranscribeConfig) async throws -> [String: Any],
                       summarise: @escaping (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String
-                        = { _, _, _, _ in LongRecordingTests.noteText }) -> PipelineDeps {
-        PipelineDeps(convertToWav: { try await AudioConverter.convertToWav(source: $0, dest: $1) },
+                        = { _, _, _, _ in LongRecordingTests.noteText },
+                      liveConverter: Bool = false) -> PipelineDeps {
+        PipelineDeps(convertToWav: liveConverter ? { try await AudioConverter.convertToWav(source: $0, dest: $1) }
+                                                 : LongRecordingTests.copyConverter,
                      transcribe: engine, ollamaReachable: { _ in true }, summarise: summarise)
     }
 
@@ -201,7 +253,7 @@ final class LongRecordingTests: XCTestCase {
         let calls = Calls()
         let before = footprintMB()
         let started = Date()
-        let result = await Pipeline.processOne(path: fx.source, config: fx.config, deps: deps(fakeEngine(calls)),
+        let result = await Pipeline.processOne(path: fx.source, config: fx.config, deps: deps(fakeEngine(calls), liveConverter: true),
                                                stableChecks: 1, stableDelay: 0)
         let after = footprintMB()
         print("LONG-RECORDING: \(seconds) s of audio in \(Int(Date().timeIntervalSince(started))) s, "
@@ -230,7 +282,7 @@ final class LongRecordingTests: XCTestCase {
     }
 
     func testDeferredRunResumesFromThePartsAlreadyDone() async throws {
-        let fx = try makeFixture(name: "resume.wav", seconds: 95 * 60, silent: 0..<0)
+        let fx = try makeFixture95(name: "resume.wav")
         defer { try? FileManager.default.removeItem(at: fx.root) }
         let first = Calls()
         let r1 = await Pipeline.processOne(path: fx.source, config: fx.config, deps: deps(fakeEngine(first, retryOn: [3])),
@@ -249,7 +301,7 @@ final class LongRecordingTests: XCTestCase {
     }
 
     func testOneFailingPartStillGivesANoteThatSaysWhatIsMissing() async throws {
-        let fx = try makeFixture(name: "onefails.wav", seconds: 95 * 60, silent: 0..<0)
+        let fx = try makeFixture95(name: "onefails.wav")
         defer { try? FileManager.default.removeItem(at: fx.root) }
         let calls = Calls()
         let r = await Pipeline.processOne(path: fx.source, config: fx.config, deps: deps(fakeEngine(calls, failOn: [2])),
@@ -261,13 +313,65 @@ final class LongRecordingTests: XCTestCase {
     }
 
     func testEveryPartFailingFailsTheRecordingWithTheEngineError() async throws {
-        let fx = try makeFixture(name: "allfail.wav", seconds: 95 * 60, silent: 0..<0)
+        let fx = try makeFixture95(name: "allfail.wav")
         defer { try? FileManager.default.removeItem(at: fx.root) }
         let calls = Calls()
         let r = await Pipeline.processOne(path: fx.source, config: fx.config,
                                           deps: deps(fakeEngine(calls, failOn: [1, 2, 3, 4])), stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(r.status, .failed)
         XCTAssertTrue((r.message ?? "").contains("engine broke"), r.message ?? "")
+    }
+
+    func testTheOwnersConfirmedLanguageReachesEveryPart() async throws {
+        var fx = try makeFixture95(name: "catalan.wav")
+        defer { try? FileManager.default.removeItem(at: fx.root) }
+        fx.config.transcribe.language = "auto"
+        try LanguageOverride(code: "ca").save(workDir: fx.work, base: "catalan")
+        let calls = Calls()
+        let r = await Pipeline.processOne(path: fx.source, config: fx.config, deps: deps(fakeEngine(calls)),
+                                          stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done, r.message ?? "")
+        XCTAssertEqual(calls.languages, ["ca", "ca", "ca", "ca"])
+    }
+
+    func testAServerFailureMidwayFailsLikeAWholeFileRunAndKeepsThePartsForTheRetry() async throws {
+        let fx = try makeFixture95(name: "server.wav")
+        defer { try? FileManager.default.removeItem(at: fx.root) }
+        let calls = Calls()
+        let r = await Pipeline.processOne(path: fx.source, config: fx.config,
+                                          deps: deps(fakeEngine(calls, serverDownOn: [2], engineName: nil)),
+                                          stableChecks: 1, stableDelay: 0)
+        XCTAssertNotEqual(r.status, .done, "never a note with a hole the size of an outage")
+        XCTAssertEqual(calls.all.count, 2, "stopped at the failing part")
+        let cached = try FileManager.default.contentsOfDirectory(atPath: fx.work.path).filter { $0.hasSuffix(".json") && $0.contains(".part-") }
+        XCTAssertEqual(cached, ["server.part-01.json"])
+    }
+
+    func testPartNotesReachTheNoteWhenTheEngineDoesNotNameItself() async throws {
+        let fx = try makeFixture95(name: "noengine.wav")
+        defer { try? FileManager.default.removeItem(at: fx.root) }
+        let r = await Pipeline.processOne(path: fx.source, config: fx.config,
+                                          deps: deps(fakeEngine(Calls(), failOn: [3], engineName: nil)),
+                                          stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(r.status, .done, r.message ?? "")
+        let note = try String(contentsOf: XCTUnwrap(r.notePath), encoding: .utf8)
+        XCTAssertTrue(note.contains("transcribed in 4 parts"), note)
+        XCTAssertTrue(note.contains("Part 3 ("), note)
+    }
+
+    func testCachedPartsAreNotReusedAfterATranscriptionSettingChange() throws {
+        let root = TestTemp.root.appendingPathComponent("distavo-cachekey-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let wav = root.appendingPathComponent("x.wav")
+        try Data([1, 2, 3]).write(to: wav)
+        let part = LongRecording.Part(index: 0, start: 0, end: 1800, isSilent: false)
+        var cfg = TranscribeConfig()
+        let key = LongRecording.WavKey(wav, config: cfg)
+        LongRecording.saveCache(["segments": []], workDir: root, base: "x", part: part, key: key)
+        XCTAssertNotNil(LongRecording.loadCache(workDir: root, base: "x", part: part, key: key))
+        cfg.embeddedModel = "something-else"
+        XCTAssertNil(LongRecording.loadCache(workDir: root, base: "x", part: part, key: LongRecording.WavKey(wav, config: cfg)))
     }
 
     // MARK: Long transcript, Ollama context
@@ -359,13 +463,29 @@ final class LongRecordingTests: XCTestCase {
         XCTAssertEqual(DistavoState.iterPending(recordingsDir: rec, state: state).map(\.lastPathComponent), ["big.wav"])
     }
 
+    func testAnotherRunningDistavoKeepsItsFile() throws {
+        let root = TestTemp.root.appendingPathComponent("distavo-owner-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = try DistavoState.Store(stateDir: root.appendingPathComponent(".state"),
+                                           notesDir: root.appendingPathComponent("notes"))
+        state.markProcessing("theirs", pid: 4242)
+        state.markProcessing("crashed", pid: 4343)
+        let set = state.setAsideInterrupted(ownPID: 1, isAlive: { $0 == 4242 })
+        XCTAssertEqual(set, ["crashed"])
+        XCTAssertTrue(state.isProcessing("theirs"))
+        state.clearProcessingMarkers(ownedBy: 1)                      // our quit leaves theirs alone
+        XCTAssertTrue(state.isProcessing("theirs"))
+        state.clearProcessingMarkers(ownedBy: 4242)
+        XCTAssertFalse(state.isProcessing("theirs"))
+    }
+
     func testNormalQuitLeavesNothingToSetAside() throws {
         let root = TestTemp.root.appendingPathComponent("distavo-quit-" + UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let state = try DistavoState.Store(stateDir: root.appendingPathComponent(".state"),
                                            notesDir: root.appendingPathComponent("notes"))
         state.markProcessing("in-flight")
-        state.clearStaleProcessing()                                   // applicationWillTerminate
+        state.clearProcessingMarkers()                                 // applicationWillTerminate
         XCTAssertEqual(state.setAsideInterrupted(), [])
         XCTAssertFalse(state.isFailed("in-flight"))
     }

@@ -282,7 +282,25 @@ public enum DistavoState {
                 .sorted { $0.0 < $1.0 }
         }
 
-        public func markProcessing(_ base: String) { write("processing\n", marker(base, "processing")) }
+        /// "processing\n<pid>\n": the pid tells a crash (dead owner) from another Distavo still at work on a shared
+        /// data folder (two editions, #6759).
+        public func markProcessing(_ base: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
+            write("processing\n\(pid)\n", marker(base, "processing"))
+        }
+
+        /// The pid recorded in `base`'s `.processing` marker, or nil (no marker, or one from an older build).
+        public func processingOwner(_ base: String) -> Int32? {
+            guard let text = try? String(contentsOf: marker(base, "processing"), encoding: .utf8) else { return nil }
+            let lines = text.split(separator: "\n")
+            return lines.count >= 2 ? Int32(lines[1].trimmingCharacters(in: .whitespaces)) : nil
+        }
+
+        /// Removes the `.processing` markers this process wrote (a normal quit, #6759); another process's stay.
+        public func clearProcessingMarkers(ownedBy pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
+            for item in markers(suffix: "processing") where processingOwner(item.base) == pid {
+                clearProcessing(item.base)
+            }
+        }
         public func clearProcessing(_ base: String) { remove(marker(base, "processing")) }
         /// Clear the `.failed` marker. A note file still sitting in the notes folder under a failed
         /// base is a leftover of a failed run (1.12-1.14 wrote the rejected summary there), not a
@@ -380,14 +398,22 @@ public enum DistavoState {
         /// how a 4 h 21 min file crash-looped the app on every relaunch, so each such recording gets a `.failed`
         /// marker with `interruptedReason` and appears in the menu's failed list; "Process now" / Retry clear
         /// it as for any failure. Returns the bases set aside, sorted, so the caller can say so.
+        ///
+        /// A marker whose owner process is still running (another Distavo edition on the same data folder) is
+        /// left alone; `isAlive` is injectable for tests.
         @discardableResult
-        public func setAsideInterrupted() -> [String] {
-            let bases = markers(suffix: "processing").map(\.base)
-            for base in bases where !isDone(base) {
-                markFailed(base, Store.interruptedReason)   // also removes the `.processing` marker
+        public func setAsideInterrupted(
+            ownPID: Int32 = ProcessInfo.processInfo.processIdentifier,
+            isAlive: (Int32) -> Bool = { kill($0, 0) == 0 || errno == EPERM }
+        ) -> [String] {
+            var setAside: [String] = []
+            for base in markers(suffix: "processing").map(\.base) {
+                if let owner = processingOwner(base), owner != ownPID, isAlive(owner) { continue }
+                if isDone(base) { clearProcessing(base); continue }   // a done base keeps its note
+                markFailed(base, Store.interruptedReason)            // also removes the `.processing` marker
+                setAside.append(base)
             }
-            removeMarkers(suffix: "processing")             // a done base keeps its note; just drop its marker
-            return bases.filter { !isDone($0) }
+            return setAside
         }
 
         /// Clear all `.failed` (and stale `.processing`, `.deferred` and

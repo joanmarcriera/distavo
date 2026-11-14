@@ -4,7 +4,7 @@ All notable changes to Distavo. This file is generated from the commit history b
 [git-cliff](https://git-cliff.org) (`git cliff -o CHANGELOG.md`, config in `cliff.toml`); do not
 edit it by hand. Task numbers link to the Vikunja board.
 
-## [Unreleased]
+## [1.21.0] - 2026-11-14
 
 ### Features
 
@@ -38,6 +38,30 @@ edit it by hand. Task numbers link to the Vikunja board.
 - **capture**: Link a call captured twice and reuse the twin's participants sheet ([#4014](https://familia.riera.co.uk/tasks/4014))
 - **summarise**: Low-speaker-confidence signal in the non-meeting gate ([#4015](https://familia.riera.co.uk/tasks/4015))
 - **speakers**: Assemble the deferred-question context from calendar, quick notes, key moments and speaker lines ([#4021](https://familia.riera.co.uk/tasks/4021))
+- **site**: WCAG 2.2 AA checker, skip links, focus rings, reduced motion, contrast fixes ([#4372](https://familia.riera.co.uk/tasks/4372))
+- **site**: Sitemap, robots, JSON-LD, canonical and OG on every page, check-seo.py with weight budget ([#4373](https://familia.riera.co.uk/tasks/4373))
+- **market**: Summary requirement in the first 300 chars of listing and site, en/ca/es ([#4661](https://familia.riera.co.uk/tasks/4661))
+- **site**: Setup page with 16/24/32 GB Ollama model table, sitemap, JSON-LD, footer link ([#4662](https://familia.riera.co.uk/tasks/4662))
+- **site**: MacWhisper alternatives page, every cell sourced and dated, with checker and fail fixture ([#4663](https://familia.riera.co.uk/tasks/4663))
+- **ops**: Pricing-experiments E1-E5, weekly-metrics rival price line and site/appcast status ([#4666](https://familia.riera.co.uk/tasks/4666))
+- **ops**: Site deploy.sh, dry-run by default, --go to copy, post-deploy probe, with local-dir test ([#4667](https://familia.riera.co.uk/tasks/4667))
+- **diarisation**: Label words owner/remote from stereo channel energy ([#6353](https://familia.riera.co.uk/tasks/6353))
+- **diarisation**: Wire channel speaker labels into the pipeline behind transcribe.channel_speakers ([#6353](https://familia.riera.co.uk/tasks/6353))
+- **summary**: Apply the note's Possible transcription corrections to the body ([#6354](https://familia.riera.co.uk/tasks/6354))
+- **summary**: Advice call template for accountant, lawyer and adviser calls ([#6355](https://familia.riera.co.uk/tasks/6355))
+- **vocabulary**: Role term packs from the participants line; feat(capture): pure mic-silence diagnosis ([#3950](https://familia.riera.co.uk/tasks/3950), [#3930](https://familia.riera.co.uk/tasks/3930))
+- **capture**: Mic-silent notification says why (permission or input name) via MicDiagnosis ([#3930](https://familia.riera.co.uk/tasks/3930))
+- **pipeline**: A finished file reports per-phase timings in the log and on ProcessResult ([#4018](https://familia.riera.co.uk/tasks/4018))
+- **capture**: Stop a recording when the call ends, behind meeting_detection.stop_when_call_ends ([#4007](https://familia.riera.co.uk/tasks/4007))
+- **speakers**: DroppedFileSheet core, when to offer the participants sheet for dropped files and what it starts with ([#4012](https://familia.riera.co.uk/tasks/4012))
+- **templates**: Project_meeting template, auto rule and opt-in neutral default ([#6666](https://familia.riera.co.uk/tasks/6666))
+- **recorder**: Stop sheet offers Auto first, preselects folder pick or rule, logs the template used ([#6667](https://familia.riera.co.uk/tasks/6667))
+- **recorder**: Opt-in recording.storage_format int16 halves the WAV size, findings on 16 kHz ([#6670](https://familia.riera.co.uk/tasks/6670))
+- **split**: Pure core to find the silence between two meetings and cut a recording there ([#6668](https://familia.riera.co.uk/tasks/6668))
+- **capture**: Stop a recording automatically at 8 hours, a setting, warned 10 minutes before
+- **notes**: Notes.link_duplicate_calls switches duplicate-call linking, off for old configs (review B)
+- **core**: RecordingStorage folder size and free disk helpers, search keywords ([#6670](https://familia.riera.co.uk/tasks/6670))
+- **settings**: Recording format picker, folder size and free disk ([#6670](https://familia.riera.co.uk/tasks/6670))
 
 
 ### Bug fixes
@@ -51,6 +75,96 @@ edit it by hand. Task numbers link to the Vikunja board.
 - **router**: A strict majority of confident windows picks the engine; strip hallucinated sound tags ([#4016](https://familia.riera.co.uk/tasks/4016))
 - **ops**: Compare the published appcast byte for byte; refresh RELEASE.md merge state; note that the site is deployed by hand ([#4071](https://familia.riera.co.uk/tasks/4071))
 - **diarisation**: Raise a too-low num_speakers when the participants list names more people ([#3953](https://familia.riera.co.uk/tasks/3953))
+- **core**: Report swallowed marker/quarantine/config failures instead of dropping them ([#4374](https://familia.riera.co.uk/tasks/4374))
+- **config**: Corrupt config falls back to plain defaults, not fresh-install ones; one .broken copy per content ([#4504](https://familia.riera.co.uk/tasks/4504))
+- **summarise**: No diarisation labels is a meeting, not a solo memo; count only substantial voices ([#4503](https://familia.riera.co.uk/tasks/4503))
+- **ops**: A failing check-seo.py stops site deploy.sh, with stub test ([#5025](https://familia.riera.co.uk/tasks/5025))
+- **pipeline**: Terminal .unreadable marker after two identical conversion failures ([#5283](https://familia.riera.co.uk/tasks/5283))
+- **pipeline**: Defer on context-too-small, fall back to WhisperKit on empty Parakeet output ([#5284](https://familia.riera.co.uk/tasks/5284))
+- **menu**: Retry and Move to Bin for unreadable recordings; Process now revives them ([#5404](https://familia.riera.co.uk/tasks/5404))
+- **gemma**: ContextTooSmall is a hard failure on the Gemma path, not an endless deferral ([#5405](https://familia.riera.co.uk/tasks/5405))
+- **pipeline**: A terminal unreadable file is not also listed as failed ([#5477](https://familia.riera.co.uk/tasks/5477))
+- **config**: A server target with no model key defaults to gemma4:26b, not llama3.1:8b ([#3952](https://familia.riera.co.uk/tasks/3952))
+- **ops**: Site deploy ships assets/example-note.md despite the *.md exclude ([#5717](https://familia.riera.co.uk/tasks/5717))
+- **capture**: Keep the recent-people popup target alive for the modal ([#5717](https://familia.riera.co.uk/tasks/5717))
+- **diarisation**: Cut a gap-free word group at a speaker-turn boundary ([#3953](https://familia.riera.co.uk/tasks/3953))
+- **diarisation**: Leading uncovered words take the first covered speaker ([#5934](https://familia.riera.co.uk/tasks/5934))
+- **regenerate**: Recompute the recording-may-be-truncated flag from the saved segments and source length ([#4013](https://familia.riera.co.uk/tasks/4013))
+- **diarisation**: Channel relabel keeps detections/engine keys so language and provenance survive ([#6353](https://familia.riera.co.uk/tasks/6353))
+- **diarisation**: Channel relabel keeps untimed words, streams the file, defers to the diariser on 3+ person calls ([#6353](https://familia.riera.co.uk/tasks/6353))
+- **release**: Refuse a release whose tag disagrees with MARKETING_VERSION ([#6070](https://familia.riera.co.uk/tasks/6070))
+- **release**: Anchor the version match, cover release-appstore, extend the tag check tests ([#6070](https://familia.riera.co.uk/tasks/6070))
+- **summary**: Verify the ledger before applying corrections; never double an already-corrected form ([#6354](https://familia.riera.co.uk/tasks/6354))
+- **summary**: Corrections get an opt-out, skip URLs and code, and find their section reliably ([#6354](https://familia.riera.co.uk/tasks/6354))
+- **summary**: Advice-call auto-pick wins the adviser tie, plurals, no generic finance words ([#6355](https://familia.riera.co.uk/tasks/6355))
+- Review follow-ups (EOF-tolerant envelope read, exact hop rate, untimed words are not evidence, indented headings) ([#6353](https://familia.riera.co.uk/tasks/6353) [#6354](https://familia.riera.co.uk/tasks/6354))
+- Review follow-ups (EOF-tolerant envelope read, exact hop rate, untimed words are not evidence, indented headings) ([#6353](https://familia.riera.co.uk/tasks/6353) [#6354](https://familia.riera.co.uk/tasks/6354))
+- **diarisation**: Channel relabel keeps segments without words; auto speaker count honours the participants sheet ([#6353](https://familia.riera.co.uk/tasks/6353))
+- **pipeline**: Reviewer findings verified by test, one failing test each ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **pipeline**: Reviewer follow-ups for the verified findings ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **regenerate**: Keep the channel-labelled owner speaker across a regenerate ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **pipeline**: Cap transient convert failures at five in a row ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **pipeline**: Partial WAV removal, live capture in the rejected-summary note, cancel is not a failure ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **speakers**: Channel relabel steps aside for 3+ diarised voices and one-sided files, back-fills leading words ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **pipeline**: Disk-full and permission errors never make a recording terminal ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **corrections**: Never rewrite the typed Highlights section of the owner ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **review**: Fence-aware Highlights chunking, integer side share with word floor, docs ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **review**: Role terms stay out of fuzzy vocabulary and after global terms; regenerate parity; unanswered mic permission ([#3950](https://familia.riera.co.uk/tasks/3950), [#3930](https://familia.riera.co.uk/tasks/3930))
+- **vocab**: Role phrase in parentheses is not a participant term (test + fix, not yet compiled)
+- **vocab**: Split role phrase on for only when a role precedes it, case-insensitive (review)
+- **capture**: Restricted mic access has its own message, unknown cause mentions muting (review, [#3930](https://familia.riera.co.uk/tasks/3930))
+- **guard**: Wider monitoring context for the offensive-word guard, sibling tools before/after ([#3951](https://familia.riera.co.uk/tasks/3951))
+- **guard**: Context never crosses a sentence or line break; drop generic words (review, [#3951](https://familia.riera.co.uk/tasks/3951))
+- **summary**: A prompt the tokenizer says overflows is chunked, not failed ([#5284](https://familia.riera.co.uk/tasks/5284))
+- **cleaner**: Drop whole segments that are Whisper silence phrases ([#4025](https://familia.riera.co.uk/tasks/4025))
+- **summary**: Context too small defers only while the window is 0 (review, [#5284](https://familia.riera.co.uk/tasks/5284))
+- **ops**: App Store string checks no longer pass when the string is found (review)
+- **pipeline**: Disk-full and transient conversion failures defer, not fail (review)
+- **speakers**: A loose duplicate-call match never copies another recording's names (review, [#4014](https://familia.riera.co.uk/tasks/4014))
+- **vocabulary**: "(CEO of Acme)" keeps Acme as a spelling term (review, [#3950](https://familia.riera.co.uk/tasks/3950))
+- **summary**: An overflowing map chunk is split once; reduce keeps its budget (review, [#5284](https://familia.riera.co.uk/tasks/5284))
+- **state**: Transient conversion failures count at most once an hour (review)
+- **summary**: A collapse that survives the stiff retry is summarised part by part before the transcript-only fallback ([#4011](https://familia.riera.co.uk/tasks/4011))
+- **summary**: Chunked collapse fallback keeps cancel/outage deferrable, falls back on a bad merge, cleans part notes ([#4011](https://familia.riera.co.uk/tasks/4011))
+- **summary**: Scaffolding scrubber keeps "none" answers, ordinary lines and real Step headings ([#4010](https://familia.riera.co.uk/tasks/4010))
+- **guard**: Regenerate, Ask and Summarise together guard text cached before the guard; hyphen/slash tool forms ([#3951](https://familia.riera.co.uk/tasks/3951))
+- **capture**: End policy treats a free mic before any call as no signal, not an ended call ([#4007](https://familia.riera.co.uk/tasks/4007))
+- **pipeline**: Timings on every done exit, last lap named summarise+note ([#4018](https://familia.riera.co.uk/tasks/4018))
+- **ledger**: Real-name speaker fields are corrected from names learned across the ledger and first names of renamed labels ([#4017](https://familia.riera.co.uk/tasks/4017))
+- **speakers**: User_speaker that is not a turn label of the transcript reads as unknown in the prompt ([#3857](https://familia.riera.co.uk/tasks/3857))
+- **review**: Owner label resolves a first name, ledger skips SPEAKER_UNKNOWN holders and placeholder names, unicode-ellipsis quotes ([#3857](https://familia.riera.co.uk/tasks/3857), [#4017](https://familia.riera.co.uk/tasks/4017))
+- **prompt**: SPEAKER ROLES block no longer says 'unknown IS <owner>' when the owner label is unknown ([#3857](https://familia.riera.co.uk/tasks/3857))
+- **review**: Unknown owner label trims newlines, tests pin the ca/es unknown wording ([#3857](https://familia.riera.co.uk/tasks/3857))
+- **review**: Opus review of o: "any speaker", newline-trimmed owner label, templated unknown test ([#3857](https://familia.riera.co.uk/tasks/3857), [#6647](https://familia.riera.co.uk/tasks/6647))
+- **test**: TestTemp registers its observer on the main thread; async tests touched it off main ([#6647](https://familia.riera.co.uk/tasks/6647))
+- **capture**: Call-end stop needs 90 s of unbroken call capture, resets while disarmed ([#4007](https://familia.riera.co.uk/tasks/4007))
+- **review**: Invented fixture strings, markOffered reports failure, prefill takes its base, stronger tests, design note on register copy ([#4012](https://familia.riera.co.uk/tasks/4012) [#3934](https://familia.riera.co.uk/tasks/3934))
+- **summary**: Summarise together reduces partials in bounded batches so a merge prompt never overflows the window ([#6070](https://familia.riera.co.uk/tasks/6070))
+- **ops**: Pre-tag-check restores Package.resolved files it touches so the run leaves the tree as it found it ([#2679](https://familia.riera.co.uk/tasks/2679))
+- **review**: Pre-tag-check snapshot uses the repo root, merge group budget leaves room for the shortened marker ([#2679](https://familia.riera.co.uk/tasks/2679) [#6070](https://familia.riera.co.uk/tasks/6070))
+- **review**: No sticky root template pick, split temp is .part, speakers.json not inherited, gap-window speaker compare, stricter project auto-pick
+- **capture**: Stop and tell the user when a microphone switch loses the device
+- **settings**: Log a failed settings save instead of dropping it
+- **pipeline**: Long recordings in bounded parts, long transcripts summarised in parts, no crash loop ([#6759](https://familia.riera.co.uk/tasks/6759))
+- **pipeline**: Long-recording review follow-ups ([#6759](https://familia.riera.co.uk/tasks/6759))
+- **capture**: Recording-cap review follow-ups
+- **config**: Apply_corrections is off for configs that predate it, never rewrites ledger quotes (review A)
+- **vocabulary**: Role-term packs are skipped for non-English meetings (review C)
+- **vocabulary**: Role terms follow the language the transcriber runs with; corrections default off in SummaryChecks (review A, C)
+- **core**: RecordingStorage allocated size, cancellation, entry cap, full-disk zero ([#6670](https://familia.riera.co.uk/tasks/6670))
+- **settings**: Cancel the folder walk, cache it 60 s, hide size line without a recorder ([#6670](https://familia.riera.co.uk/tasks/6670))
+- **speakers**: Seed the note owner's name and never infer the owner from "standing in for" ([#6772](https://familia.riera.co.uk/tasks/6772))
+- **speakers**: Owner never creates a transcriber prompt, softer rule, capped merge ([#6772](https://familia.riera.co.uk/tasks/6772))
+
+
+### Tooling
+
+- Origin/main (PR #16 codex fixes) into the feedback drive
+- Long recordings in bounded parts and the crash-loop guard ([#6759](https://familia.riera.co.uk/tasks/6759))
+- Stop a recording automatically at 8 hours
+- New behaviour keys inert for existing configs (drive review decisions A-C)
+- Recording format picker, folder size and free disk in Settings ([#6670](https://familia.riera.co.uk/tasks/6670))
+- Seed the note owner's name and stop inferring the owner from "standing in for" ([#6772](https://familia.riera.co.uk/tasks/6772))
 
 
 ### Documentation
@@ -64,10 +178,32 @@ edit it by hand. Task numbers link to the Vikunja board.
 - **ops**: Key inventory (names only) and incident runbook ([#4088](https://familia.riera.co.uk/tasks/4088))
 - **speakers**: Edition-gated plan for persistent voice profiles ([#2944](https://familia.riera.co.uk/tasks/2944))
 - **embedded**: Spike note mapping the macOS 27 LanguageModel protocol onto the summariser seam ([#2198](https://familia.riera.co.uk/tasks/2198))
-- **market**: Add 2026-10 competition and executive memos
-- **listing**: ASO keyword strategy and de/fr/it draft locales ([#2972](https://familia.riera.co.uk/tasks/2972))
-- **scope**: CLI, stdio MCP and URL-import scope note, Direct-only ([#2955](https://familia.riera.co.uk/tasks/2955))
 - **embedded**: Note that CoreAI.framework has no language-model type, MLX vs CoreAI runner both external ([#2198](https://familia.riera.co.uk/tasks/2198))
+- **changelog**: Generate CHANGELOG.md with git-cliff, add cliff.toml ([#4370](https://familia.riera.co.uk/tasks/4370))
+- **quality**: Clean-clone quickstart check, architecture map, unify macOS 14+ ([#4371](https://familia.riera.co.uk/tasks/4371))
+- Error-handling audit of discarded try? in the pipeline path ([#4374](https://familia.riera.co.uk/tasks/4374))
+- **outreach**: AlternativeTo, OpenAlternative, Hugging Face and Softcatala drafts with checker ([#4664](https://familia.riera.co.uk/tasks/4664))
+- **market**: First-run summariser fallback design note and checker ([#4665](https://familia.riera.co.uk/tasks/4665))
+- **listing**: Localised App Store copy draft (en/ca/es full, de/fr/it fields) with character-limit checker ([#2972](https://familia.riera.co.uk/tasks/2972))
+- **verify**: Scope and verification status for meeting detection and transcript viewer ([#2945](https://familia.riera.co.uk/tasks/2945), [#2951](https://familia.riera.co.uk/tasks/2951))
+- **architecture**: Archify architecture diagram (json, html, png) and README link ([#3752](https://familia.riera.co.uk/tasks/3752))
+- **setapp**: Submission packet index with requirements checklist, screenshots and 1.20 release notes ([#1958](https://familia.riera.co.uk/tasks/1958))
+- Deferred/tooShort statuses, call sidecars, CI and version-bump are workflow_dispatch only ([#5717](https://familia.riera.co.uk/tasks/5717))
+- **memory**: Findings and proposed fix for the 9.6 GB growth, by code reading ([#4019](https://familia.riera.co.uk/tasks/4019))
+- **summary**: Name the sole caller of SummaryDriverError.deferral; Gemma hard-fails by design ([#5536](https://familia.riera.co.uk/tasks/5536))
+- **summary**: Name Advice call in the template help text and add its manual check ([#6355](https://familia.riera.co.uk/tasks/6355))
+- **summary**: Manual check states the adviser tie as the tests do ([#6355](https://familia.riera.co.uk/tasks/6355))
+- **summary**: Use the adviser-plus-profession example from the tests ([#6355](https://familia.riera.co.uk/tasks/6355))
+- **review**: Drive review of the h chain with merge recommendation and by-eye checklist
+- **review**: Second review round, counts and open lows
+- **state**: Next action is the review doc and the j merge
+- **summary**: Evidence and recommendation on defaulting embedded_enabled ([#1793](https://familia.riera.co.uk/tasks/1793))
+- **review**: Review of k and the l fixes, next action names the l branch
+- **remotes**: Remote direction map and merge-order checklist ([#1925](https://familia.riera.co.uk/tasks/1925))
+- **state**: Next action names branch p and the merge checklist ([#1925](https://familia.riera.co.uk/tasks/1925))
+- Keep the already-published Setapp listing draft and trademark note
+- **claude**: Long recordings, crash-loop guard, recording cap and part caches ([#6759](https://familia.riera.co.uk/tasks/6759))
+- **state**: Checkpoint of the 2026-11-14 feedback drive
 
 
 ### Tests
@@ -76,17 +212,28 @@ edit it by hand. Task numbers link to the Vikunja board.
 - **summary**: Pin the action-deadline rule in map and shared prompts ([#1793](https://familia.riera.co.uk/tasks/1793))
 - **summary**: Give the solo-memo fixture enough words ([#4015](https://familia.riera.co.uk/tasks/4015))
 - **core**: Coverage floor script and unit tests for HTTPSupport, NoteAssembly, StoredZipWriter, SummaryRouting, SummaryGenerator ([#4367](https://familia.riera.co.uk/tasks/4367))
+- **vocab**: Correct expected term order for role-phrase test (compiled, 1561 tests pass)
+- Every DistavoCore test uses a per-test temp dir removed when the test ends ([#6647](https://familia.riera.co.uk/tasks/6647))
+- **embedded**: Every DistavoEmbedded test uses a per-test temp dir removed when the test ends ([#6647](https://familia.riera.co.uk/tasks/6647))
+- **quality**: Synthetic panel fixture pins ledger checks and records the open gaps ([#3934](https://familia.riera.co.uk/tasks/3934))
+- **summary**: Catalan repetition-collapse fixture pins the validator; findings table updated ([#3931](https://familia.riera.co.uk/tasks/3931))
 
 
 ### CI and build
 
 - **ops**: Fast smoke script and a smoke job in CI ([#4368](https://familia.riera.co.uk/tasks/4368))
 - Pin checkout by SHA in ci.yml, same pin as ci/gitleaks-pins-2026-10-24 ([#4369](https://familia.riera.co.uk/tasks/4369))
+- **release**: Run the tag/version check before building ([#6070](https://familia.riera.co.uk/tasks/6070))
+- **release**: Submit-appstore checks the version against MARKETING_VERSION; document the tag rule ([#6070](https://familia.riera.co.uk/tasks/6070))
 
 
 ### Maintenance
 
 - **ops**: Pre-tag check script, static/default/full modes ([#2679](https://familia.riera.co.uk/tasks/2679))
+- **ops**: Lint-scripts.sh (set -u, bash -n, shellcheck, no swallowed Python exceptions) with negative tests ([#4374](https://familia.riera.co.uk/tasks/4374))
+- Restore Package.resolved accidentally included in the previous commit
+- Restore main's DistavoEmbedded Package.resolved, the toolchain rewrote it to v3 and dropped the Sparkle pin
+- **release**: Bump version to 1.21.0 (build 24), What's New for 1.21 [skip version bump]
 
 ## [1.20.0] - 2026-10-21
 

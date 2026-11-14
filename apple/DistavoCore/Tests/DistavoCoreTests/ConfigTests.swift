@@ -4,7 +4,7 @@ import XCTest
 final class ConfigTests: XCTestCase {
 
     private func tempFile() -> URL {
-        FileManager.default.temporaryDirectory
+        TestTemp.root
             .appendingPathComponent("distavo-cfg-\(UUID().uuidString)")
             .appendingPathComponent("watcher-config.json")
     }

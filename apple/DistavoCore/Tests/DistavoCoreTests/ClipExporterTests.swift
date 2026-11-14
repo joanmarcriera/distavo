@@ -6,7 +6,7 @@ import AVFoundation
 final class ClipExporterTests: XCTestCase {
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-clip-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url

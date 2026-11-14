@@ -47,7 +47,8 @@ of the original Python module (noted in its header).
 
 - **`Pipeline.swift`** — `Pipeline.processOne(path:config:deps:)` orchestrates one recording and
   returns a `ProcessResult(status, base, message, ...)`. Statuses (`ProcessStatus`): `done`,
-  `skipped`, `deferredNeedLocal`, `failed`. `Scanner.scanOnce(...)` processes all pending once.
+  `skipped`, `deferredNeedLocal`, `deferred` (a dependency temporarily unavailable; stays pending, never failed),
+  `failed`, `tooShort` (under `min_recording_seconds`; `.tooshort` marker). `Scanner.scanOnce(...)` processes all pending once.
   **Dependency injection:** all external effects (convert/transcribe/summarise/reachability) are
   passed in via `PipelineDeps` (with `.live()` wiring AVFoundation + the HTTP clients), preserving
   the test seam — **do not remove this**.
@@ -75,7 +76,7 @@ of the original Python module (noted in its header).
 1.17 feature groups (each file's header comment is the spec; all pure and unit-tested, the app target only renders them):
 - **Settings panes** — `SettingsPanes.swift`: which panes exist per edition, sidebar search, remembered selection.
 - **Note language** — `NoteLanguage.swift` (`summarise.note_language`: `en` | `auto` | a Whisper code; unknown = `en`).
-- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript.
+- **Vocabulary** — `Vocabulary.swift`: `transcribe.vocabulary` (prompt for the engines + summary) and ordered `transcribe.replacements` on the cleaned transcript. `RoleTermPacks.swift` seeds English UK-tax/finance terms from a role in the participants line, but only when the meeting is English or its language is not pinned (`RoleTermPacks.appliesTo`: skipped for a non-English `transcribe.language` or per-recording `LanguageOverride.code`), because an English vocabulary prompt collapses Catalan chunks (#3579).
 - **Templates + action items** — `SummaryTemplates.swift` swaps only the prompt's section list; the default prompt carries NO domain examples (#3578: an 8B model copies them into the ledger) — UK contracting/HPC rules live only in the opt-in `uk_contracting` template (`ledgerRules`/`notesRules`); `ActionItemsPrompt.swift`
   expresses `summarise.action_items` as a template; `ActionItems.swift` lists/ticks `- [ ]` across notes;
   `RemindersExport.swift` decides what to send (EventKit sink lives in the app target).
@@ -88,7 +89,7 @@ of the original Python module (noted in its header).
   (retrieval, token budget, citations) / `AskEndpoint.swift` (local-only endpoint guard, `docs/ask-local-only.md`).
 - **Automation** — `AutomationCommand.swift` (`distavo://` allow-list, Finder Service, App Intents; `docs/automation.md`), `AutomationCopySafety.swift`.
 - **Summarise together** — `ProjectSummary.swift` (`docs/project-summary.md`): 2-10 notes -> one cited `Project - <title>.md`, unsupported bullets dropped.
-- **Meeting detection** — `MeetingDetector.swift`: offers to record when a listed call app captures the mic (fake-clock policy, like `SilenceMonitor`).
+- **Meeting detection** — `MeetingDetector.swift`: offers to record when a listed call app captures the mic (fake-clock policy, like `SilenceMonitor`). `MeetingEndPolicy.swift` (#4007): with `meeting_detection.stop_when_call_ends` on (off by default) `CallEndStop` stops a recording 60 s after the call that held the mic releases it; the calendar end never stops anything.
 - **Scratchpad, key moments** — `Scratchpad.swift` (typed Quick Notes -> `Prompt.build(scratchpad:)`), `RecordingBookmarks.swift`
   (markers -> deterministic `## Key moments`), `ClipExporter.swift` (AVFoundation m4a clips).
 - **Notes window (1.18)** — `NotesLibrary.swift`: one row per note (newest meeting first) with what is on disk for it and, per
@@ -156,8 +157,12 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
 - `.segments.json` — timed transcript; `Pipeline`. `.segments.orig.json`, `.transcript.clean.orig.txt`, `.segments.orig.speakers.json` — pristine copies made before the first transcript-editor save.
 - `.speakers.json` — participants/speaker count from the recorder question (`SpeakerHints`).
 - `.language.json` — `LanguageOverride`: spoken language `code`, plus `note_language` and `summary_template` for that recording; written by the recorder's confirm controls.
+- `.call.json` — `CallRecord` (container time, duration, live-capture flag; no audio or text) and `.also-captured.json` — `AlsoCaptured` (the twin's base, whether this note is the primary); both from `DuplicateCallLink.swift`, written only when `notes.link_duplicate_calls` is on.
 - `.speaker-names.json` — rename mapping (`SpeakerRename`); `.pre-merge-<stamp>` copies of transcript/segments before a merge.
 - `.scratchpad.json` (Quick Notes), `.bookmarks.json` (key moments) — recorder.
+- `.part-NN.json` — one transcribed part of a long recording (`LongRecording`, keyed to the work WAV and the transcribe
+  settings); `.part-NN.wav` exists only while that part is transcribed. Removed once the note is written.
+- `.sheet-offered.json` — `DroppedFileSheet.markOffered`: the participants sheet was offered for a dropped file (core only until the UI lands, #4012).
 - `.calendar.json` — the matched event (`CalendarMatch`); `.vault.json` — name + hash of the vault copy (`VaultExport`).
 - `reminders-exported.json` — ledger of reminders already sent (one per work dir, not per base; `RemindersLedger`).
 - In the **notes** folder: `<note>.prev-<yyyyMMdd-HHmmss>.md` backups (`NoteVersions`, from Regenerate and speaker rename); every scan/listing skips them via `NoteVersions.isBackupName`.
@@ -179,8 +184,21 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   partitions input; the reduce step reuses `Prompt.build`, so an on-device note has the same shape as Ollama.
   The feature is a kill switch: with `summarise.embedded_enabled` false, `backend == "embedded"` falls back
   to Ollama (does not fail), and Settings does not offer it.
-- **Stale markers at startup:** leftover `.processing` markers mean a prior crash; they're cleared so files
-  become pending again. `.failed` markers persist until "Process now" clears them.
+- **Stale markers at startup never crash-loop (#6759):** a normal quit clears this process's `.processing`
+  markers (`applicationWillTerminate` -> `clearProcessingMarkers`, markers carry the pid), so one left at launch
+  means Distavo died on that file: `setAsideInterrupted` marks it `.failed` with `interruptedReason` and the app
+  notifies; it is never retried at launch. A marker whose pid is alive (another edition on the same data folder)
+  is left alone. `.failed` markers persist until "Process now" clears them.
+- **Long recordings are transcribed in bounded parts (#6759, `LongRecording.swift`):** a work WAV over 90 min is cut
+  at the quietest second near every 30-min boundary (streamed), silent parts are skipped, each part goes through
+  `deps.transcribe`, and the results are stitched (absolute times, speakers renumbered per part by talk time, a footer
+  line via `LongRecording.notesKey`). Finished parts are cached for resume; a network/server error stops the run like
+  a whole-file run, an error about one part's audio leaves that part out and says so. An Ollama transcript over
+  `num_ctx` is summarised in parts and merged (`Pipeline.longTranscriptInput`, also in Regenerate). Shorter recordings
+  take the unchanged whole-file path.
+- **Recording cap (`RecordingDurationCap`):** `recording.max_duration_hours` (default 8, also for configs predating it;
+  0 = off) stops the built-in recorder through the normal stop path, without the speakers question, after a warning
+  10 minutes before; fed monotonic elapsed time.
 - **Too short is not failed:** a recording under `min_recording_seconds` (default 15) gets a `.tooshort` marker
   (never `.failed`) and is never transcribed; the menu offers to move it to the Bin, "Process now" clears the
   marker. Duration comes through the `audioDurationSeconds` seam in `PipelineDeps`.
@@ -205,6 +223,8 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   action items, meeting detection, key-moment hotkey…) decodes to off/empty for a config predating it, and
   `recommendedForThisMac()` leaves them off too unless a comment says otherwise. With them unset `Prompt.build` and the note
   are byte-identical to before (pinned by `PromptTests`/`SummaryTemplateTests`); don't add a prompt line that changes the unset digest.
+  Keys that change a note but are on for FRESH installs only (off on decode; `recommendedForThisMac()` sets them): `summarise.apply_corrections`
+  (applies the note's "Possible transcription corrections" to its body; never rewrites Highlights or facts-ledger quotes), `summarise.neutral_default`, `notes.link_duplicate_calls` (the same call captured twice: no `.call.json`/`.also-captured.json`, no footer line, no sheet copy when off).
 - **Note section order is fixed** (`NoteAssembly`): frontmatter → model body (incl. Highlights) → `## Key moments` → `## Tracked terms` → provenance footer.
   Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
 - **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions
@@ -250,7 +270,7 @@ Recordings, notes, WAVs, and `watcher-config.json` are gitignored — never comm
 
 `swift test` in `apple/DistavoCore`, macOS runner in CI (`.github/workflows/ci.yml`). Tests inject
 fakes through the pipeline's `PipelineDeps` seam and use a WhisperX fixture / `MockURLProtocol` for
-the HTTP clients. `LiveE2ETests` is skipped unless `DISTAVO_LIVE=1` (see `apple/README.md`). CI also
+the HTTP clients. `LiveE2ETests` is skipped unless `DISTAVO_LIVE=1` (see `apple/README.md`). CI (`ci.yml`) and `version-bump.yml` are `workflow_dispatch` only: nothing runs on push, so run the tests locally. A manual CI run also
 regenerates the Xcode project and builds the Direct edition unsigned to catch app-target breakage.
 The suite is ~1100 tests (one file per feature in `Tests/DistavoCoreTests`); anything needing audio, a model, a server or a TCC
 permission is gated behind an env var (`DISTAVO_LIVE`, `DISTAVO_EMBEDDED_LIVE`, `DISTAVO_DETECTOR_LIVE`, `DISTAVO_SUMMARY_LIVE`, …) and skips by default,

@@ -4,7 +4,7 @@ import XCTest
 final class WhisperXClientTests: XCTestCase {
 
     func testTranscribeBuildsRequestAndParsesResult() async throws {
-        let tmpWav = FileManager.default.temporaryDirectory
+        let tmpWav = TestTemp.root
             .appendingPathComponent("distavo-\(UUID().uuidString).wav")
         try Data([0, 1, 2, 3]).write(to: tmpWav)
         defer { try? FileManager.default.removeItem(at: tmpWav) }
@@ -37,7 +37,7 @@ final class WhisperXClientTests: XCTestCase {
     /// language value. It must be mapped to "" instead, same as an already-
     /// empty language value.
     func testAutoLanguageIsSentAsEmptyToWhisperX() async throws {
-        let tmpWav = FileManager.default.temporaryDirectory
+        let tmpWav = TestTemp.root
             .appendingPathComponent("distavo-\(UUID().uuidString).wav")
         try Data([0, 1, 2, 3]).write(to: tmpWav)
         defer { try? FileManager.default.removeItem(at: tmpWav) }

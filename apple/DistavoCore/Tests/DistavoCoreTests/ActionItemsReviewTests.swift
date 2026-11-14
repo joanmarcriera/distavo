@@ -8,7 +8,7 @@ final class ActionItemsReviewTests: XCTestCase {
     private var dir: URL!
 
     override func setUpWithError() throws {
-        dir = FileManager.default.temporaryDirectory.appendingPathComponent("actions-r-\(UUID().uuidString)")
+        dir = TestTemp.root.appendingPathComponent("actions-r-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
     }
     override func tearDownWithError() throws { try? FileManager.default.removeItem(at: dir) }

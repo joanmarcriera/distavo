@@ -95,6 +95,9 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Snap near-miss spellings to the vocabulary after transcription (`FuzzyVocabulary`, Vikunja #3950): the
     /// only way the vocabulary reaches Parakeet, which takes no prompt. Absent in older configs -> false.
     public var fuzzyVocabulary: Bool
+    /// Label speakers from the recorder's stereo channels (left = owner's mic, right = remote) instead of the
+    /// diariser, when both channels carry signal (#6353, `ChannelSpeakerLabeller`). Absent in older configs -> false.
+    public var channelSpeakers: Bool
 
     /// The user's own rules first (they win), then every enabled pack's rules.
     public var effectiveReplacements: [ReplacementRule] {
@@ -105,6 +108,7 @@ public struct TranscribeConfig: Codable, Equatable {
         case vocabulary, replacements
         case replacementPacks = "replacement_packs"
         case fuzzyVocabulary = "fuzzy_vocabulary"
+        case channelSpeakers = "channel_speakers"
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
@@ -116,7 +120,9 @@ public struct TranscribeConfig: Codable, Equatable {
                 language: String = "en", diarize: Bool = true, numSpeakers: Int = 0,
                 preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
                 vocabulary: [String] = [], replacements: [ReplacementRule] = [],
-                replacementPacks: [String] = [], fuzzyVocabulary: Bool = false) {
+                replacementPacks: [String] = [], fuzzyVocabulary: Bool = false,
+                channelSpeakers: Bool = false) {
+        self.channelSpeakers = channelSpeakers
         self.replacementPacks = replacementPacks
         self.fuzzyVocabulary = fuzzyVocabulary
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
@@ -146,6 +152,7 @@ public struct TranscribeConfig: Codable, Equatable {
         replacements = (try? c.decodeIfPresent(LossyList<ReplacementRule>.self, forKey: .replacements))?.elements ?? d.replacements
         replacementPacks = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .replacementPacks))?.elements ?? d.replacementPacks
         fuzzyVocabulary = (try? c.decodeIfPresent(Bool.self, forKey: .fuzzyVocabulary)).flatMap { $0 } ?? d.fuzzyVocabulary
+        channelSpeakers = (try? c.decodeIfPresent(Bool.self, forKey: .channelSpeakers)).flatMap { $0 } ?? d.channelSpeakers
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.
@@ -225,9 +232,25 @@ public struct SummariseConfig: Codable, Equatable {
     /// #2941, see `ActionItemsPrompt`). **false for any config predating the key**
     /// and never turned on by `recommendedForThisMac()`.
     public var actionItems: Bool
+    /// Skip the interview-style summary for recordings that are not meetings (film/TV audio, a solo memo):
+    /// see `MeetingShapeGate` (Vikunja #4015). **false for any config predating the key**, never set by
+    /// `recommendedForThisMac()`.
+    public var nonMeetingGuard: Bool
+    /// Apply the note's own "Possible transcription corrections" to its body (Vikunja #6354). **false for any
+    /// config predating the key** (the list stays advice only); true only for fresh installs via
+    /// `recommendedForThisMac()` (drive review A, 2026-11-09). Never rewrites Highlights or facts-ledger quotes.
+    public var applyCorrections: Bool
+    /// When no summary template applies ("none", unset, or "auto" with nothing to go on) use the neutral
+    /// section list instead of the stock one that carries Opportunity / Role expectations / Compensation
+    /// (Vikunja #6666). **false for any config predating the key** (the prompt stays byte-identical);
+    /// true only for fresh installs via `recommendedForThisMac()`.
+    public var neutralDefault: Bool
 
     enum CodingKeys: String, CodingKey {
+        case neutralDefault = "neutral_default"
+        case nonMeetingGuard = "non_meeting_guard"
         case actionItems = "action_items"
+        case applyCorrections = "apply_corrections"
         case backend, server, local, allowLocalFallback = "allow_local_fallback"
         case embeddedEnabled = "embedded_enabled", embeddedModel = "embedded_model", options
         case promptStyle = "prompt_style"
@@ -246,8 +269,11 @@ public struct SummariseConfig: Codable, Equatable {
                 biggerModel: String? = nil,
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
-                actionItems: Bool = false) {
-        self.actionItems = actionItems
+                actionItems: Bool = false, nonMeetingGuard: Bool = false,
+                applyCorrections: Bool = false, neutralDefault: Bool = false) {
+        self.neutralDefault = neutralDefault
+        self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
+        self.applyCorrections = applyCorrections
         self.backend = backend; self.server = server; self.local = local
         self.allowLocalFallback = allowLocalFallback
         self.embeddedEnabled = embeddedEnabled; self.embeddedModel = embeddedModel
@@ -259,11 +285,17 @@ public struct SummariseConfig: Codable, Equatable {
         self.folderTemplates = folderTemplates
     }
 
+    private struct PartialTarget: Decodable { var url: String?; var model: String? }
+
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = SummariseConfig()
         backend = try c.decodeIfPresent(String.self, forKey: .backend) ?? d.backend
-        server = try c.decodeIfPresent(OllamaTarget.self, forKey: .server) ?? d.server
+        // A server target that names no model gets the server default (gemma4:26b, #3952), not
+        // OllamaTarget's generic llama3.1:8b; a stored `model` is always kept as written.
+        if let partial = try c.decodeIfPresent(PartialTarget.self, forKey: .server) {
+            server = OllamaTarget(url: partial.url ?? d.server.url, model: partial.model ?? d.server.model)
+        } else { server = d.server }
         local = try c.decodeIfPresent(OllamaTarget.self, forKey: .local) ?? d.local
         allowLocalFallback = try c.decodeIfPresent(Bool.self, forKey: .allowLocalFallback) ?? d.allowLocalFallback
         embeddedEnabled = try c.decodeIfPresent(Bool.self, forKey: .embeddedEnabled) ?? d.embeddedEnabled
@@ -282,6 +314,9 @@ public struct SummariseConfig: Codable, Equatable {
         folderTemplates = ((try? c.decodeIfPresent([String: String].self, forKey: .folderTemplates)) ?? nil)
             ?? d.folderTemplates
         actionItems = ((try? c.decodeIfPresent(Bool.self, forKey: .actionItems)) ?? nil) ?? d.actionItems
+        nonMeetingGuard = ((try? c.decodeIfPresent(Bool.self, forKey: .nonMeetingGuard)) ?? nil) ?? d.nonMeetingGuard
+        applyCorrections = ((try? c.decodeIfPresent(Bool.self, forKey: .applyCorrections)) ?? nil) ?? d.applyCorrections
+        neutralDefault = ((try? c.decodeIfPresent(Bool.self, forKey: .neutralDefault)) ?? nil) ?? d.neutralDefault
     }
 }
 
@@ -535,6 +570,12 @@ public struct Config: Codable, Equatable {
         // Fresh installs pick the note template per recording from the participants (#3582), so a
         // stale global template never decides the shape of an unrelated meeting.
         cfg.summarise.template = SummaryTemplateCatalog.autoID
+        // ...and when nothing matches they get neutral sections, not the job-search layout (#6666).
+        cfg.summarise.neutralDefault = true
+        // ...and apply the note's own transcription corrections to its body (#6354); old configs keep them as advice.
+        cfg.summarise.applyCorrections = true
+        // Fresh installs link the same call captured twice (#4014); old configs keep notes untouched.
+        cfg.notes.linkDuplicateCalls = true
         // Fresh installs let the recorder try other microphones when the first is silent (#4039).
         cfg.recording.micAutoSwitch = true
         if embeddedSupported {
@@ -556,6 +597,54 @@ public struct Config: Codable, Equatable {
         }
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(Config.self, from: data)
+    }
+
+    /// Like `load`, but never throws: a config that cannot be read or parsed gives the defaults plus a
+    /// one-line `problem` for the log. The unreadable file is copied to `<name>.broken-<yyyyMMdd-HHmmss>`
+    /// beside it (the app saves the config on the next settings change, which would otherwise destroy the
+    /// only copy of what the user had; an identical earlier copy is reused, so a file that stays broken does
+    /// not pile up one copy per launch). The original is left in place. The error path returns plain
+    /// `Config()`, never `fresh()`: fresh-install defaults (compaction on, embedded backend) must not reach a
+    /// user who already had a config (#4504). A missing file is not a problem:
+    /// it is created with `fresh()`, exactly as `load` does.
+    public static func loadReportingProblems(
+        from url: URL, fileManager: FileManager = .default, now: Date = Date(),
+        fresh: @autoclosure () -> Config = Config()
+    ) -> (config: Config, problem: String?) {
+        do {
+            return (try load(from: url, fileManager: fileManager, fresh: fresh()), nil)
+        } catch {
+            var problem = "cannot read \(url.lastPathComponent) (\(error.localizedDescription)); using defaults"
+            if fileManager.fileExists(atPath: url.path) {
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.dateFormat = "yyyyMMdd-HHmmss"
+                let copy = url.deletingLastPathComponent()
+                    .appendingPathComponent("\(url.lastPathComponent).broken-\(formatter.string(from: now))")
+                do {
+                    if let same = identicalBrokenCopy(of: url, fileManager: fileManager) {
+                        problem += "; the unreadable file was already kept as \(same)"
+                    } else {
+                        try fileManager.copyItem(at: url, to: copy)
+                        problem += "; the unreadable file was kept as \(copy.lastPathComponent)"
+                    }
+                } catch {
+                    problem += "; could not keep a copy of it (\(error.localizedDescription))"
+                }
+            }
+            return (Config(), problem)
+        }
+    }
+
+    /// Name of an existing `<name>.broken-*` beside `url` with the same bytes, if any.
+    private static func identicalBrokenCopy(of url: URL, fileManager: FileManager) -> String? {
+        let dir = url.deletingLastPathComponent()
+        guard let original = try? Data(contentsOf: url),
+              let names = try? fileManager.contentsOfDirectory(atPath: dir.path) else { return nil }
+        return names.sorted().first {
+            $0.hasPrefix(url.lastPathComponent + ".broken-")
+                && (try? Data(contentsOf: dir.appendingPathComponent($0))) == original
+        }
     }
 
     public static func save(_ cfg: Config, to url: URL, fileManager: FileManager = .default) throws {

@@ -33,6 +33,11 @@ final class MeetingCaptureController: ObservableObject {
         case manual
         /// Stopped by the auto-stop option after this many silent minutes.
         case silence(minutes: Int)
+        /// The call app that held the microphone released it (#4007, `CallEndStop`). Behaves like a manual stop.
+        case callEnded
+        /// The recording reached `recording.max_duration_hours` (`RecordingDurationCap`). Nobody may be at the
+        /// Mac, so like a silence stop it never asks the speakers question.
+        case durationCap(hours: Int)
     }
 
     /// The tap TCC category settled in macOS 14.4 — hide the feature below it.
@@ -56,6 +61,11 @@ final class MeetingCaptureController: ObservableObject {
     let keyMoments = KeyMomentsModel()
 
     private var silenceMonitor: SilenceMonitor?
+    /// Call-end stop (#4007): fed once a second only while `CallEndStop.isArmed`; reset per recording.
+    private var callEndPolicy = CallEndStop.policy()
+    /// Longest-recording cap (8 h by default); fed the monotonic elapsed time once a second, reset per recording.
+    private var durationCap = RecordingDurationCap()
+    private var capStartUptime: TimeInterval = 0
     private var recorder: Any?  // MeetingRecorder (stored as Any: availability)
     private var timer: Timer?
     private var startedAt: Date?
@@ -70,6 +80,8 @@ final class MeetingCaptureController: ObservableObject {
     /// Name of the input being recorded, shown in the menu while recording (#4039).
     @Published private(set) var liveInputName: String?
     private static let preflightKey = "distavo.didExplainCapture"
+    /// UserDefaults: last stop-sheet template per recordings subfolder (#6667).
+    private static let templatePicksKey = "stopSheet.templatePicks"
     /// How long to wait before telling the user the meeting side is silent
     /// (Vikunja #2060). Long enough to join a call and hear someone speak.
     static let silentSystemAudioWarningSeconds = 20
@@ -217,6 +229,7 @@ final class MeetingCaptureController: ObservableObject {
         guard #available(macOS 14.4, *) else { return }
 
         let recorder = MeetingRecorder()
+        recorder.storageFormat = configProvider().recording.storageFormat   // #6670
         do {
             // Creating the tap fires the System Audio Recording prompt on
             // first use (macOS shows a purple indicator while recording).
@@ -263,6 +276,9 @@ final class MeetingCaptureController: ObservableObject {
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
+        callEndPolicy = CallEndStop.policy()
+        durationCap = RecordingDurationCap(hours: configProvider().recording.maxDurationHours)
+        capStartUptime = ProcessInfo.processInfo.systemUptime
         log("Meeting recording started → \(recorder.fileURL?.lastPathComponent ?? "?")")
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             // A Timer fires from the main run loop, so run the tick in place
@@ -311,12 +327,14 @@ final class MeetingCaptureController: ObservableObject {
         liveInputName = nil
         var silenceMinutes: Int?
         if case .silence(let m) = reason { silenceMinutes = m }
+        var capHours: Int?
+        if case .durationCap(let h) = reason { capHours = h }
         let config = configProvider()
         // An automatic silence stop never asks: nobody is at the Mac, and the
         // blocking dialog would sit there (freezing other main-thread work)
         // while the recording waited, untranscribed. It behaves exactly like
         // answering Skip: no speakers sidecar, no language override.
-        let ask = config.askSpeakersOnStop && silenceMinutes == nil
+        let ask = config.askSpeakersOnStop && silenceMinutes == nil && capHours == nil
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
         let recStart = recorder.startedAt ?? startedAt ?? Date()
@@ -333,13 +351,13 @@ final class MeetingCaptureController: ObservableObject {
         guard let outcome else { return }
         guard wantsCalendar else {
             finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                       ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
+                       capHours: capHours, ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
             return
         }
         Task { @MainActor [weak self] in
             let match = await CalendarRecordingStep.lookup(start: recStart, config: config)
             self?.finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                             ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
+                             capHours: capHours, ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
         }
     }
 
@@ -347,7 +365,7 @@ final class MeetingCaptureController: ObservableObject {
     /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup.
     @available(macOS 14.4, *)
     private func finishStop(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, config: Config,
-                            silenceMinutes: Int?, ask: Bool, recStart: Date,
+                            silenceMinutes: Int?, capHours: Int? = nil, ask: Bool, recStart: Date,
                             calendarMatch: CalendarMatch?, heldForCalendar: Bool) {
         // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
         var savedURL = outcome.url
@@ -371,7 +389,18 @@ final class MeetingCaptureController: ObservableObject {
             notify(PermissionNudgePolicy.title(kind), PermissionNudgePolicy.body(kind))
             log("Warning: recording contained no system audio (permission denied or nothing was playing)")
         }
-        if !outcome.systemAudioHeard && ask {
+        if let capHours {
+            // The cap message wins: it is the one thing the user must know (the meeting may still be going).
+            let text = RecordingDurationCap.stoppedText(hours: capHours, fileName: savedURL.lastPathComponent)
+            notify(text.title, text.body)
+            log("Recording stopped automatically at the \(capHours)-hour limit")
+            // What the take is missing still has to be said (review of 92c1091).
+            if !outcome.systemAudioHeard { noSystemAudioNotice() }
+            else if !outcome.microphoneHeard {
+                notify("The microphone was silent in that recording",
+                       "Check the Microphone permission in System Settings → Privacy & Security, and your input device.")
+            }
+        } else if !outcome.systemAudioHeard && ask {
             // decided after the question below
         } else if !outcome.systemAudioHeard {
             noSystemAudioNotice()
@@ -443,6 +472,47 @@ final class MeetingCaptureController: ObservableObject {
         elapsedLabel = String(format: "%d:%02d", seconds / 60, seconds % 60)
         warnIfSystemAudioSilent(after: seconds)
         checkSilence()
+        checkCallEnded(at: ProcessInfo.processInfo.systemUptime)   // monotonic, like the silence monitor
+        checkDurationCap(at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    /// Once a second: the longest-recording cap (`RecordingDurationCap`, 8 h by default). The limit follows
+    /// Settings live; the elapsed time is monotonic, so a clock change never stops or extends a take.
+    private func checkDurationCap(at now: TimeInterval) {
+        guard isRecording else { return }
+        durationCap.hours = configProvider().recording.maxDurationHours
+        switch durationCap.observe(elapsed: now - capStartUptime) {
+        case .none: break
+        case .warn(let minutesLeft):
+            let text = RecordingDurationCap.warningText(minutesLeft: minutesLeft, hours: durationCap.hours)
+            log("Recording reaches the \(durationCap.hours)-hour limit in \(minutesLeft) min")
+            notify(text.title, text.body)
+        case .stop(let hours):
+            log("Recording reached the \(hours)-hour limit - stopping it")
+            stop(reason: .durationCap(hours: hours))
+        }
+    }
+
+    /// Once a second, only with meeting detection and `stop_when_call_ends` on (#4007): stop 60 s after the
+    /// call app that was holding the microphone released it. The decision is `MeetingEndPolicy` (pure, in
+    /// DistavoCore); this reads which processes capture the mic (read-only Core Audio metadata, Distavo
+    /// excluded) and stops. A call never seen, or an unreadable capture state, never stops anything.
+    private func checkCallEnded(at now: TimeInterval) {
+        let detection = configProvider().meetingDetection
+        guard isRecording else { return }
+        guard CallEndStop.isArmed(detection) else {
+            // Disarmed (switched off in Settings): forget what was seen, so switching it back on later in the
+            // same recording cannot stop at once on a stale release time (review of p).
+            callEndPolicy = CallEndStop.policy()
+            return
+        }
+        let signal = CallEndStop.callActive(capturing: MeetingDetectionController.capturingBundleIDs(),
+                                            config: detection)
+        guard callEndPolicy.observe(now: now, callActive: signal) == .stop else { return }
+        log("The call released the microphone 60 s ago - stopping the recording")
+        stop(reason: .callEnded)
+        // Only once the stop really happened (a bail-out in stop() must not notify every second).
+        if !isRecording { notify("Recording stopped", "The call ended, so Distavo stopped the recording.") }
     }
 
     /// Once a second: refresh the policy from Settings (changes apply live),
@@ -466,9 +536,17 @@ final class MeetingCaptureController: ObservableObject {
 
         if micLevelCheck.ingest(mic: levels.mic, system: levels.system) {
             log("Warning: microphone silent for the first \(micLevelCheck.window) s while the call is audible")
+            // Say WHY when we can tell (permission / which input), per MicDiagnosis (#3930).
+            let permission: MicDiagnosis.Permission
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized: permission = .granted
+            case .notDetermined: permission = .undetermined
+            case .restricted: permission = .restricted
+            default: permission = .denied
+            }
+            let diagnosis = MicDiagnosis.diagnose(permission: permission, inputName: liveInputName, inputMuted: false)
             notify("Your microphone is silent",
-                   "The other side is coming through, but nothing is reaching the microphone. "
-                   + "Check it is not muted, the right input is selected, and Distavo has microphone access.")
+                   "The other side is coming through, but nothing is reaching the microphone. " + diagnosis.message)
         }
 
         if applyMicFallback(levels: levels, recorder: recorder) { return }   // take ended
@@ -646,18 +724,17 @@ final class MeetingCaptureController: ObservableObject {
         let noteLanguageTarget = LanguagePickerActionTarget { userChangedNoteLanguage = true }
         noteLanguagePopup.target = noteLanguageTarget
         noteLanguagePopup.action = #selector(LanguagePickerActionTarget.picked)
-        // Per-recording summary template (Vikunja #2940). Index 0 = no override (the
-        // folder rule / Settings value applies). Only a click saves anything.
-        var templateChoices: [(title: String, value: String?)] =
-            [(SettingsDefaults.templateLabel(config), nil), ("Auto (from the participants)", SummaryTemplateCatalog.autoID),
-             ("No template", SummaryTemplateCatalog.noneID)]
-            + SummaryTemplateCatalog.bundledTemplates.map { ($0.name, Optional($0.id)) }
-        if SummaryTemplateCatalog.customTemplate(config: config) != nil {
-            templateChoices.append(("Custom", SummaryTemplateCatalog.customID))
-        }
+        // Per-recording summary template (Vikunja #2940, #6667). Auto is the first row and is preselected
+        // unless the owner picked something for this folder before or a folder rule names a template; a stale
+        // global Settings template is never preselected (`StopSheetTemplate`). The "Default from Settings" row
+        // is still there, second.
+        let templateFolder = SummaryTemplateCatalog.folder(of: url, in: folderProvider())
+        let templateChoices = StopSheetTemplate.choices(config: config, folder: templateFolder)
+        let templatePicks = UserDefaults.standard.dictionary(forKey: Self.templatePicksKey) as? [String: String] ?? [:]
         let templatePopup = NSPopUpButton(frame: .zero, pullsDown: false)
         for choice in templateChoices { templatePopup.addItem(withTitle: choice.title) }
-        templatePopup.selectItem(at: 0)
+        templatePopup.selectItem(at: StopSheetTemplate.preselectedIndex(
+            config: config, folder: templateFolder, lastPicks: templatePicks))
         var userChangedTemplate = false
         let templateTarget = LanguagePickerActionTarget { userChangedTemplate = true }
         templatePopup.target = templateTarget
@@ -771,7 +848,7 @@ final class MeetingCaptureController: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = myRole
         // NSControl.target is weak: keep both popup targets alive for the modal run.
-        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget)) { alert.runModal() }
+        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget, recentTarget)) { alert.runModal() }
         let inPerson = inPersonBox.state == .on
         guard response == .alertFirstButtonReturn else { return false }
 
@@ -787,8 +864,15 @@ final class MeetingCaptureController: ObservableObject {
         let spokenCode = userChangedLanguage ? selectedCode : ""
         let noteChoice = userChangedNoteLanguage
             ? noteChoices[max(0, noteLanguagePopup.indexOfSelectedItem)].value : nil
-        let templateChoice = userChangedTemplate
-            ? templateChoices[max(0, templatePopup.indexOfSelectedItem)].value : nil
+        // The preselected row counts as a choice (#6667): an untouched sheet saves Auto, not the Settings value.
+        let templateChoice = StopSheetTemplate.valueToSave(
+            choices: templateChoices, selectedIndex: templatePopup.indexOfSelectedItem)
+        // Only a pick the owner clicked is remembered (never the untouched preselection).
+        if userChangedTemplate {
+            UserDefaults.standard.set(
+                StopSheetTemplate.remembering(templateChoice, folder: templateFolder, in: templatePicks),
+                forKey: Self.templatePicksKey)
+        }
         // One sidecar carries the spoken language, the note language and the summary
         // template (#2940); any may be absent. Nothing clicked = no file, as before.
         if !spokenCode.isEmpty || noteChoice != nil || templateChoice != nil {

@@ -20,7 +20,7 @@ final class TranscriptTimelineTests: XCTestCase {
     }
 
     private func tmp() throws -> URL {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-tl-\(UUID().uuidString)")
+        let d = TestTemp.root.appendingPathComponent("distavo-tl-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }

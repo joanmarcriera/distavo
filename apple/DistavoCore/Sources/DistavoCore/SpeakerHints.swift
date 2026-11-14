@@ -39,7 +39,18 @@ public struct SpeakerHints: Codable, Equatable {
         for raw in text.split(whereSeparator: { $0 == "," || $0 == ";" || $0 == "\n" }) {
             var piece = String(raw)
             if let open = piece.firstIndex(of: "("), let close = piece[open...].firstIndex(of: ")") {
-                terms.append(String(piece[piece.index(after: open)..<close]))
+                // "(accountant for Example Ltd)", "(CEO of Acme)", "(accountant at X)": a role is not a name, only
+                // the organisation after the joining word is. Only split when what precedes it is a role, so
+                // "Centre for Computational Biology" and "Bank of England" stay whole.
+                var inner = String(piece[piece.index(after: open)..<close])
+                for joiner in [" for ", " of ", " at "] {
+                    if let r = inner.range(of: joiner, options: .caseInsensitive),
+                       Self.isRole(String(inner[..<r.lowerBound])) {
+                        inner = String(inner[r.upperBound...])
+                        break
+                    }
+                }
+                if !inner.trimmingCharacters(in: .whitespaces).isEmpty, !Self.isRole(inner) { terms.append(inner) }
                 piece.removeSubrange(open...close)
             }
             for sep in [" \u{2014} ", " \u{2013} ", " - ", " for "] {
@@ -50,6 +61,13 @@ public struct SpeakerHints: Codable, Equatable {
         return Vocabulary.normalisedTerms(terms).filter {
             $0.count >= 2 && $0.split(separator: " ").count <= 4 && $0.lowercased() != "me"
         }
+    }
+
+    /// A role description ("accountant", "the CFO", "CEO"): a pack trigger word or a phrase opening with a role word.
+    private static func isRole(_ text: String) -> Bool {
+        if RoleTermPacks.isRoleWord(text) { return true }
+        let first = text.trimmingCharacters(in: .whitespaces).split(separator: " ").first.map { $0.lowercased() } ?? ""
+        return roleWords.contains(first)
     }
 
     /// True when there is nothing worth passing on.
@@ -120,6 +138,16 @@ public struct SpeakerHints: Codable, Equatable {
             return !roleWords.contains(first.lowercased())
         }
         return people.isEmpty ? nil : people.count + 1
+    }
+
+    /// The speaker count to give the diarizer (Vikunja #3953). The owner's explicit count wins. Without
+    /// one, a participants list naming more people than the configured count raises it, because forcing
+    /// 2 on a 3-person call merges two voices into one turn; it never lowers a configured count, and
+    /// 0 (auto) stays auto. Result 0 = auto.
+    public static func reconciledCount(hintCount: Int?, participants: String?, configured: Int) -> Int {
+        if let c = hintCount, c > 0 { return c }
+        if configured > 0, let listed = suggestedCount(participants), listed > configured { return listed }
+        return configured
     }
 
     /// Lowercased first names (first word of each listed person) in a participants text, or [] when none.

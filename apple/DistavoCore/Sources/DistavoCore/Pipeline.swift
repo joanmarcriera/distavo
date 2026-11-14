@@ -68,6 +68,8 @@ public struct ProcessResult: Equatable {
     /// transcribed in" for `EmbeddedModelCatalog.nextBigger` without
     /// re-deriving it from `detectedLanguages`' display string (Vikunja #2205).
     public var dominantLanguageCode: String?
+    /// Seconds per phase of a finished file (convert, transcribe, summarise); nil on every other outcome (#4018).
+    public var timings: PhaseTimings?
 
     public init(status: ProcessStatus, base: String, message: String,
                 notePath: URL? = nil, transcriptPath: URL? = nil,
@@ -197,6 +199,9 @@ public struct PipelineDeps {
     /// The container's embedded creation date (when the recording ENDED, usually UTC), for dating a
     /// dropped file's note when its name carries no stamp (Vikunja #4018). Defaults to AVAsset metadata.
     public var containerCreationDate: (URL) async -> Date?
+    /// The source's left/right samples for `transcribe.channel_speakers` (#6353); nil when it is not stereo or
+    /// unreadable. Only consulted when that flag is on.
+    public var stereoChannels: (URL) async -> StereoChannels?
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -207,9 +212,11 @@ public struct PipelineDeps {
         embeddedReadiness: @escaping (String) async -> EmbeddedReadiness = { _ in .ready },
         audioDurationSeconds: @escaping (URL) async -> Double? = { AudioConverter.durationSeconds(of: $0) },
         calendarLookup: ((Date, Date) async -> [CalendarCandidate])? = nil,
-        recordingStart: @escaping (URL) async -> Date? = { await Pipeline.recordingStartEvidence($0) },
-        containerCreationDate: @escaping (URL) async -> Date? = { await Pipeline.containerCreation($0) }
+        recordingStart: @escaping (URL) async -> Date? = { Pipeline.recordingStartEvidenceSync($0) },
+        containerCreationDate: @escaping (URL) async -> Date? = { Pipeline.creationDateMetadataSync($0) },
+        stereoChannels: @escaping (URL) async -> StereoChannels? = { StereoChannels.read(from: $0) }
     ) {
+        self.stereoChannels = stereoChannels
         self.containerCreationDate = containerCreationDate
         self.calendarLookup = calendarLookup
         self.recordingStart = recordingStart
@@ -397,15 +404,52 @@ public enum Pipeline {
         // Calendar event for this recording (#2946); nil when off / no match.
         let calendarMatch = await CalendarLookup.resolve(
             path: path, sourceBase: sourceBase, workDir: workDir, config: config, deps: deps)
+        // Same call captured twice (#4014): note a time record for this recording, link a twin already seen
+        // and reuse its sheet when this one has none. Needs trustworthy time evidence; nil means no record.
+        // Only when `notes.link_duplicate_calls` is on (off for configs that predate it): off writes no sidecar,
+        // no footer line and copies no sheet.
+        var alsoCaptured: AlsoCaptured?
+        if variant == nil, config.notes.linkDuplicateCalls {
+            // One await per statement: two awaited dependency closures in one condition list aborted the test
+            // process on the macOS 26 runtime ("freed pointer was not the last allocation", CI 2026-11-14).
+            let time = await deps.recordingStart(path)
+            let seconds = time == nil ? nil : await deps.audioDurationSeconds(path)
+            if let time, let seconds, seconds > 0 {
+                alsoCaptured = DuplicateCallLink.register(
+                    CallRecord(base: sourceBase, time: time, durationSeconds: seconds,
+                               isLiveCapture: exactRecorderNameDate(path) != nil), workDir: workDir)
+            }
+        }
         let hints = SpeakerHints.load(workDir: workDir, base: sourceBase, source: path)
         var transcribeConfig = variant?.transcribe ?? config.transcribe
-        if let count = hints?.count, count > 0 { transcribeConfig.numSpeakers = count }
+        transcribeConfig.numSpeakers = SpeakerHints.reconciledCount(
+            hintCount: hints?.count, participants: hints?.participants, configured: transcribeConfig.numSpeakers)
         // This meeting's own terms come first, then the global vocabulary (#3584); the enabled replacement
         // packs follow the user's own rules.
         // Names from the participants line are seeded too (#3950).
+        // Then the role packs of the participants line (accountant -> UK tax terms, RoleTermPacks).
+        // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
+        // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
+        // The owner's own name (full and first, #6772): a misheard "Marc" must not become a second person. It always
+        // feeds the summary glossary and the fuzzy post-pass, but joins the TRANSCRIBER vocabulary only when that
+        // already has terms: a vocabulary prompt triggers #3579 (BSC Catalan chunks collapse), so the owner never
+        // creates one. Unset owner adds nothing.
         let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
-        if !meetingTerms.isEmpty {
-            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
+        // English packs only for an English or unpinned meeting (drive review C): never into a Catalan vocabulary prompt.
+        let roleTerms = hints?.roleTerms(
+            configuredLanguage: transcribeConfig.language,
+            override: LanguageOverride.load(workDir: workDir, base: LanguageOverride.sourceBase(from: sourceBase))) ?? []
+        let ownerTerms = OwnerIdentity.terms(noteOwner: config.noteOwner)
+        let transcriberHasTerms = !Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary).isEmpty
+        let transcriberTerms = meetingTerms + (transcriberHasTerms ? ownerTerms : [])
+        if !transcriberTerms.isEmpty {
+            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcriberTerms + transcribeConfig.vocabulary)
+        }
+        let fuzzyTerms = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + ownerTerms)
+        var summaryGlossary = fuzzyTerms   // what the summary prompt's spelling aid lists
+        if !roleTerms.isEmpty {
+            transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + roleTerms)
+            summaryGlossary = Vocabulary.normalisedTerms(summaryGlossary + roleTerms)
         }
         transcribeConfig.replacements = transcribeConfig.effectiveReplacements
         // Participants stay exactly what the owner stated; unconfirmed calendar names ride in their own block.
@@ -418,6 +462,16 @@ public enum Pipeline {
             try? FileManager.default.removeItem(at: TranscriptSegments.url(workDir: workDir, base: base))
             TranscriptEditStore.removeOriginals(workDir: workDir, base: base)   // #2951: edits belonged to the old transcript
             let wavPath = workDir.appendingPathComponent("\(base).wav")
+            var timings = PhaseTimings()   // #4018: one line per file saying where the time went
+            var phaseStart = Date()
+            func lap(_ name: String) { timings.add(name, seconds: Date().timeIntervalSince(phaseStart)); phaseStart = Date() }
+            func withTimings(_ r: ProcessResult) -> ProcessResult {
+                // Every `.done` exit comes through here: the long-recording part caches (#6759) have served.
+                if r.status == .done { LongRecording.removeCaches(workDir: workDir, base: base) }
+                lap("summarise+note")
+                print("[Distavo] " + timings.logLine)
+                var r = r; r.timings = timings; return r
+            }
             deps.onPhase?(.converting)
 
             // A prior attempt (e.g. one that later hit a RetryableDependencyError
@@ -427,7 +481,40 @@ public enum Pipeline {
             // than the source recording, so an edited/re-recorded file still
             // gets a fresh conversion.
             if !wavIsFresh(wavPath: wavPath, sourcePath: path) {
-                try await deps.convertToWav(path, wavPath)
+                do { try await deps.convertToWav(path, wavPath); state.clearTransientConvertFailures(base) } catch {
+                    // #5283: the same conversion failure twice is terminal, not a retry per launch.
+                    // Drive d (#1793): a transient one (never a cancellation) is terminal after a run of five.
+                    let size = (try? FileManager.default.attributesOfItem(atPath: path.path)[.size] as? Int) ?? nil
+                    let message = cleanMessage(error)
+                    // A half-written WAV is newer than the source: `wavIsFresh` would trust it on the retry and
+                    // transcribe truncated audio (and no second failure would ever be counted).
+                    try? FileManager.default.removeItem(at: wavPath)
+                    let terminal: Bool
+                    if error is CancellationError || Self.isMachineLevelConvertFailure(error) {
+                        // Cancelled, or the machine's problem (disk full, permission): never the file's fault, so it
+                        // is never counted towards a terminal state however often it recurs.
+                        terminal = false
+                    } else if Self.isTransientConvertFailure(error) {
+                        terminal = state.recordTransientConvertFailure(base, message: message, fileSize: size)
+                    } else {
+                        terminal = state.recordConvertFailure(base, message: message, fileSize: size)
+                    }
+                    if terminal {
+                        // #5477: the unreadable list is the single home of a terminal file. A `.failed` marker too
+                        // would show it in both menu lists, and "Retry failed" would clear only that one.
+                        state.clearProcessing(base); state.clearDeferred(base)
+                        return ProcessResult(status: .failed, base: base,
+                                             message: message + " (not retried again; Move to Bin or replace the file)")
+                    }
+                    // Retryable (the machine's problem, or transient under the cap): DEFER with backoff so the scan
+                    // retries it. A `.failed` marker is only cleared by the user's Retry, so a full disk or an
+                    // offline volume used to leave the file failed for good (h-chain review 2026-11-09).
+                    if !(error is CancellationError),
+                       Self.isMachineLevelConvertFailure(error) || Self.isTransientConvertFailure(error) {
+                        throw RetryableDependencyError(message + " - will retry")
+                    }
+                    throw error
+                }
             }
             // Second chance for the length check: containers AVFoundation
             // could not measure directly (video files) are measurable now.
@@ -435,13 +522,35 @@ public enum Pipeline {
                 return setAsideTooShort(state: state, base: base, source: path, seconds: seconds, minimum: minSeconds)
             }
 
+            lap("convert")
             deps.onPhase?(.transcribing)
-            let result = try await deps.transcribe(wavPath, transcribeConfig)
+            // #6759: a long recording goes to the engine in bounded parts (memory and CoreML buffers grew with the
+            // length of the file; 4 h 21 min aborted the app), then the parts are stitched back together.
+            let longParts = LongRecording.plan(wav: wavPath)
+            var result = longParts.isEmpty
+                ? try await deps.transcribe(wavPath, transcribeConfig)
+                : try await LongRecording.transcribe(wav: wavPath, parts: longParts, base: base, workDir: workDir,
+                                                     config: transcribeConfig, transcribe: deps.transcribe)
+            lap("transcribe")
+            var channelLabelled = false   // owner is SPEAKER_00 by construction (ChannelSpeakerLabeller)
+            var stereoNeeded = false      // a stereo original that a reprocess would read again
+            // #6353: speakers from the stereo channels when the flag is on and both sides carry signal; any
+            // other case (mono source, a silent channel, no word timings) keeps the engine's own labels.
+            // Two sides cannot describe a call of three or more people (the remote side is several voices): then the
+            // diariser's labels stay. Auto (0) counts the people the participants sheet names.
+            let expectedPeople = max(transcribeConfig.numSpeakers, SpeakerHints.suggestedCount(hints?.participants) ?? 0)
+            if transcribeConfig.channelSpeakers, expectedPeople <= 2, let ch = await deps.stereoChannels(path) {
+                stereoNeeded = true
+                if let relabelled = ChannelSpeakerLabeller.relabel(result: result, channels: ch) {
+                    result = relabelled
+                    channelLabelled = true
+                }
+            }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
-            if transcribeConfig.fuzzyVocabulary, !transcribeConfig.vocabulary.isEmpty {
+            if transcribeConfig.fuzzyVocabulary, !fuzzyTerms.isEmpty {
                 let text = TranscriptCleaner.segments(from: result).map(\.text).joined(separator: " ")
-                transcribeConfig.replacements += FuzzyVocabulary.rules(terms: transcribeConfig.vocabulary, text: text)
+                transcribeConfig.replacements += FuzzyVocabulary.rules(terms: fuzzyTerms, text: text)
             }
             let detectedLanguages = detectedLanguages(from: result)
             // Computed unconditionally (unlike `noteLanguage` below, which
@@ -457,6 +566,7 @@ public enum Pipeline {
             let clean = guarded.text
             GuardReport.store(guarded.flagged, workDir: workDir, base: base)
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                LongRecording.removeCaches(workDir: workDir, base: base)   // nothing in them worth resuming
                 state.markFailed(base, "empty transcript")
                 return ProcessResult(status: .failed, base: base, message: "empty transcript")
             }
@@ -468,7 +578,8 @@ public enum Pipeline {
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.
-            TranscriptMeta.store(dominant: dominantCode, workDir: workDir, base: base)
+            TranscriptMeta.store(dominant: dominantCode, ownerSpeaker: channelLabelled ? "SPEAKER_00" : nil,
+                                 workDir: workDir, base: base)
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
             var timedForNote: TranscriptSegments?   // tracked terms / duration (#2954)
@@ -501,16 +612,29 @@ public enum Pipeline {
                 sidecarID: LanguageOverride.load(
                     workDir: workDir, base: LanguageOverride.sourceBase(from: base))?.template,
                 participants: participants, transcript: clean)
-            let noteDate: Date?
-            if let calendarStart = calendarMatch?.recordingStart { noteDate = calendarStart }
-            else { noteDate = await noteStart(for: path, deps: deps) }
+            // The template actually used, by name, so the log answers "why is this note shaped like that" (#6667).
+            print("[Distavo] " + StopSheetTemplate.logLine(
+                base: base, template: resolvedTemplate.template, autoNote: resolvedTemplate.note))
+            // A plain var, not a `let` initialised in an if/else with an await in one branch: that shape aborted the
+            // test process on the macOS 26 runtime with Xcode 26.4-26.6 ("freed pointer was not the last allocation").
+            var noteDate = calendarMatch?.recordingStart
+            if noteDate == nil { noteDate = Pipeline.noteStartFromName(path) }
+            if noteDate == nil {
+                // The awaits stay in processOne (see `noteStart(for:created:duration:)`).
+                let created = await deps.containerCreationDate(path)
+                let duration = created == nil ? nil : await deps.audioDurationSeconds(path)
+                noteDate = Pipeline.noteStart(for: path, created: created, duration: duration)
+            }
             var context = NoteContext(
-                noteOwner: config.noteOwner, userSpeaker: config.userSpeaker,
+                noteOwner: config.noteOwner,
+                // Channel labels put the owner (left, microphone) on SPEAKER_00 whatever label the owner typed
+                // for the diariser's numbering.
+                userSpeaker: channelLabelled ? "SPEAKER_00" : OwnerSpeakerLabel.effective(configured: config.userSpeaker, transcript: clean),   // #3857
                 participants: participants, meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
-                customInstruction: NoteMeta.mergedInstruction(nil, notes: config.notes),
-                glossary: transcribeConfig.vocabulary,
+                customInstruction: OwnerIdentity.merged(nil, noteOwner: config.noteOwner, notes: config.notes),   // #6772 owner rule + #2954
+                glossary: summaryGlossary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.
                 template: ActionItemsPrompt.effectiveTemplate(resolvedTemplate.template,
@@ -518,6 +642,39 @@ public enum Pipeline {
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            // #6759: "transcribed in N parts" and any part that is missing, whatever engine ran.
+            context.summaryNotes += (result[LongRecording.notesKey] as? [String]) ?? []
+            // Key moments (#2950) are the owner's own live markers: they belong in every note, also the
+            // transcript-only one below.
+            let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
+                segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
+            // #4015 (opt-in): film/TV audio or a solo memo is not a meeting. Not-a-meeting gets a short transcript-only
+            // note; one voice gets the memo template. A participants sheet always means "meeting".
+            if config.summarise.nonMeetingGuard {
+                let sheet = !(participants ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                switch MeetingShapeGate.assess(segments: TranscriptCleaner.segments(from: result), hasParticipantsSheet: sheet) {
+                case .meeting: break
+                case .soloMemo:
+                    context.template = ActionItemsPrompt.effectiveTemplate(
+                        MeetingShapeGate.memoTemplate, style: config.summarise.promptStyle,
+                        enabled: config.summarise.actionItems)
+                case .notAMeeting(let reason):
+                    let note = composeNote(
+                        body: Self.keepingLiveCapture(
+                            MeetingShapeGate.notAMeetingNote(reason: reason, transcript: clean),
+                            scratchpad: context.scratchpad, keyMoments: keyMoments),
+                        footer: "", meta: nil,
+                        config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
+                        cleanTranscript: clean, dominantCode: dominantCode,
+                        existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                    try note.write(to: notePath, atomically: true, encoding: .utf8)
+                    state.markDone(base)
+                    return withTimings(ProcessResult(status: .done, base: base,
+                                         message: "note written (transcript only: does not look like a meeting: \(reason))",
+                                         notePath: notePath, transcriptPath: transcriptPath,
+                                         detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
+                }
+            }
             // #4013: a recording that stops mid-conversation is flagged, not summarised as complete.
             if let timed = timedForNote, let audio = await deps.audioDurationSeconds(path),
                TruncationCheck.isTruncated(segments: timed.segments, audioSeconds: audio) {
@@ -525,8 +682,6 @@ public enum Pipeline {
                 context.summaryNotes.append(TruncationCheck.banner)
                 print("[Distavo] " + TruncationCheck.logLine(lastSegmentEnd: timed.segments.last?.end ?? 0, audioSeconds: audio))
             }
-            let keyMoments = RecordingBookmarks.load(workDir: workDir, base: sourceBase)?.noteSection(
-                segments: TranscriptSegments.load(workDir: workDir, base: base)) ?? ""   // #2950
             // One summarise attempt: run the model, strip a leaked
             // facts-first working preamble (Vikunja #2203), append the
             // footer, and validate.
@@ -534,8 +689,9 @@ public enum Pipeline {
             var noteBody = "", noteFooter = ""
             var languageRetried = false             // #3585: the one retry for a note in the wrong language
             var summaryOptions = config.summarise.options   // #4011: stiffened for the one retry after a repetition collapse
+            var summariseInput: String?             // #4011: the merged part notes on the chunked third attempt
             func summariseAttempt() async throws -> (text: String, failures: [String]) {
-                let raw = try await deps.summarise(clean, target, summaryOptions, context)
+                let raw = try await deps.summarise(summariseInput ?? clean, target, summaryOptions, context)
                 // A rare edge case (the ledger only existed in the discarded
                 // preamble): print rather than writing to the real
                 // ActivityLog file, so a unit test exercising it never
@@ -551,7 +707,8 @@ public enum Pipeline {
                 // Typed scratchpad lines (#2949) reach the note even if the model ignored them.
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 // Post-summary checks shared with regenerate (1.19): may rewrite the text and add footer notes.
-                var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context,
+                                                applyCorrections: config.summarise.applyCorrections)
                 cleaned = checked.text
                 // A retry that still came back in the wrong language says so in the footer (#3585).
                 if languageRetried, let requested = context.noteLanguage,
@@ -562,12 +719,30 @@ public enum Pipeline {
                 // Note order (see `NoteAssembly`): frontmatter, body with Highlights, Key moments,
                 // Tracked terms, provenance footer. `noteBody` is the body INCLUDING Key moments.
                 let footer = NoteFooterLines.footer(
-                    provenance: provenanceFooter(from: result), summaryNotes: checked.notes)
+                    provenance: provenanceFooter(from: result),
+                    summaryNotes: checked.notes + (alsoCaptured.map {
+                        [DuplicateCallDetector.alsoCapturedLine(otherBase: $0.otherBase, isPrimary: $0.isPrimary)]
+                    } ?? []))
                 let withMoments = RecordingBookmarks.appending(keyMoments, to: cleaned)
                 (noteBody, noteFooter) = (withMoments, footer)
                 return (withMoments + footer, checked.failures + SummaryValidator.validate(cleaned + footer))
             }
 
+            // Part notes for `parts`, merged into one input for the final pass; nil when no part produced a usable
+            // note. A part that fails or is rejected is left out (logged); a retryable error or a cancel stops all.
+            func summariseInParts(_ parts: [String]) async throws -> String? {
+                try await Pipeline.summariseInParts(parts, target: target, options: summaryOptions, context: context,
+                                                    summarise: deps.summarise)
+            }
+
+            // #6759: a transcript longer than the Ollama context window is summarised part by part and the part
+            // notes merged; sent whole, Ollama silently drops the start of the prompt. The on-device engines plan
+            // their own chunks (`SummaryGenerator`), so only the Ollama target is checked.
+            if let long = try await Pipeline.longTranscriptInput(clean, target: target, options: summaryOptions,
+                                                                 context: context, summarise: deps.summarise) {
+                summariseInput = long.input
+                context.summaryNotes.append(Pipeline.partedSummaryNote(parts: long.parts))
+            }
             var (noteText, failures) = try await summariseAttempt()
             // A truncated/empty response gets one retry with the same
             // prompt — Ollama occasionally cuts a response short with no
@@ -587,24 +762,45 @@ public enum Pipeline {
                 (noteText, failures) = try await summariseAttempt()
                 collapsed = failures.contains { $0.contains("repetition collapse") }
             }
+            // A long take that still loops is summarised part by part, then the part notes are merged (#4011):
+            // each part is short enough that the model has no room to loop on one quote.
+            if collapsed {
+                let parts = Pipeline.collapseParts(of: clean)
+                if parts.count >= 2 {
+                    if let merged = try await summariseInParts(parts) {
+                        // Kept set through the language check below; every path that still fails returns the fallback.
+                        summariseInput = merged
+                        do {
+                            (noteText, failures) = try await summariseAttempt()
+                        } catch is CancellationError { throw CancellationError()
+                        } catch let retry as RetryableDependencyError { throw retry
+                        } catch { failures = ["merge of part notes failed: \(error.localizedDescription)"] }
+                        // Any failure of the merge keeps the transcript-only note, never a stuck `.failed`.
+                        collapsed = !failures.isEmpty
+                    }
+                }
+            }
             // Still looping: keep the work. A transcript-only note that says why beats no note and a stuck
             // `.failed` marker; Regenerate can fill the summary in later. The rejected text stays quarantined.
             if collapsed {
                 let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
-                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                let saveError = Pipeline.quarantine(noteText, at: quarantine, workDir: workDir)
                 let reason = failures.joined(separator: "; ")
                 let fallback = composeNote(
-                    body: Pipeline.transcriptOnlyNote(reason: reason, transcript: clean), footer: "", meta: nil,
+                    body: Self.keepingLiveCapture(   // Quick Notes and Key moments survive a rejected summary too
+                        Pipeline.transcriptOnlyNote(reason: reason, transcript: clean),
+                        scratchpad: context.scratchpad, keyMoments: keyMoments),
+                    footer: "", meta: nil,
                     config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
                     cleanTranscript: clean, dominantCode: dominantCode,
                     existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
                 try fallback.write(to: notePath, atomically: true, encoding: .utf8)
                 state.markDone(base)
-                return ProcessResult(status: .done, base: base,
-                                     message: "note written (transcript only: summary rejected twice: \(reason))",
+                return withTimings(ProcessResult(status: .done, base: base,
+                                     message: "note written (transcript only: summary rejected: \(reason))"
+                                        + (saveError.map { "; rejected summary could not be saved: \($0)" } ?? ""),
                                      notePath: notePath, transcriptPath: transcriptPath,
-                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+                                     detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
             }
             // A Catalan/Spanish note that came back in another language gets one retry with the
             // language stated again (#3585). The first note is kept if the retry is rejected.
@@ -629,12 +825,12 @@ public enum Pipeline {
                 // out of scope here.) The `.failed` marker is unchanged, and
                 // `notePath` stays nil so nothing in the UI can open it.
                 let quarantine = workDir.appendingPathComponent("\(base).failed-summary.md")
-                try? FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
-                try? noteText.write(to: quarantine, atomically: true, encoding: .utf8)
+                let saveError = Pipeline.quarantine(noteText, at: quarantine, workDir: workDir)
                 // The reason (validator text names it) is what the menu shows.
-                // Name the file so the reason in the menu/log says where the rejected text went.
+                // Name the file so the reason in the menu/log says where the rejected text went,
+                // or says it could not be kept (#4374: never claim a file that was not written).
                 let message = "summary rejected: " + failures.joined(separator: "; ")
-                    + " (kept at \(quarantine.path))"
+                    + (saveError.map { " (rejected summary could not be saved: \($0))" } ?? " (kept at \(quarantine.path))")
                 state.markFailed(base, message)
                 return ProcessResult(status: .failed, base: base, message: message,
                                      transcriptPath: transcriptPath,
@@ -650,13 +846,14 @@ public enum Pipeline {
             rememberTitle(noteMeta, config: config, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             var message = "note written"
-            if config.compactRecordingsAfterNote, variant == nil,
+            // Compaction makes the take mono; with channel speakers on, a reprocess needs the stereo original.
+            if config.compactRecordingsAfterNote, variant == nil, !stereoNeeded,
                let compacted = compactRecording(source: path, compactWav: wavPath) {
                 message += "; recording compacted \(compacted)"
             }
-            return ProcessResult(status: .done, base: base, message: message,
+            return withTimings(ProcessResult(status: .done, base: base, message: message,
                                  notePath: notePath, transcriptPath: transcriptPath,
-                                 detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode)
+                                 detectedLanguages: detectedLanguages, dominantLanguageCode: dominantCode))
         } catch let retry as RetryableDependencyError {
 
             // I2: grow the wait with each consecutive deferral (60 s, 120 s,
@@ -671,6 +868,10 @@ public enum Pipeline {
             state.clearProcessing(base)
             state.markDeferred(base, retryAfter: backoff)
             return ProcessResult(status: .deferred, base: base, message: retry.message)
+        } catch is CancellationError {
+            // A pause or quit is not a verdict on the file: leave it pending, never `.failed`.
+            state.clearProcessing(base)
+            return ProcessResult(status: .skipped, base: base, message: "cancelled; will be picked up again")
         } catch {
             let message = cleanMessage(error)
             state.markFailed(base, message)
@@ -744,15 +945,27 @@ public enum Pipeline {
     }
 
     /// Start of the recording for NOTE dating (#4018), in order of evidence: the recorder's or a phone's
-    /// name stamp, the container `creation_time` minus the duration, the file system date.
+    /// name stamp, the container `creation_time` minus the duration, the file system date. Async convenience over
+    /// the pure `noteStart(for:created:duration:)`; `processOne` does the two awaits itself (see there).
     static func noteStart(for url: URL, deps: PipelineDeps, timeZone: TimeZone = .current) async -> Date? {
+        if let named = noteStartFromName(url, timeZone: timeZone) { return named }
+        let created = await deps.containerCreationDate(url)
+        let duration = created == nil ? nil : await deps.audioDurationSeconds(url)
+        return noteStart(for: url, created: created, duration: duration, timeZone: timeZone)
+    }
+
+    /// The name-stamp step of `noteStart` alone (recorder name, then a phone's stamp).
+    static func noteStartFromName(_ url: URL, timeZone: TimeZone = .current) -> Date? {
         let stem = url.deletingPathExtension().lastPathComponent
-        if let date = recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone) {
-            return date
-        }
-        if let created = await deps.containerCreationDate(url),
-           let duration = await deps.audioDurationSeconds(url),
-           let start = RecordingStamp.start(creation: created, duration: duration) {
+        return recorderNameDate(stem, timeZone: timeZone) ?? RecordingStamp.parse(stem, timeZone: timeZone)
+    }
+
+    /// `noteStart` once the container date and the duration are known (pure). No await inside: an async
+    /// `noteStart` awaiting a real async dependency aborted the test process on the macOS 26 runtime with
+    /// Xcode 26.4-26.6 ("freed pointer was not the last allocation" at its first await, CI 2026-11-14).
+    static func noteStart(for url: URL, created: Date?, duration: Double?, timeZone: TimeZone = .current) -> Date? {
+        if let named = noteStartFromName(url, timeZone: timeZone) { return named }
+        if let created, let duration, let start = RecordingStamp.start(creation: created, duration: duration) {
             return start
         }
         return meetingDate(for: url, timeZone: timeZone)
@@ -760,10 +973,25 @@ public enum Pipeline {
 
     /// The media's embedded creation date (AVAsset), nil when absent.
     public static func containerCreation(_ url: URL) async -> Date? {
+        await creationDateMetadata(url)
+    }
+
+    /// The asset's `creationDate` metadata, nil when absent or unreadable.
+    ///
+    /// Synchronous on purpose: awaiting AVFoundation's `asset.load(.creationDate)` aborted the process on the
+    /// macOS 26 runtime with Xcode 26.4-26.6 ("freed pointer was not the last allocation" at the await that called
+    /// it, bisected and backtraced on CI 2026-11-14), which would crash a release built there whenever a dropped
+    /// file without a name stamp is dated. The deprecated synchronous properties read the same metadata.
+    static func creationDateMetadata(_ url: URL) async -> Date? {
+        // Off the Swift task entirely: AVFoundation runs on a plain GCD thread with no current task.
+        await withCheckedContinuation { (cont: CheckedContinuation<Date?, Never>) in
+            DispatchQueue.global(qos: .utility).async { cont.resume(returning: creationDateMetadataSync(url)) }
+        }
+    }
+
+    public static func creationDateMetadataSync(_ url: URL) -> Date? {
         let asset = AVURLAsset(url: url)
-        guard let item = try? await asset.load(.creationDate),
-              let date = try? await item.load(.dateValue) else { return nil }
-        return date
+        return asset.creationDate?.dateValue
     }
 
     /// The start time in a recorder-style name, exactly as before #2946 (any
@@ -795,10 +1023,12 @@ public enum Pipeline {
     /// filesystem dates and any other file name are NOT evidence.
     public static func recordingStartEvidence(_ url: URL) async -> Date? {
         if let d = exactRecorderNameDate(url) { return d }
-        let asset = AVURLAsset(url: url)
-        guard let item = try? await asset.load(.creationDate),
-              let date = try? await item.load(.dateValue) else { return nil }
-        return date
+        return await creationDateMetadata(url)
+    }
+
+    /// `recordingStartEvidence` without an await, for the `PipelineDeps` default (see `creationDateMetadata`).
+    public static func recordingStartEvidenceSync(_ url: URL) -> Date? {
+        exactRecorderNameDate(url) ?? creationDateMetadataSync(url)
     }
 
     /// The router's detections from the transcribe result, formatted for the
@@ -845,6 +1075,18 @@ public enum Pipeline {
             notes: transcribeResult["footer_notes"] as? [String] ?? [])
     }
 
+    /// Writes a rejected summary into the work dir. Returns nil on success, else why it failed, so the
+    /// caller's message never claims a file that is not there (#4374, docs/error-handling-audit.md).
+    static func quarantine(_ text: String, at url: URL, workDir: URL) -> String? {
+        do {
+            try FileManager.default.createDirectory(at: workDir, withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
     /// Options for the one retry after a repetition collapse (#4011): firmer penalty over a longer window,
     /// a little more temperature and a different seed, so the retry does not walk the same loop.
     static func stiffened(_ o: SummariseOptions) -> SummariseOptions {
@@ -854,6 +1096,81 @@ public enum Pipeline {
         n.temperature = max(o.temperature, 0.3)
         n.seed = o.seed &+ 1
         return n
+    }
+
+    /// Roughly ten minutes of speech per part (~9,000 characters). Fewer than two parts means the whole
+    /// transcript is already short and chunking cannot help.
+    static let collapsePartTokens = 3000
+    static func collapseParts(of transcript: String) -> [String] {
+        EmbeddedSummaryPlanner.chunks(transcript: transcript, budgetTokens: collapsePartTokens)
+    }
+
+    /// Largest transcript share of one part when a long transcript is summarised in parts (#6759): about an
+    /// hour of talk, short enough for an 8B model to keep track of, long enough that few parts are needed.
+    static let longPartMaxTokens = 16_000
+
+    /// The parts of a transcript too long for the Ollama context window (`num_ctx`), or nil when it fits (or
+    /// the target is on-device, which chunks for itself). Fits = the estimated prompt plus the reply budget
+    /// (`num_predict`) is within `num_ctx`; each part leaves the same room for the instructions and the reply.
+    static func longTranscriptParts(_ transcript: String, target: SummariseTarget,
+                                    options: SummariseOptions, context: NoteContext) -> [String]? {
+        guard case .ollama = target, options.numCtx > 0 else { return nil }
+        let instructions = EmbeddedSummaryTokens.estimate(context.prompt(transcript: ""))
+        let whole = instructions + EmbeddedSummaryTokens.estimate(transcript)
+        guard whole + max(0, options.numPredict) > options.numCtx else { return nil }
+        let room = options.numCtx - max(0, options.numPredict) - instructions - 256   // 256: chunk-join slack
+        let budget = min(longPartMaxTokens, max(1_000, room))
+        let parts = EmbeddedSummaryPlanner.chunks(transcript: transcript, budgetTokens: budget)
+        return parts.count >= 2 ? parts : nil
+    }
+
+    /// Part notes for `parts`, merged into one input for the final pass; nil when no part produced a usable note.
+    /// A part that fails or is rejected is left out (logged); a retryable error or a cancel stops all.
+    static func summariseInParts(
+        _ parts: [String], target: SummariseTarget, options: SummariseOptions, context: NoteContext,
+        summarise: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String
+    ) async throws -> String? {
+        var partNotes: [String] = []
+        for (i, part) in parts.enumerated() {
+            try Task.checkCancellation()
+            do {
+                let raw = try await summarise(part, target, options, context)
+                let note = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
+                if SummaryValidator.validate(note).isEmpty { partNotes.append(note) }
+                else { print("[Distavo] part \(i + 1)/\(parts.count) rejected; left out of the merge") }
+            } catch is CancellationError { throw CancellationError()
+            } catch let retry as RetryableDependencyError { throw retry
+            } catch { print("[Distavo] part \(i + 1)/\(parts.count) failed (\(error.localizedDescription)); left out of the merge") }
+        }
+        return partNotes.isEmpty ? nil : EmbeddedSummaryPrompt.merge(partials: partNotes)
+    }
+
+    /// For a transcript too long for the Ollama context (#6759): the merged part notes to summarise instead,
+    /// and how many parts the transcript was cut into; nil when it fits (or no part note came back, in which
+    /// case the caller sends the transcript as before). Merged notes that still overflow are merged in parts
+    /// again, at most twice. Shared by `processOne` and `regenerate`.
+    static func longTranscriptInput(
+        _ transcript: String, target: SummariseTarget, options: SummariseOptions, context: NoteContext,
+        summarise: (String, SummariseTarget, SummariseOptions, NoteContext) async throws -> String
+    ) async throws -> (input: String, parts: Int)? {
+        guard let parts = longTranscriptParts(transcript, target: target, options: options, context: context) else {
+            return nil
+        }
+        print("[Distavo] long transcript (\(EmbeddedSummaryTokens.estimate(transcript)) tokens est.): summarising in \(parts.count) parts")
+        guard var merged = try await summariseInParts(parts, target: target, options: options, context: context,
+                                                     summarise: summarise) else { return nil }
+        for _ in 0..<2 {
+            guard let again = longTranscriptParts(merged, target: target, options: options, context: context),
+                  let remerged = try await summariseInParts(again, target: target, options: options, context: context,
+                                                            summarise: summarise) else { break }
+            merged = remerged
+        }
+        return (merged, parts.count)
+    }
+
+    /// Footer line of a note summarised in parts (#6759).
+    static func partedSummaryNote(parts: Int) -> String {
+        "The transcript was too long for the summary model in one go, so it was summarised in \(parts) parts and the part notes merged."
     }
 
     /// Body of the fallback note written when the summary collapsed twice (#4011).
@@ -876,6 +1193,59 @@ public enum Pipeline {
         }
         guard !hasNonRetryable else { return false }
         return failures.contains { $0.hasPrefix("summary is empty") || $0.hasPrefix("summary is truncated") }
+    }
+
+    /// A transcript-only note still carries what the owner captured live: typed Quick Notes (as Highlights) and
+    /// Key moments markers. Neither depends on the model, so neither may vanish with the summary.
+    static func keepingLiveCapture(_ body: String, scratchpad: ScratchpadNotes?, keyMoments: String) -> String {
+        var out = body
+        if let pad = scratchpad { out = pad.ensureHighlights(in: out) }
+        return RecordingBookmarks.appending(keyMoments, to: out)
+    }
+
+    /// True for a conversion failure that says nothing about the file itself (cancelled, offline volume, busy file,
+    /// disk full, permission): it stays retryable. Machine-level ones (`isMachineLevelConvertFailure`) never count;
+    /// the rest are capped at `Store.transientFailureCap` in a row (#5283).
+    static func isTransientConvertFailure(_ error: Error) -> Bool {
+        if error is CancellationError { return true }
+        let ns = error as NSError
+        let transient: Bool
+        switch ns.domain {
+        case NSURLErrorDomain:
+            transient = [NSURLErrorCancelled, NSURLErrorTimedOut, NSURLErrorNetworkConnectionLost,
+                         NSURLErrorNotConnectedToInternet, NSURLErrorCannotConnectToHost].contains(ns.code)
+        case NSCocoaErrorDomain:
+            transient = [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError,
+                         NSFileLockingError, NSUserCancelledError].contains(ns.code)
+        case NSPOSIXErrorDomain:
+            // EIO and EPERM are deliberately absent: a bad sector or a permanent refusal is the file's problem.
+            transient = [ENOSPC, EACCES, EBUSY, EINTR, EAGAIN, EDQUOT].contains(Int32(ns.code))
+        case NSOSStatusErrorDomain:
+            transient = ns.code == -34   // dskFulErr
+        default:
+            transient = false
+        }
+        if transient { return true }
+        // AVFoundation / AudioToolbox wrap the real cause one level down.
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isTransientConvertFailure(under) }
+        return false
+    }
+
+    /// True when the machine, not the recording, is at fault (disk full, quota, permission): such a failure is
+    /// retried at every launch and never counted toward `.unreadable` (the cap is for offline volumes and the like).
+    static func isMachineLevelConvertFailure(_ error: Error) -> Bool {
+        let ns = error as NSError
+        switch ns.domain {
+        case NSCocoaErrorDomain:
+            if [NSFileWriteOutOfSpaceError, NSFileWriteNoPermissionError, NSFileReadNoPermissionError].contains(ns.code) { return true }
+        case NSPOSIXErrorDomain:
+            if [ENOSPC, EACCES, EDQUOT].contains(Int32(ns.code)) { return true }
+        case NSOSStatusErrorDomain:
+            if ns.code == -34 { return true }
+        default: break
+        }
+        if let under = ns.userInfo[NSUnderlyingErrorKey] as? Error { return isMachineLevelConvertFailure(under) }
+        return false
     }
 
     /// Prefer a typed error's human message over the default struct description.

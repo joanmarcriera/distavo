@@ -23,6 +23,14 @@ final class SettingsPanesTests: XCTestCase {
         }
     }
 
+    func testRecordingFormatAndDiskSettingsAreFindable() {
+        // Vikunja #6670: the recording format picker and the disk-space lines live in Recording.
+        let all = SettingsPane.visible(hasUpdates: true)
+        for q in ["format", "size", "disk", "16-bit"] {
+            XCTAssertTrue(SettingsPane.filter(all, query: q).contains(.recording), "\(q) should find Recording")
+        }
+    }
+
     func testBlankQueryKeepsAll() {
         let all = SettingsPane.visible(hasUpdates: true)
         XCTAssertEqual(SettingsPane.filter(all, query: "  "), all)

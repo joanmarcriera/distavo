@@ -17,7 +17,7 @@ final class SummaryTemplatePipelineTests: XCTestCase {
     private struct Env { var config: Config; var recordings: URL; var work: URL; var notes: URL }
 
     private func makeEnv() throws -> Env {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-tplpipe-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)

@@ -6,7 +6,7 @@ test, and submit changes. By participating you agree to follow our
 
 ## Prerequisites
 
-- macOS 13+ with a recent Xcode / Swift toolchain
+- macOS 14+ (the `deploymentTarget` in `apple/project.yml`) with a recent Xcode / Swift toolchain
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`)
 
 ## Setup

@@ -83,8 +83,20 @@ extension PipelineDeps {
             var result: [String: Any]
             switch decision.model.engine {
             case .parakeet:
-                result = try await ParakeetTranscriber.shared.transcribe(
-                    wavURL: wavURL, languageHint: decision.languageHint, config: transcribeConfig)
+                // #5284: Parakeet heard nothing on two mic-only recordings (14 Oct): try WhisperKit once.
+                let whisper = EmbeddedModelCatalog.model(id: EmbeddedModelCatalog.defaultModelID)
+                let attempt = try await TranscribeFallback.run(
+                    primary: {
+                        try await ParakeetTranscriber.shared.transcribe(
+                            wavURL: wavURL, languageHint: decision.languageHint, config: transcribeConfig)
+                    },
+                    fallback: {
+                        await ModelCoordinator.shared.report("Parakeet produced no text - trying \(whisper.displayName).")
+                        return try await EmbeddedTranscriber.shared.transcribe(
+                            wavURL: wavURL, model: whisper,
+                            languageHint: decision.languageHint, config: transcribeConfig)
+                    })
+                result = attempt.result
             case .whisperKit:
                 result = try await EmbeddedTranscriber.shared.transcribe(
                     wavURL: wavURL, model: decision.model,

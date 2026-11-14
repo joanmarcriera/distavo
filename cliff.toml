@@ -1,0 +1,61 @@
+# git-cliff configuration for Distavo - https://git-cliff.org/docs/configuration
+#
+# CHANGELOG.md is GENERATED from Conventional Commits; do not edit it by hand:
+#   git cliff -o CHANGELOG.md                       # regenerate the whole file
+#   git cliff --unreleased --tag vX.Y.Z             # preview the section for the next release
+# A "#NNNN" in a commit message becomes a link to the Vikunja task.
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to Distavo. This file is generated from the commit history by
+[git-cliff](https://git-cliff.org) (`git cliff -o CHANGELOG.md`, config in `cliff.toml`); do not
+edit it by hand. Task numbers link to the Vikunja board.
+
+"""
+body = """
+{% if version -%}
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else -%}
+## [Unreleased]
+{% endif -%}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+
+{% for commit in commits -%}
+- {% if commit.scope %}**{{ commit.scope }}**: {% endif %}{% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}
+{% endfor %}
+{% endfor %}
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+# Commits that are not Conventional Commits (merges, fixups) are left out.
+filter_unconventional = true
+split_commits = false
+# "#4021" -> a link to the task on the Vikunja board.
+commit_preprocessors = [
+    { pattern = '#([0-9]{3,5})\b', replace = "[#${1}](https://familia.riera.co.uk/tasks/${1})" },
+]
+commit_parsers = [
+    { message = "^feat", group = "<!-- 0 -->Features" },
+    { message = "^fix", group = "<!-- 1 -->Bug fixes" },
+    { message = "^perf", group = "<!-- 2 -->Performance" },
+    { message = "^refactor", group = "<!-- 3 -->Refactoring" },
+    { message = "^docs?", group = "<!-- 4 -->Documentation" },
+    { message = "^test", group = "<!-- 5 -->Tests" },
+    { message = "^(ci|build)", group = "<!-- 6 -->CI and build" },
+    { message = "^chore", group = "<!-- 7 -->Maintenance" },
+    { message = "^style", group = "<!-- 8 -->Style" },
+    { message = "^revert", group = "<!-- 9 -->Reverts" },
+    { message = "^(tools|merge)", group = "<!-- 10 -->Tooling" },
+]
+filter_commits = true
+protect_breaking_commits = false
+# Only release tags (v1.20.0), never other tags.
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "oldest"

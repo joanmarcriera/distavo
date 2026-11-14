@@ -106,3 +106,51 @@ final class WordSpeakerAlignerTests: XCTestCase {
         XCTAssertEqual(s[0]["text"] as? String, "a b")
     }
 }
+
+/// #3953: a gap-free hand-off between two speakers (synthetic two-person fixture,
+/// no real recording) must not merge into one turn.
+final class WordSpeakerAlignerHandoffTests: XCTestCase {
+    private func words(_ ts: [String], from t0: Double = 0, step: Double = 0.3) -> [TimedWord] {
+        ts.enumerated().map { TimedWord(text: $1, start: t0 + Double($0) * step, end: t0 + Double($0) * step + step - 0.02) }
+    }
+    private func segs(_ d: [String: Any]) -> [(String?, String)] {
+        (d["segments"] as! [[String: Any]]).map { ($0["speaker"] as? String, $0["text"] as! String) }
+    }
+
+    func testGapFreeHandoffSplitsAtTurnBoundary() {
+        // "How old are you ... Five and seven" with no pause and no sentence end.
+        let w = words(["so", "how", "old", "are", "they", "five", "and", "seven"])
+        let turns = [SpeakerTurn(speaker: 0, start: 0, end: 1.5), SpeakerTurn(speaker: 1, start: 1.5, end: 2.4)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: turns))
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s[0].0, "SPEAKER_00"); XCTAssertEqual(s[0].1, "so how old are they")
+        XCTAssertEqual(s[1].0, "SPEAKER_01"); XCTAssertEqual(s[1].1, "five and seven")
+    }
+
+    func testLoneEdgeWordDoesNotSplit() {
+        let w = words(["so", "how", "old", "are", "they", "five"])
+        let turns = [SpeakerTurn(speaker: 0, start: 0, end: 1.5), SpeakerTurn(speaker: 1, start: 1.5, end: 2.0)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: turns))
+        XCTAssertEqual(s.count, 1)
+        XCTAssertEqual(s[0].0, "SPEAKER_00")
+    }
+
+    /// #5934: words before the first turn must not become their own group (which would
+    /// inherit the previous speaker through carryGap).
+    func testLeadingUncoveredWordsStayWithFirstTurn() {
+        let earlier = [TimedWord(text: "okay.", start: 0, end: 0.4)]
+        // Gap of 0.3 s after "okay." (> betweenWordGap, < carryGap): a separate group.
+        let w = earlier + words(["so", "how", "old", "are", "they", "five"], from: 0.7)
+        let turns = [SpeakerTurn(speaker: 1, start: 0, end: 0.4), SpeakerTurn(speaker: 0, start: 1.3, end: 2.6)]
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: turns))
+        XCTAssertEqual(s.count, 2)
+        XCTAssertEqual(s[0].0, "SPEAKER_01"); XCTAssertEqual(s[0].1, "okay.")
+        XCTAssertEqual(s[1].0, "SPEAKER_00"); XCTAssertEqual(s[1].1, "so how old are they five")
+    }
+
+    func testSingleTurnUnchanged() {
+        let w = words(["a", "b", "c", "d"])
+        let s = segs(WordSpeakerAligner.whisperXDictionary(words: w, turns: [SpeakerTurn(speaker: 1, start: 0, end: 2)]))
+        XCTAssertEqual(s.count, 1); XCTAssertEqual(s[0].0, "SPEAKER_01")
+    }
+}

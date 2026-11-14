@@ -67,10 +67,12 @@ public struct SpeakerSuggestions: Equatable, Sendable {
     }
 
     /// The newest `limit` sheets in the work dir, newest first (by file date). Unreadable files are skipped.
-    public static func recentHistory(workDir: URL, limit: Int = 10) -> [SpeakerHints] {
+    /// `excluding` names a base whose own sheet must not count as history (a dropped file being prefilled).
+    public static func recentHistory(workDir: URL, limit: Int = 10, excluding base: String? = nil) -> [SpeakerHints] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: workDir, includingPropertiesForKeys: [.contentModificationDateKey]) else { return [] }
-        let sheets = files.filter { $0.lastPathComponent.hasSuffix(".speakers.json") }
+        let skip = base.map { "\($0).speakers.json" }
+        let sheets = files.filter { $0.lastPathComponent.hasSuffix(".speakers.json") && $0.lastPathComponent != skip }
             .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
             .sorted { $0.1 > $1.1 }
             .prefix(limit)

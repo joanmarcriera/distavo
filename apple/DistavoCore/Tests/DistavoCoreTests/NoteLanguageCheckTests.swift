@@ -85,7 +85,7 @@ final class NoteLanguageCheckTests: XCTestCase {
     // MARK: Pipeline retry
 
     private func run(replies: [String], language: String = "ca") async throws -> (notes: String, calls: Int, instructions: [String?]) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString)")
+        let dir = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: dir) }
         var cfg = Config()
         cfg.recordingsDir = dir.appendingPathComponent("rec").path

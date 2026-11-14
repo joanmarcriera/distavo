@@ -105,6 +105,10 @@ public enum DistavoState {
         public let stateDir: URL
         public let notesDir: URL
         private let fm = FileManager.default
+        /// Called with a one-line description when a marker cannot be written (set once, before use).
+        /// Default: print, the module's convention for diagnostics that must not touch the real log
+        /// (see the comment in `Pipeline.processOne`); the app target can route it to `ActivityLog`.
+        public var onIOFailure: ((String) -> Void)?
 
         public init(stateDir: URL, notesDir: URL) throws {
             self.stateDir = stateDir
@@ -121,7 +125,13 @@ public enum DistavoState {
         }
 
         private func exists(_ url: URL) -> Bool { fm.fileExists(atPath: url.path) }
-        private func write(_ text: String, _ url: URL) { try? text.write(to: url, atomically: true, encoding: .utf8) }
+        private func write(_ text: String, _ url: URL) {
+            do { try text.write(to: url, atomically: true, encoding: .utf8) } catch {
+                // A lost marker means a finished file is processed again (or a failure forgotten): say so.
+                let line = "cannot write marker \(url.lastPathComponent): \(error.localizedDescription)"
+                if let onIOFailure { onIOFailure(line) } else { print("[Distavo] \(line)") }
+            }
+        }
         private func remove(_ url: URL) { try? fm.removeItem(at: url) }
 
         public func isDone(_ base: String) -> Bool { exists(notePath(base)) || exists(marker(base, "done")) }
@@ -163,6 +173,94 @@ public enum DistavoState {
 
         public func clearTooShort(_ base: String) { remove(marker(base, "tooshort")) }
 
+        // MARK: Unreadable recordings (Vikunja #5283)
+        //
+        // A file whose conversion fails with the same message twice in a row will not start working by
+        // being retried at every launch (two 7 Jul recordings logged "could not start reading" ~15 times).
+        // `.convertfail` ("<message>\n<size>\n<count>") survives `retryFailed`; at the second identical
+        // failure the base gets a terminal `.unreadable` marker ("<message>\n<size>"), which `iterPending`
+        // skips while the file keeps its size and which only `clearUnreadable` (the menu's action) removes.
+
+        /// Record a conversion failure; returns true when it was the second identical one in a row and the
+        /// base is now terminal. A different message or file size restarts the count.
+        @discardableResult
+        public func recordConvertFailure(_ base: String, message: String, fileSize: Int?) -> Bool {
+            let size = fileSize.map(String.init) ?? ""
+            var count = 1
+            if let old = try? String(contentsOf: marker(base, "convertfail"), encoding: .utf8) {
+                let l = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                if l.count >= 3, l[0] == message, l[1] == size, let n = Int(l[2]) { count = n + 1 }
+            }
+            write("\(message)\n\(size)\n\(count)\n", marker(base, "convertfail"))
+            guard count >= 2 else { return false }
+            write("\(message)\n\(size)\n", marker(base, "unreadable"))
+            return true
+        }
+
+        /// Consecutive transient conversion failures (disk full, permission, offline volume) that end a
+        /// recording's retries (drive d, #1793): without a cap a file that never converts for such a reason is
+        /// retried at every launch for ever. The caller never counts a cancellation.
+        public static let transientFailureCap = 5
+
+        /// Failures closer together than this are one outage and count once. A transient conversion failure
+        /// DEFERS (60 s, 120 s, ... backoff), so without the spacing five quick retries made an offline volume
+        /// terminal within 15 minutes (j-branch review 2026-11-09); with it the cap means hours of failures.
+        public static let transientCountSpacing: TimeInterval = 3600
+
+        /// `.transientfail` ("<size>\n<count>\n<epoch of the last counted failure>"): the run of transient
+        /// failures for the file at this size. Returns true when it reached `cap` and the base is now terminal
+        /// (`.unreadable`, the #5283 state). A new file size restarts the run; a successful conversion
+        /// (`clearTransientConvertFailures`) ends it; a failure within `transientCountSpacing` of the last
+        /// counted one is not counted. A marker without the epoch line (older builds) counts as before.
+        @discardableResult
+        public func recordTransientConvertFailure(_ base: String, message: String, fileSize: Int?,
+                                                  cap: Int = Store.transientFailureCap, now: Date = Date()) -> Bool {
+            let size = fileSize.map(String.init) ?? ""
+            var count = 1
+            if let old = try? String(contentsOf: marker(base, "transientfail"), encoding: .utf8) {
+                let l = old.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+                if l.count >= 2, l[0] == size, let n = Int(l[1]) {
+                    if l.count >= 3, let last = Double(l[2]),
+                       now.timeIntervalSince1970 - last < Store.transientCountSpacing {
+                        return false   // same outage: neither counted nor re-stamped
+                    }
+                    count = n + 1
+                }
+            }
+            write("\(size)\n\(count)\n\(Int(now.timeIntervalSince1970))\n", marker(base, "transientfail"))
+            guard count >= cap else { return false }
+            write("\(message) (failed \(count) times in a row)\n\(size)\n", marker(base, "unreadable"))
+            return true
+        }
+
+        /// The conversion worked: the run of transient failures is over.
+        public func clearTransientConvertFailures(_ base: String) { remove(marker(base, "transientfail")) }
+
+        /// True when `base` is terminal for the file as it is now (same size rule as `isTooShort`).
+        public func isUnreadable(_ base: String, currentSize: Int? = nil) -> Bool {
+            guard let content = try? String(contentsOf: marker(base, "unreadable"), encoding: .utf8) else { return false }
+            guard let currentSize else { return true }
+            let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+            guard lines.count >= 2, let recorded = Int(lines[1].trimmingCharacters(in: .whitespaces)) else { return true }
+            return recorded == currentSize
+        }
+
+        public func clearUnreadable(_ base: String) {
+            remove(marker(base, "unreadable")); remove(marker(base, "convertfail")); remove(marker(base, "transientfail"))
+        }
+
+        /// Release every terminal recording ("Process now" and the menu's Retry, Vikunja #5404). Not part
+        /// of `retryFailed`, which also runs at launch and must keep a terminal file skipped (#5283); the
+        /// `.convertfail` count goes too, so a still-broken file needs two fresh identical failures again.
+        public func retryUnreadable() {
+            removeMarkers(suffix: "unreadable")
+            removeMarkers(suffix: "convertfail")
+            removeMarkers(suffix: "transientfail")
+        }
+
+        /// Terminal recordings with their reason: the menu's one line each, with a Move to Bin action.
+        public func unreadableBases() -> [(base: String, reason: String)] { markers(suffix: "unreadable") }
+
         /// Every recording currently set aside as too short, with its reason,
         /// sorted by base name — the menu's "delete it?" list.
         public func tooShortBases() -> [(base: String, reason: String)] {
@@ -184,7 +282,25 @@ public enum DistavoState {
                 .sorted { $0.0 < $1.0 }
         }
 
-        public func markProcessing(_ base: String) { write("processing\n", marker(base, "processing")) }
+        /// "processing\n<pid>\n": the pid tells a crash (dead owner) from another Distavo still at work on a shared
+        /// data folder (two editions, #6759).
+        public func markProcessing(_ base: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
+            write("processing\n\(pid)\n", marker(base, "processing"))
+        }
+
+        /// The pid recorded in `base`'s `.processing` marker, or nil (no marker, or one from an older build).
+        public func processingOwner(_ base: String) -> Int32? {
+            guard let text = try? String(contentsOf: marker(base, "processing"), encoding: .utf8) else { return nil }
+            let lines = text.split(separator: "\n")
+            return lines.count >= 2 ? Int32(lines[1].trimmingCharacters(in: .whitespaces)) : nil
+        }
+
+        /// Removes the `.processing` markers this process wrote (a normal quit, #6759); another process's stay.
+        public func clearProcessingMarkers(ownedBy pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
+            for item in markers(suffix: "processing") where processingOwner(item.base) == pid {
+                clearProcessing(item.base)
+            }
+        }
         public func clearProcessing(_ base: String) { remove(marker(base, "processing")) }
         /// Clear the `.failed` marker. A note file still sitting in the notes folder under a failed
         /// base is a leftover of a failed run (1.12-1.14 wrote the rejected summary there), not a
@@ -204,6 +320,7 @@ public enum DistavoState {
             clearFailed(base)
             clearDeferred(base)
             clearTooShort(base)
+            clearUnreadable(base)
         }
 
         public func markFailed(_ base: String, _ error: String) {
@@ -267,9 +384,37 @@ public enum DistavoState {
             for url in items where url.pathExtension == suffix { remove(url) }
         }
 
-        /// Remove leftover `.processing` markers (call when nothing is running —
-        /// they indicate a prior crash mid-process).
+        /// Remove leftover `.processing` markers without a verdict (call when nothing is running). The app calls
+        /// it on a normal quit, so that only a crash leaves a marker for `setAsideInterrupted` to find.
         public func clearStaleProcessing() { removeMarkers(suffix: "processing") }
+
+        /// The reason a recording that was being processed when Distavo stopped is set aside (#6759).
+        public static let interruptedReason =
+            "Distavo stopped unexpectedly while processing this recording, so it was set aside instead of being "
+            + "tried again at launch. Choose Process now to try it once more."
+
+        /// At launch (#6759): every `.processing` marker left behind means Distavo crashed (or was killed) on
+        /// that recording, because a normal quit clears them (`clearStaleProcessing`). Retrying it at once is
+        /// how a 4 h 21 min file crash-looped the app on every relaunch, so each such recording gets a `.failed`
+        /// marker with `interruptedReason` and appears in the menu's failed list; "Process now" / Retry clear
+        /// it as for any failure. Returns the bases set aside, sorted, so the caller can say so.
+        ///
+        /// A marker whose owner process is still running (another Distavo edition on the same data folder) is
+        /// left alone; `isAlive` is injectable for tests.
+        @discardableResult
+        public func setAsideInterrupted(
+            ownPID: Int32 = ProcessInfo.processInfo.processIdentifier,
+            isAlive: (Int32) -> Bool = { kill($0, 0) == 0 || errno == EPERM }
+        ) -> [String] {
+            var setAside: [String] = []
+            for base in markers(suffix: "processing").map(\.base) {
+                if let owner = processingOwner(base), owner != ownPID, isAlive(owner) { continue }
+                if isDone(base) { clearProcessing(base); continue }   // a done base keeps its note
+                markFailed(base, Store.interruptedReason)            // also removes the `.processing` marker
+                setAside.append(base)
+            }
+            return setAside
+        }
 
         /// Clear all `.failed` (and stale `.processing`, `.deferred` and
         /// `.tooshort`) markers so every recording gets retried right away
@@ -334,6 +479,7 @@ public enum DistavoState {
             let base = baseFor(recordingsDir: recordingsDir, path: url)
             if state.isDone(base) || state.isProcessing(base) || state.isFailed(base) { continue }
             if state.isTooShort(base, currentSize: fileSize(url)) { continue }
+            if state.isUnreadable(base, currentSize: fileSize(url)) { continue }
 
             if let until = state.deferredUntil(base), until > now() { continue }
             pending.append(url)

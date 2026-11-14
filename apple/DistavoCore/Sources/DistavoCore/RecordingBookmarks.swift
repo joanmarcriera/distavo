@@ -261,6 +261,12 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
     /// while recording. The default combination is ⌃⌥⌘R.
     public var recordHotkeyEnabled: Bool
     public var recordHotkey: HotkeySpec
+    /// On-disk format of the built-in recorder's WAV (Vikunja #6670, `RecordingStorageFormat`). Full (Float32)
+    /// for any config predating the key and for fresh installs: smaller files are opt-in.
+    public var storageFormat: RecordingStorageFormat
+    /// Stop a built-in recording after this many hours (`RecordingDurationCap`); 0 = no limit. 8 for any
+    /// config predating the key and for fresh installs: it is a safety net for a forgotten Stop.
+    public var maxDurationHours: Int
 
     public static let clipSecondsRange = 0...600
 
@@ -269,7 +275,11 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
                 clipTailSeconds: Int = RecordingBookmarks.defaultTailSeconds,
                 micAutoSwitch: Bool = false,
                 recordHotkeyEnabled: Bool = false,
-                recordHotkey: HotkeySpec = .recordDefault) {
+                recordHotkey: HotkeySpec = .recordDefault,
+                storageFormat: RecordingStorageFormat = .full,
+                maxDurationHours: Int = RecordingDurationCap.defaultHours) {
+        self.storageFormat = storageFormat
+        self.maxDurationHours = RecordingDurationCap.clamp(maxDurationHours)
         self.micAutoSwitch = micAutoSwitch
         self.recordHotkeyEnabled = recordHotkeyEnabled
         self.recordHotkey = recordHotkey
@@ -287,6 +297,8 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         case micAutoSwitch = "mic_auto_switch"
         case recordHotkeyEnabled = "record_hotkey_enabled"
         case recordHotkey = "record_hotkey"
+        case storageFormat = "storage_format"
+        case maxDurationHours = "max_duration_hours"
     }
 
     public init(from decoder: Decoder) throws {
@@ -302,6 +314,10 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         recordHotkeyEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .recordHotkeyEnabled)).flatMap { $0 } ?? d.recordHotkeyEnabled
         let rspec = (try? c.decodeIfPresent(HotkeySpec.self, forKey: .recordHotkey)).flatMap { $0 }
         recordHotkey = (rspec?.isValid == true ? rspec : nil) ?? d.recordHotkey
+        storageFormat = (try? c.decodeIfPresent(String.self, forKey: .storageFormat)).flatMap { $0 }
+            .flatMap(RecordingStorageFormat.init(rawValue:)) ?? d.storageFormat
+        maxDurationHours = RecordingDurationCap.clamp(
+            (try? c.decodeIfPresent(Int.self, forKey: .maxDurationHours)).flatMap { $0 } ?? d.maxDurationHours)
     }
 
     /// Why the record shortcut cannot be used right now, or nil. The same combination must not be

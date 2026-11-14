@@ -349,7 +349,14 @@ public enum AskNotes {
     // MARK: Single note
 
     /// A candidate section before keys are assigned.
-    struct Block { let title: String, base: String, kind: SearchKind, timestamp: Double?, text: String, order: Int }
+    struct Block {
+        let title: String, base: String, kind: SearchKind, timestamp: Double?, text: String, order: Int
+        /// Every block passes the #3951 guard: notes and transcripts made before it existed are read here too.
+        init(title: String, base: String, kind: SearchKind, timestamp: Double?, text: String, order: Int) {
+            (self.title, self.base, self.kind, self.timestamp, self.order) = (title, base, kind, timestamp, order)
+            self.text = OffensiveWordGuard.apply(text).text
+        }
+    }
 
     /// The note's and transcript's sections for `base` (none when neither exists).
     static func noteBlocks(base: String, notesDir: URL, workDir: URL) -> [Block] {
@@ -427,6 +434,8 @@ public enum AskNotes {
                 if segmentsCache[p.base] == nil { segmentsCache[p.base] = .some(TranscriptSegments.load(workDir: workDir, base: p.base)) }
                 if let segs = segmentsCache[p.base] ?? nil { stamp = timestamp(of: text, in: segs) }
             }
+            // #3951 guard after the timestamp lookup (old segments are unguarded): the index may predate the guard.
+            text = OffensiveWordGuard.apply(text).text
             var e = AskExcerpt(key: out.count + 1, title: p.title, base: p.base, kind: p.kind, timestamp: stamp, text: text)
             var c = AskPrompt.cost(of: e)
             if used + c > budget {

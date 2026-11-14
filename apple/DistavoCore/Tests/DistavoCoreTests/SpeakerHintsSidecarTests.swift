@@ -4,7 +4,7 @@ import XCTest
 /// #4012: a speakers.json beside a dropped file is honoured; the work-dir answer wins.
 final class SpeakerHintsSidecarTests: XCTestCase {
     private func tmp() throws -> URL {
-        let d = FileManager.default.temporaryDirectory.appendingPathComponent("sh-" + UUID().uuidString)
+        let d = TestTemp.root.appendingPathComponent("sh-" + UUID().uuidString)
         try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }

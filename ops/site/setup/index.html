@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up Distavo in five minutes</title>
+  <meta name="description" content="Install Distavo, choose how summaries are written (Ollama or on-device) and get your first meeting note, with model sizes for 16, 24 and 32 GB Macs.">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/assets/site.css">
+  <link rel="canonical" href="https://distavo.com/setup/">
+  <meta property="og:title" content="Set up Distavo in five minutes">
+  <meta property="og:description" content="Install Distavo, choose how summaries are written (Ollama or on-device) and get your first meeting note, with model sizes for 16, 24 and 32 GB Macs.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://distavo.com/setup/">
+  <script type="application/ld+json">
+  {"@context":"https://schema.org","@type":"HowTo","name":"Set up Distavo in five minutes","description":"Install Distavo, choose a summariser and produce a first Markdown meeting note on a Mac.","totalTime":"PT5M","step":[{"@type":"HowToStep","name":"Install Distavo","text":"Install Distavo from the Mac App Store or the free direct download."},{"@type":"HowToStep","name":"Choose how summaries are written","text":"Point Distavo at an Ollama server with a model pulled, or use Apple Intelligence on macOS 26 or later (not for Catalan), or the opt-in on-device model."},{"@type":"HowToStep","name":"Make your first note","text":"Record a meeting from the menu bar or drop a recording into the watched folder."}]}
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <nav class="nav" aria-label="Primary">
+      <a class="brand" href="/"><span class="brand-mark"></span><span>Distavo</span></a>
+      <div class="nav-links">
+        <a href="/">Home</a>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+      </div>
+    </nav>
+  </header>
+
+  <main id="main" class="page-main">
+    <span class="eyebrow" style="color: var(--muted); border-color: var(--line)">Setup</span>
+    <h1>Set up Distavo in five minutes.</h1>
+    <p>Transcription runs on your Mac with nothing to configure. Summaries need one extra choice: an Ollama server you run, Apple Intelligence on macOS 26 or later (not for Catalan), or the opt-in on-device model. Do this once and every recording becomes a note.</p>
+
+    <h2>1. Install</h2>
+    <p>Install Distavo from the Mac App Store, or use the free <a href="https://github.com/joanmarcriera/distavo/releases">direct download</a>. It needs macOS 14 or later and Apple Silicon. The Catalan and Spanish models need 16 GB of memory or more.</p>
+
+    <h2>2. Choose how summaries are written</h2>
+    <ul class="list">
+      <li><strong>Ollama (your Mac or a machine on your network).</strong> Install <a href="https://ollama.com/download">Ollama</a>, pull a model (table below), then in Distavo's Settings enter the server address and press Test connection. If the server is on your LAN, allow macOS Local Network access when asked.</li>
+      <li><strong>On-device, no server.</strong> On macOS 26 or later Distavo can use Apple Intelligence (not available for Catalan), or the opt-in on-device model you switch on in Settings.</li>
+    </ul>
+    <p>If you skip this step the first recording is transcribed but its note waits, with the message that the Ollama server is offline. Nothing is lost: set the server up and it finishes on its own.</p>
+
+    <h2>Which Ollama model for my Mac?</h2>
+    <p>These are suggestions, not guarantees. The only figure published for each model is its download size, so pick a model that leaves clear room in memory for macOS, Distavo's transcription and the model itself. Sizes come from the Ollama library page named in each row; check it before you pull.</p>
+    <table class="model-table" style="border-collapse: collapse; width: 100%">
+      <thead>
+        <tr><th scope="col">Mac memory</th><th scope="col">Suggested model</th><th scope="col">Download size</th><th scope="col">Source</th><th scope="col">Retrieved</th></tr>
+      </thead>
+      <tbody>
+        <tr id="model-16"><th scope="row">16 GB</th><td><code>ollama pull gemma4:e4b</code></td><td>6.6 GB to 9.5 GB</td><td><a href="https://ollama.com/library/gemma4">ollama.com/library/gemma4</a></td><td>2026-10-24</td></tr>
+        <tr id="model-24"><th scope="row">24 GB</th><td><code>ollama pull gemma4:12b</code></td><td>7.7 GB to 8.0 GB</td><td><a href="https://ollama.com/library/gemma4">ollama.com/library/gemma4</a></td><td>2026-10-24</td></tr>
+        <tr id="model-32"><th scope="row">32 GB</th><td><code>ollama pull gemma4:26b</code></td><td>16 GB to 19 GB</td><td><a href="https://ollama.com/library/gemma4">ollama.com/library/gemma4</a></td><td>2026-10-24</td></tr>
+      </tbody>
+    </table>
+    <p>Smaller Macs: a smaller model is faster and less accurate, so check your first notes. Any model Ollama can run works; type its name in Settings.</p>
+
+    <h2>3. Make your first note</h2>
+    <p>Choose Record from the menu-bar icon and talk for a minute, or drop a recording into the watched folder. The first transcription downloads its model once. The note appears as a Markdown file in your notes folder.</p>
+    <p>
+      <a class="button primary" href="/support/">Support and requirements</a>
+      <a class="button secondary" href="/feedback/">Tell us what went wrong</a>
+    </p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>Distavo setup.</span>
+      <div class="footer-links">
+        <a href="/">Home</a>
+        <a href="/support/">Support</a>
+        <a href="/privacy/">Privacy</a>
+        <a href="https://github.com/joanmarcriera/distavo">GitHub</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

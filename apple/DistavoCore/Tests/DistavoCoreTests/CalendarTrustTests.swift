@@ -133,7 +133,7 @@ final class CalendarTrustTests: XCTestCase {
     // MARK: Nothing hostile reaches the prompt; heading is sanitised
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-trust-\(UUID().uuidString)")
+        let url = TestTemp.root.appendingPathComponent("distavo-trust-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

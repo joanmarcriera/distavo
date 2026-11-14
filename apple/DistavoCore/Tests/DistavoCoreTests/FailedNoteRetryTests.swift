@@ -9,7 +9,7 @@ final class FailedNoteRetryTests: XCTestCase {
     private var store: DistavoState.Store!
 
     override func setUpWithError() throws {
-        tmp = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-\(UUID().uuidString)")
+        tmp = TestTemp.root.appendingPathComponent("distavo-\(UUID().uuidString)")
         let notes = tmp.appendingPathComponent("notes")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         store = try DistavoState.Store(stateDir: tmp.appendingPathComponent("state"), notesDir: notes)

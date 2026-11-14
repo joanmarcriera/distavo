@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://distavo.com/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://distavo.com/"/>
+    <xhtml:link rel="alternate" hreflang="ca" href="https://distavo.com/ca/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://distavo.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://distavo.com/"/>
+  </url>
+  <url>
+    <loc>https://distavo.com/ca/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://distavo.com/"/>
+    <xhtml:link rel="alternate" hreflang="ca" href="https://distavo.com/ca/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://distavo.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://distavo.com/"/>
+  </url>
+  <url>
+    <loc>https://distavo.com/es/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://distavo.com/"/>
+    <xhtml:link rel="alternate" hreflang="ca" href="https://distavo.com/ca/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://distavo.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://distavo.com/"/>
+  </url>
+  <url>
+    <loc>https://distavo.com/setup/</loc>
+  </url>
+  <url>
+    <loc>https://distavo.com/alternatives/macwhisper/</loc>
+  </url>
+  <url>
+    <loc>https://distavo.com/support/</loc>
+  </url>
+  <url>
+    <loc>https://distavo.com/privacy/</loc>
+  </url>
+</urlset>

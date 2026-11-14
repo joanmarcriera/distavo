@@ -6,7 +6,7 @@ import XCTest
 final class TranscriptSidecarPipelineTests: XCTestCase {
 
     private func env() throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-seg-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-seg-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")

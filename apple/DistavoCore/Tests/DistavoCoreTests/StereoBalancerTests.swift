@@ -13,7 +13,7 @@ final class StereoBalancerTests: XCTestCase {
     }
 
     private func tempURL(_ suffix: String) -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-balance-\(UUID().uuidString)\(suffix)")
         scratch.append(url)
         return url

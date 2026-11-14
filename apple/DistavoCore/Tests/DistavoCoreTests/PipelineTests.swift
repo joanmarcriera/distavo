@@ -31,7 +31,7 @@ final class PipelineTests: XCTestCase {
         "of decisions made and outstanding risks that require follow-up before the next session."
 
     private func tempDir() -> URL {
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-pipe-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
@@ -71,6 +71,18 @@ final class PipelineTests: XCTestCase {
             },
             transcribe: transcribe, ollamaReachable: reachable, summarise: summarise,
             onPhase: onPhase, audioDurationSeconds: duration)
+    }
+
+    // MARK: Phase timings (Vikunja #4018)
+
+    /// A finished file reports where the time went: convert, transcribe, summarise+note, in that order, as numbers only.
+    func testDoneResultCarriesPhaseTimings() async throws {
+        let (cfg, input) = try makeEnv()
+        let result = await Pipeline.processOne(path: input, config: cfg, deps: deps(), stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        let names = result.timings?.steps.map(\.name)
+        XCTAssertEqual(names, ["convert", "transcribe", "summarise+note"])
+        XCTAssertTrue(result.timings?.logLine.hasPrefix("Timing: convert ") ?? false)
     }
 
     // MARK: Too-short recordings (Vikunja #2185)
@@ -815,6 +827,78 @@ final class PipelineTests: XCTestCase {
             stableChecks: 1, stableDelay: 0)
         XCTAssertEqual(result.status, .done)
         XCTAssertEqual(calls.count, 2)
+    }
+
+    /// #4011: a long recording whose whole-transcript summary loops twice gets a third, chunked attempt
+    /// (one call per ~10-minute part, then one call over the merged part notes) before the transcript-only fallback.
+    func testCollapseOnLongTranscriptFallsBackToChunkedSummary() async throws {
+        let (cfg, input) = try makeEnv()
+        let calls = CallCounter()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let segments: [[String: Any]] = (0..<400).map { i in
+            ["speaker": "SPEAKER_0\(i % 2)", "start": Double(i) * 5, "end": Double(i) * 5 + 4,
+             "text": "Turn \(i): we talked about item number \(i) and what it means for the plan."]
+        }
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    calls.increment()
+                    // The model only loops on the whole transcript; a part or the merged part notes is fine.
+                    return transcript.count > 12_000 ? repeated : PipelineTests.validNote
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done)
+        XCTAssertFalse(result.message.contains("transcript only"), result.message)
+        // 2 whole-transcript attempts + at least 2 parts + 1 merge.
+        XCTAssertGreaterThanOrEqual(calls.count, 5)
+        let note = try String(contentsOf: try XCTUnwrap(result.notePath), encoding: .utf8)
+        XCTAssertTrue(note.contains("Executive summary"))
+        XCTAssertFalse(note.contains("No summary:"))
+    }
+
+    private func longSegments() -> [[String: Any]] {
+        (0..<400).map { i in
+            ["speaker": "SPEAKER_0\(i % 2)", "start": Double(i) * 5, "end": Double(i) * 5 + 4,
+             "text": "Turn \(i): we talked about item number \(i) and what it means for the plan."]
+        }
+    }
+
+    /// #4011 review: a part that is cancelled or hits a transient outage must not become a permanent transcript-only note.
+    func testChunkedFallbackDoesNotTurnAnOutageIntoADoneNote() async throws {
+        let (cfg, input) = try makeEnv()
+        let segments = longSegments()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    if transcript.count > 12_000 { return repeated }
+                    throw RetryableDependencyError("ollama dropped")
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertNotEqual(result.status, .done, result.message)
+        XCTAssertNotEqual(result.status, .failed, result.message)
+    }
+
+    /// #4011 review: a merge that comes back truncated falls back to the transcript-only note, not a stuck `.failed`.
+    func testChunkedMergeFailureStillWritesTranscriptOnlyNote() async throws {
+        let (cfg, input) = try makeEnv()
+        let segments = longSegments()
+        let repeated = String(repeating: "the cat sat on mat ", count: 20)
+        let result = await Pipeline.processOne(
+            path: input, config: cfg,
+            deps: deps(
+                transcribe: { _, _ in ["segments": segments] },
+                summarise: { transcript, _, _, _ in
+                    if transcript.count > 12_000 { return repeated }
+                    return transcript.contains("Notes from part") ? "# Meeting notes\n\nShort." : PipelineTests.validNote
+                }),
+            stableChecks: 1, stableDelay: 0)
+        XCTAssertEqual(result.status, .done, result.message)
+        XCTAssertTrue(result.message.contains("transcript only"), result.message)
     }
 
     // MARK: Summariser selection

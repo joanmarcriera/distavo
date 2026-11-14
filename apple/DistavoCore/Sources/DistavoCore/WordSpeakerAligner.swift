@@ -31,6 +31,61 @@ public enum WordSpeakerAligner {
     /// beyond it the speaker is unknown (spec §5.5).
     public static let carryGap = 1.0
 
+    /// A subsegment that straddles a turn boundary is cut there only when each
+    /// side holds at least this many words (#3953): a fast hand-off ("...five and
+    /// seven." / "How old?") leaves no 0.15 s gap, so the whole run used to take
+    /// one label; a lone word at an edge stays with its neighbours, so a
+    /// diarisation flicker cannot shred a sentence.
+    public static let minSplitWords = 2
+
+    /// Speaker of the turn covering most of a word (midpoint fallback), nil when none.
+    static func speakerOf(_ w: TimedWord, in turns: [SpeakerTurn]) -> Int? {
+        var best: (Int, Double)? = nil
+        for t in turns {
+            let o = min(w.end, t.end) - max(w.start, t.start)
+            if o > 0, best == nil || o > best!.1 { best = (t.speaker, o) }
+        }
+        if best == nil {
+            let m = (w.start + w.end) / 2
+            return turns.first { m >= $0.start && m <= $0.end }?.speaker
+        }
+        return best?.0
+    }
+
+    /// Cuts a gap-free word group where its words move from one turn's speaker to
+    /// another's, keeping runs of at least `minSplitWords` words.
+    static func splitAtTurnBoundaries(_ group: [TimedWord], turns: [SpeakerTurn]) -> [[TimedWord]] {
+        guard group.count >= 2 * minSplitWords else { return [group] }
+        var per = group.map { speakerOf($0, in: turns) }
+        // Words before the first covered one take its label (#5934): a leading
+        // uncovered run must never become a group of its own, or it would inherit
+        // the previous group's speaker through `carryGap`.
+        if let first = per.firstIndex(where: { $0 != nil }), first > 0 {
+            for k in 0..<first { per[k] = per[first] }
+        }
+        // Runs of identical (non-nil) labels; nil words join the preceding run.
+        var runs: [(speaker: Int?, range: Range<Int>)] = []
+        var i = 0
+        while i < per.count {
+            var j = i + 1
+            while j < per.count, per[j] == per[i] || per[j] == nil { j += 1 }
+            runs.append((per[i], i..<j)); i = j
+        }
+        // Fold runs that are too short into the previous (or next) run.
+        var merged: [(speaker: Int?, range: Range<Int>)] = []
+        for r in runs {
+            if r.range.count < minSplitWords, var last = merged.popLast() {
+                last.range = last.range.lowerBound..<r.range.upperBound; merged.append(last)
+            } else if let last = merged.last, last.speaker == r.speaker {
+                merged[merged.count - 1].range = last.range.lowerBound..<r.range.upperBound
+            } else { merged.append(r) }
+        }
+        if merged.count > 1, merged[0].range.count < minSplitWords {
+            let f = merged.removeFirst(); merged[0].range = f.range.lowerBound..<merged[0].range.upperBound
+        }
+        return merged.map { Array(group[$0.range]) }
+    }
+
     public static func whisperXDictionary(words rawWords: [TimedWord], turns rawTurns: [SpeakerTurn]) -> [String: Any] {
         // M8: sort by (start, end) rather than start alone, so two entries that
         // share a start time (a zero-length turn, or a duplicated timestamp in
@@ -49,6 +104,7 @@ public enum WordSpeakerAligner {
             if words[i].start - words[i - 1].end > betweenWordGap { groups.append([words[i]]) }
             else { groups[groups.count - 1].append(words[i]) }
         }
+        groups = groups.flatMap { splitAtTurnBoundaries($0, turns: turns) }
 
         // 2. Speaker per subsegment: largest intersection. A subsegment that
         // overlaps no turn inherits the previous subsegment's speaker if the

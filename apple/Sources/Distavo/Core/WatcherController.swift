@@ -32,6 +32,9 @@ final class WatcherController: ObservableObject {
     /// from their `.tooshort` markers like `failedRecordings`. The menu offers
     /// to move each one to the Bin.
     @Published private(set) var tooShortRecordings: [(base: String, reason: String)] = []
+    /// Recordings whose conversion failed identically twice (`.unreadable`, Vikunja #5283/#5404): skipped
+    /// until the user picks Retry or Move to Bin in the menu, or "Process now".
+    @Published private(set) var unreadableRecordings: [(base: String, reason: String)] = []
     /// "Catalan 92%, English 71%" from the last recording the router detected
     /// a language for (Vikunja #2161); survives relaunch via UserDefaults so
     /// Settings can caption the Language picker with it.
@@ -105,8 +108,11 @@ final class WatcherController: ObservableObject {
         self.needsOnboarding = !UserDefaults.standard.bool(forKey: Self.onboardedKey)
         // Fresh installs default to the on-device engine sized for this Mac;
         // existing config files keep whatever backend they already use.
-        var cfg = (try? Config.load(from: Config.defaultConfigURL,
-                                    fresh: .recommendedForThisMac())) ?? Config()
+        // An unreadable config gives defaults AND a log line, with the broken file kept beside it (#4374).
+        let loaded = Config.loadReportingProblems(from: Config.defaultConfigURL,
+                                                  fresh: .recommendedForThisMac())
+        var cfg = loaded.config
+        let configProblem = loaded.problem
         // A config carried over from another Mac may say "embedded" on
         // hardware that can't run it (Intel) — fall back to the server backend
         // rather than failing every recording.
@@ -117,9 +123,12 @@ final class WatcherController: ObservableObject {
         self.config = cfg
         self.watchIntervalSeconds = cfg.watchIntervalSeconds
         self.allowLocalOllama = cfg.summarise.allowLocalFallback
-        clearStaleProcessing()
+        // #6759: a `.processing` marker that survived to launch means Distavo died on that recording (a normal
+        // quit clears them, `clearMarkersOnQuit`). Set it aside instead of retrying it into another crash.
+        interruptedAtLaunch = store()?.setAsideInterrupted() ?? []
         recentActivity = activityLog.recent(12)
         log("Distavo started")
+        if let configProblem { log("Config problem: \(configProblem)") }
         // Map pipeline stage boundaries onto the icon (converting → loading;
         // transcribing/summarising → transcribing). Both backends emit these.
         self.deps.onPhase = { [weak self] phase in
@@ -233,6 +242,7 @@ final class WatcherController: ObservableObject {
         }
         seedLastNoteFromDisk()
         refreshFailedRecordings()
+        announceInterrupted()   // #6759
         reconcileSearchIndex()   // #2942, background
         maybeWarnLocalNetwork()
         while !Task.isCancelled {
@@ -293,13 +303,70 @@ final class WatcherController: ObservableObject {
             stateDir: workDir.appendingPathComponent(".state"), notesDir: notesDir)
     }
 
-    private func clearStaleProcessing() { store()?.clearStaleProcessing() }
+    /// Recordings set aside at launch because Distavo stopped while processing them (#6759); announced once
+    /// the notifier is ready (`runAfterLaunch`).
+    private var interruptedAtLaunch: [String] = []
+
+    /// A normal quit (#6759): drop the in-flight `.processing` marker, so only a crash leaves one for
+    /// `setAsideInterrupted` at the next launch. The file stays pending and is processed again next time.
+    func clearMarkersOnQuit() { store()?.clearProcessingMarkers() }
+
+    private func announceInterrupted() {
+        guard !interruptedAtLaunch.isEmpty else { return }
+        for base in interruptedAtLaunch {
+            log("Set aside \(base): Distavo stopped while processing it last time; Process now tries it again")
+        }
+        let names = interruptedAtLaunch.prefix(2).joined(separator: ", ")
+            + (interruptedAtLaunch.count > 2 ? " and \(interruptedAtLaunch.count - 2) more" : "")
+        notifier.notify(title: "Recording set aside",
+                        body: "Distavo stopped while processing \(names). It was set aside so it cannot stop Distavo "
+                            + "again. Choose Process now in the menu to try once more.")
+        interruptedAtLaunch = []
+    }
 
     /// Re-read the failed set from disk so the menu reflects reality rather than
     /// only what happened since launch.
     func refreshFailedRecordings() {
         failedRecordings = store()?.failedBases() ?? []
         tooShortRecordings = store()?.tooShortBases() ?? []
+        unreadableRecordings = store()?.unreadableBases() ?? []
+    }
+
+    /// Menu "Retry": release every unreadable recording and rescan (Vikunja #5404).
+    func retryUnreadableRecordings() {
+        Task { [weak self] in
+            guard let self else { return }
+            self.log("Retrying \(self.unreadableRecordings.count) unreadable recording(s)")
+            self.store()?.retryUnreadable()
+            self.refreshFailedRecordings()
+            await self.scanOnce()
+        }
+    }
+
+    /// Menu "Move to Bin" for an unreadable recording. Like the too-short path: the Bin (recoverable),
+    /// and a file that changed size since the marker was set is released instead of trashed.
+    func trashUnreadableRecording(_ base: String) {
+        let recordingsDir = Config.resolvePath(config.recordingsDir)
+        guard let url = Self.recordingURL(forBase: base, in: recordingsDir) else {
+            store()?.clearUnreadable(base)
+            refreshFailedRecordings()
+            return
+        }
+        guard store()?.isUnreadable(base, currentSize: DistavoState.fileSize(url)) == true else {
+            store()?.clearUnreadable(base)
+            log("\(url.lastPathComponent) changed since it was marked unreadable — it will be processed instead")
+            refreshFailedRecordings()
+            return
+        }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            store()?.clearUnreadable(base)
+            log("Moved unreadable recording to the Bin: \(url.lastPathComponent)")
+        } catch {
+            log("Could not move \(url.lastPathComponent) to the Bin: \(error.localizedDescription)")
+            notifier.notify(title: "Could not move recording to the Bin", body: error.localizedDescription)
+        }
+        refreshFailedRecordings()
     }
 
     /// Move a too-short recording to the Bin and forget its marker (Vikunja
@@ -715,6 +782,7 @@ final class WatcherController: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             self.store()?.retryFailed()
+            self.store()?.retryUnreadable()   // an explicit user action revives terminal files too (#5404)
             await self.scanOnce()
         }
     }

@@ -11,7 +11,7 @@ final class SearchIndexTests: XCTestCase {
     private var indexURL: URL!
 
     override func setUpWithError() throws {
-        root = FileManager.default.temporaryDirectory.appendingPathComponent("search-\(UUID().uuidString)")
+        root = TestTemp.root.appendingPathComponent("search-\(UUID().uuidString)")
         notes = root.appendingPathComponent("notes")
         work = root.appendingPathComponent("work")
         indexURL = root.appendingPathComponent("support/search-index.sqlite")   // parent does not exist yet

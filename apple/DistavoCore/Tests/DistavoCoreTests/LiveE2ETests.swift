@@ -28,7 +28,7 @@ final class LiveE2ETests: XCTestCase {
         cfg.applyEnvOverrides(env)  // WHISPERX_URL / OLLAMA_URL / OLLAMA_MODEL
 
         // 1) Convert with AVFoundation.
-        let wav = FileManager.default.temporaryDirectory
+        let wav = TestTemp.root
             .appendingPathComponent("distavo-live-\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: wav) }
         try await AudioConverter.convertToWav(source: source, dest: wav)

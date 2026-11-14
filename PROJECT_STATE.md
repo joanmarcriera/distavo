@@ -1,5 +1,30 @@
 # Project State
 
+## Next action (2026-11-14 00:35, feedback drive)
+
+- Integration branch `feat/feedback-drive-2026-11-13` = the whole d..s drive chain (private docs stripped) + origin/main
+  PR #16 + #6759 long recordings in parts / crash-loop guard + 8-hour recording cap. swift test 1711 / 0 failures,
+  Direct Debug build OK. Next: merge `fix/inert-defaults-review-abc` (review decisions A-C) after its review, three
+  edition Release builds, What's New, bump to 1.21.0 (24), git-cliff, PR to GitHub main, tag v1.21.0.
+  App Store gate clear: 1.20.0 READY_FOR_DISTRIBUTION (ASC dry run 2026-11-14 00:24).
+  Write-up: `docs/drives/2026-11-14-feedback-drive.md` (to come).
+
+## Previous next action (2026-11-09, drive review lane, superseded)
+
+- **p** (`feat/drive-distavo-p-2026-11-09`, from o a3199c1, on forgejo-work) is the newest branch: it contains o, n … j
+  and every older drive branch. Merge order and exact commands: `docs/remote-direction.md` (origin = GitHub primary,
+  forgejo = read-only pull mirror, forgejo-work = drive branches). p adds: Opus review fixes of o, #4007 stop when
+  the call ends (off by default, by-eye item 3 in `docs/drive-review-2026-11-09.md`), DistavoEmbedded temp-dir
+  leak fix (#6647). swift test: DistavoCore 1626 / 0 failures, DistavoEmbedded 92 / 0; Direct Debug build succeeded.
+
+- l (`feat/drive-distavo-l-2026-11-09`, from k, on forgejo-work): review of k plus #4010/#3951/#4007 fixes,
+  swift test 1595 / 0 failures; see "Review of k" in `docs/drive-review-2026-11-09.md`. Merge order: j, k, l,
+  after the by-eye checks.
+
+- Read `docs/drive-review-2026-11-09.md`, take decisions A-C, run the by-eye checks, then merge
+  `feat/drive-distavo-j-2026-11-09` (contains the whole h chain, lanes d-h) into `main`:
+  `git checkout main && git merge --no-ff feat/drive-distavo-j-2026-11-09`. Dry run clean; swift test 1581 / 0 failures.
+
 ## Resume here (2026-10-21)
 
 - **v1.20.0 (build 23) shipped** from `main` @ c7e1f68, tag `v1.20.0` on `origin` (GitHub, primary).
@@ -52,8 +77,8 @@ replacement for rejected version 1.9.0 build 10.
 - `ops/site` is deployed and live at `https://distavo.com/`.
 - Homepage now includes recording-law nuance and a free/open recorder tools
   section, including Notely Voice from F-Droid.
-- Added `version-bump.yml` so every non-bot push to `main` gets a follow-up
-  commit that increments the marketing minor version and build number.
+- Added `version-bump.yml` to increment the marketing minor version and build
+  number in a follow-up commit. It is `workflow_dispatch` only (run by hand, not on push); `ci.yml` is too.
 - Remote branch hygiene was checked after `git fetch --prune`; only `main` and
   the active unmerged `fix/appstore-signing` branch remain.
 - App Store release workflow now requires an explicit Mac App Store

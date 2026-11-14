@@ -34,7 +34,7 @@ final class GemmaRig: @unchecked Sendable {
     /// the manifest/sha verification runs for real); nil serves empty files,
     /// which the published tokenizer sha rejects.
     init(weights: URL?, optedIn: Bool) throws {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-gemma-\(UUID().uuidString)", isDirectory: true)
         self.root = root
         for name in ["", "recordings", "work", "notes"] {

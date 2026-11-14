@@ -46,7 +46,7 @@ final class BenchmarkTests: XCTestCase {
         XCTAssertTrue(caption.contains("6.1 s per minute of audio, peak 2.3 GB"))
         XCTAssertTrue(caption.contains("failed (no model)"))
 
-        let url = FileManager.default.temporaryDirectory
+        let url = TestTemp.root
             .appendingPathComponent("distavo-bench-\(UUID().uuidString)/watcher-config.json")
         var cfg = Config(); cfg.benchmark = r
         try Config.save(cfg, to: url)

@@ -14,7 +14,7 @@ final class TranscriptRevertRenameTests: XCTestCase {
     }
 
     private func env() throws -> (notes: URL, work: URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-rr-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-rr-\(UUID().uuidString)")
         let notes = root.appendingPathComponent("notes"), work = root.appendingPathComponent("work")
         try FileManager.default.createDirectory(at: notes, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: work, withIntermediateDirectories: true)

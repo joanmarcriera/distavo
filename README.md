@@ -103,6 +103,11 @@ Config and the work/cache directory live under
 Supported input formats include `.wav`, `.m4a`, `.mp3`, `.opus`, `.ogg`,
 `.flac`, `.aac`, `.mov`, `.mp4`, and `.m4v` (anything AVFoundation can decode).
 
+![Distavo architecture: recording to meeting note](docs/architecture/distavo.architecture.png)
+
+Interactive diagram: [`docs/architecture/distavo.architecture.html`](docs/architecture/distavo.architecture.html)
+(spec: [`distavo.architecture.json`](docs/architecture/distavo.architecture.json); prose: [`docs/architecture.md`](docs/architecture.md)).
+
 ## Privacy
 
 Distavo is built to keep your data on machines you control:

@@ -22,6 +22,14 @@ private final class Calls: @unchecked Sendable {
     var targets: [SummariseTarget] { lock.lock(); defer { lock.unlock() }; return _targets }
 }
 
+/// The last transcript the fake summariser saw.
+private final class SeenTranscript: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _value: String?
+    func set(_ v: String) { lock.lock(); _value = v; lock.unlock() }
+    var value: String? { lock.lock(); defer { lock.unlock() }; return _value }
+}
+
 /// Vikunja #2947: regenerate re-summarises from the cached transcript only and
 /// keeps the previous note.
 final class RegenerateTests: XCTestCase {
@@ -31,7 +39,7 @@ final class RegenerateTests: XCTestCase {
 
     private func makeEnv(transcript: String? = "SPEAKER_00: hello there",
                          note: String? = "# Meeting notes\n\nOLD NOTE BODY") throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory
+        let root = TestTemp.root
             .appendingPathComponent("distavo-regen-\(UUID().uuidString)")
         var cfg = Config()
         cfg.recordingsDir = root.appendingPathComponent("recordings").path
@@ -95,6 +103,21 @@ final class RegenerateTests: XCTestCase {
         XCTAssertEqual(second.status, .done)
         XCTAssertEqual(backups(notes).count, 2, "an existing backup must never be overwritten")
         XCTAssertTrue(backups(notes).contains { read($0) == oldNote })
+    }
+
+    /// #3951 review: a transcript cached BEFORE the guard existed (the recording that reported the bug) must not
+    /// reach the summary prompt unmarked when the note is regenerated.
+    func testRegenerateGuardsATranscriptCachedBeforeTheGuard() async throws {
+        let slur = ["n", "i", "g", "g", "e", "r"].joined()   // rebuilt so the repository does not contain it
+        let (cfg, _, _) = try makeEnv(transcript: "SPEAKER_00: I wrote the \(slur)s plugins. Then he said \(slur).")
+        let seen = SeenTranscript()
+        let result = await Pipeline.regenerate(base: "demo", options: .init(), config: cfg,
+                                               deps: deps(Calls(), summarise: { t in seen.set(t); return RegenerateTests.newNote }))
+        XCTAssertEqual(result.status, .done, result.message)
+        let input = try XCTUnwrap(seen.value)
+        XCTAssertFalse(input.lowercased().contains(slur), input)
+        XCTAssertTrue(input.contains("Nagios plugins"), input)
+        XCTAssertTrue(input.contains(OffensiveWordGuard.placeholder), input)
     }
 
     func testMissingTranscriptIsAClearErrorAndTouchesNothing() async throws {
@@ -166,6 +189,29 @@ final class RegenerateTests: XCTestCase {
         XCTAssertEqual(calls.targets.first, .ollama(url: cfg.summarise.server.url, model: "big-model:1b"))
     }
 
+    /// #4013: a regenerate recomputes the "recording stops mid-conversation" flag from the
+    /// saved timed transcript and the source audio length, like `processOne`.
+    func testRegenerateFlagsATruncatedRecording() async throws {
+        let (cfg, _, work) = try makeEnv()
+        let cut = TranscriptSegments.Segment(start: 1850, end: 1859.5, text: "and the rate is what we will not accept averages", speaker: "SPEAKER_00")
+        try TranscriptSegments(segments: [cut]).save(workDir: work, base: "demo")
+        let source = work.appendingPathComponent("demo.wav")
+        try Data().write(to: source)
+        func run(duration: Double) async -> NoteContext? {
+            let calls = Calls()
+            var d = deps(calls)
+            d.audioDurationSeconds = { _ in duration }
+            let r = await Pipeline.regenerate(base: "demo", options: RegenerateOptions(), config: cfg, deps: d, sourcePath: source)
+            XCTAssertEqual(r.status, .done, r.message)
+            return calls.contexts.first
+        }
+        let flagged = await run(duration: 1860)
+        XCTAssertEqual(flagged?.recordingMayBeTruncated, true)
+        XCTAssertTrue(flagged?.summaryNotes.contains(TruncationCheck.banner) ?? false)
+        let silent = await run(duration: 1900)   // trailing silence: the speaker stopped first
+        XCTAssertEqual(silent?.recordingMayBeTruncated, false)
+    }
+
     /// Kill switch: "embedded" with on-device summaries off means Ollama, and a
     /// typed model name lands on the Ollama server target (never `embeddedModel`).
     func testOnDeviceBackendOffFallsBackToOllama() async throws {
@@ -217,7 +263,7 @@ final class RegenerateTests: XCTestCase {
     }
 
     private func processOneEnv(language: String = "auto") throws -> (Config, URL, URL) {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("distavo-meta-\(UUID().uuidString)")
+        let root = TestTemp.root.appendingPathComponent("distavo-meta-\(UUID().uuidString)")
         let rec = root.appendingPathComponent("recordings")
         try FileManager.default.createDirectory(at: rec, withIntermediateDirectories: true)
         let input = rec.appendingPathComponent("demo.opus")

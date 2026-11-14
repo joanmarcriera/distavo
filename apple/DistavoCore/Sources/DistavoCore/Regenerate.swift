@@ -122,7 +122,9 @@ extension Pipeline {
         participants: String? = nil, transcript: String = ""
     ) -> (template: SummaryTemplate?, note: String?) {
         let chosen = options.templateID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if chosen.lowercased() == SummaryTemplateCatalog.noneID { return (nil, nil) }
+        if chosen.lowercased() == SummaryTemplateCatalog.noneID {
+            return (config.summarise.neutralDefault ? SummaryTemplateCatalog.neutralDefault : nil, nil)   // #6666
+        }
         if !chosen.isEmpty, chosen.lowercased() != SummaryTemplateCatalog.autoID,
            let t = SummaryTemplateCatalog.template(id: chosen, config: config) { return (t, nil) }
         let folder = sourcePath.map {
@@ -171,7 +173,9 @@ extension Pipeline {
         // 1. The cached transcript. Absent for notes made before it was kept, or
         //    after the work folder was cleared: say so, change nothing.
         let transcriptPath = cachedTranscriptURL(workDir: workDir, base: base)
-        let transcript = ((try? String(contentsOf: transcriptPath, encoding: .utf8)) ?? "")
+        // The #3951 guard again: a transcript cached before the guard existed must not reach the prompt
+        // unmarked (idempotent on a guarded one). In memory only; the cached file is left as it is.
+        let transcript = OffensiveWordGuard.apply((try? String(contentsOf: transcriptPath, encoding: .utf8)) ?? "").text
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !transcript.isEmpty else {
             return ProcessResult(
@@ -209,26 +213,41 @@ extension Pipeline {
         // Speakers renamed after transcription (#2944): the transcript carries the
         // new names, so the owner's label and the participants hint follow them.
         let renamed = SpeakerNames.regenerateContext(
-            userSpeaker: cfg.userSpeaker, participants: participants, workDir: workDir, base: base)
+            userSpeaker: TranscriptMeta.load(workDir: workDir, base: base)?.ownerSpeaker ?? cfg.userSpeaker,   // channel-labelled: SPEAKER_00
+            participants: participants, workDir: workDir, base: base)
         let resolvedTemplate = regenerateTemplate(
             options: options, config: cfg, workDir: workDir, sourceBase: sourceBase, sourcePath: sourcePath,
             participants: renamed.participants, transcript: transcript)
         var context = NoteContext(
-            noteOwner: cfg.noteOwner, userSpeaker: renamed.userSpeaker, participants: renamed.participants,
+            noteOwner: cfg.noteOwner, userSpeaker: OwnerSpeakerLabel.effective(configured: renamed.userSpeaker, transcript: transcript),   // #3857
+            participants: renamed.participants,
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             // The user's instruction, plus the title/tags request when #2954 asks for it.
-            customInstruction: NoteMeta.mergedInstruction(options.customInstruction, notes: cfg.notes),
+            customInstruction: OwnerIdentity.merged(options.customInstruction, noteOwner: cfg.noteOwner, notes: cfg.notes),   // #6772
             // The glossary reaches the prompt exactly as in `processOne`. The cached
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
-            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + cfg.transcribe.vocabulary),   // this meeting's terms first (#3584)
+            glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? [])
+                + OwnerIdentity.terms(noteOwner: cfg.noteOwner) + cfg.transcribe.vocabulary + (hints?.roleTerms(
+                configuredLanguage: cfg.transcribe.language,
+                override: LanguageOverride.load(workDir: workDir, base: sourceBase)) ?? [])),   // this meeting's terms first (#3584)
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
                 resolvedTemplate.template,
                 style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
             scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
             calendarAttendees: calendarAttendees)   // #2946
         if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+        // #4013: recompute the "stops mid-conversation" flag as processOne does. It needs the
+        // source audio length; without the source (moved, compacted away) nothing is judged.
+        if let source = sourcePath, FileManager.default.fileExists(atPath: source.path),
+           let timed = TranscriptSegments.load(workDir: workDir, base: base)
+                ?? TranscriptSegments.load(workDir: workDir, base: sourceBase),
+           let audio = await deps.audioDurationSeconds(source),
+           TruncationCheck.isTruncated(segments: timed.segments, audioSeconds: audio) {
+            context.recordingMayBeTruncated = true
+            context.summaryNotes.append(TruncationCheck.banner)
+        }
 
         // The old note's "Transcribed on this Mac with …" footer describes the
         // transcription, which did not change: carry it over.
@@ -247,8 +266,15 @@ extension Pipeline {
             var noteMeta: NoteMeta.Extracted?   // the model's title/tags (#2954)
             var noteBody = "", footer = provenance
             var languageRetried = false   // #3585
+            // #6759: a transcript longer than the Ollama context is summarised in parts, as in `processOne`.
+            var summariseInput = transcript
+            if let long = try await Pipeline.longTranscriptInput(transcript, target: target, options: cfg.summarise.options,
+                                                                 context: context, summarise: deps.summarise) {
+                summariseInput = long.input
+                context.summaryNotes.append(Pipeline.partedSummaryNote(parts: long.parts))
+            }
             func attempt() async throws -> (text: String, failures: [String]) {
-                let raw = try await deps.summarise(transcript, target, cfg.summarise.options, context)
+                let raw = try await deps.summarise(summariseInput, target, cfg.summarise.options, context)
                 var cleaned = SummaryCleaner.stripLeakedWorkingSteps(raw) { print("[Distavo] \($0)") }
                 if cfg.notes.asksModelForMetadata {
                     noteMeta = NoteMeta.extract(from: cleaned)
@@ -256,7 +282,8 @@ extension Pipeline {
                 }
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 // Same post-summary checks as processOne (1.19).
-                var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context)
+                var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context,
+                                                applyCorrections: cfg.summarise.applyCorrections)
                 cleaned = checked.text
                 if languageRetried, let requested = context.noteLanguage,
                    let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {

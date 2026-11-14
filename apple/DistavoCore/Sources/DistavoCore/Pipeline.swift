@@ -423,7 +423,9 @@ public enum Pipeline {
         // Then the role packs of the participants line (accountant -> UK tax terms, RoleTermPacks).
         // Role terms go AFTER the user's global vocabulary (the prompt budget trims from the end) and never feed
         // the fuzzy post-pass, which rewrites words: only terms the owner typed or named are snapped.
-        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? [])
+        // The owner's own name (full and first, #6772) rides with the participants: a misheard "Marc" must not become
+        // a second person. Unset owner adds nothing.
+        let meetingTerms = (hints?.terms ?? []) + (hints?.participantTerms ?? []) + OwnerIdentity.terms(noteOwner: config.noteOwner)
         let roleTerms = hints?.roleTerms ?? []
         if !meetingTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(meetingTerms + transcribeConfig.vocabulary)
@@ -607,7 +609,7 @@ public enum Pipeline {
                 participants: participants, meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
-                customInstruction: NoteMeta.mergedInstruction(nil, notes: config.notes),
+                customInstruction: OwnerIdentity.merged(nil, noteOwner: config.noteOwner, notes: config.notes),   // #6772 owner rule + #2954
                 glossary: transcribeConfig.vocabulary,
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.

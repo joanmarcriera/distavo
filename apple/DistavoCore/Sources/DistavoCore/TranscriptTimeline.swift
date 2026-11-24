@@ -485,7 +485,14 @@ public enum TranscriptEditing {
         if n == m, zip(rh, ch).allSatisfy(==) {
             // (All their letters, not only those at the cut: speech that repeats, "Yes. Yes.", looks the same
             // on both sides of a cut that moved.)
-            let cutsAgree = (0..<n - 1).allSatisfy { rh[$0] != rh[$0 + 1] || (rl[$0] == cl[$0] && rl[$0 + 1] == cl[$0 + 1]) }
+            // Written out as a loop: the one-line form compiles here but times out the type checker on the
+            // CI runners (24 Nov 2026), and `0..<n - 1` would trap for an empty file.
+            var cutsAgree = true
+            for k in 0..<max(0, n - 1) where rh[k] == rh[k + 1] {
+                let sameHere: Bool = rl[k] == cl[k]
+                let sameNext: Bool = rl[k + 1] == cl[k + 1]
+                if !(sameHere && sameNext) { cutsAgree = false; break }
+            }
             if cutsAgree { return (0..<n).map { $0...$0 } }
         }
         var earliest: [ClosedRange<Int>] = [], j = 0

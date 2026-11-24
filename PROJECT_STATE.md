@@ -1,12 +1,19 @@
 # Project State
 
-## Resume here (2026-11-23 12:30)
+## Resume here (2026-11-24 17:30)
+
+- **1.22.0 (build 25)** is cut from `release/1.22` (PR https://github.com/joanmarcriera/distavo/pull/21), a squash of
+  `feat/people-pages` plus "Was this two meetings?" (`recording.ask_two_meetings`, off by default, lossless cut after review).
+  `ops/pre-tag-check.sh --full v1.22.0` all PASS (DistavoCore 2200+ / 0 failures, DistavoEmbedded 95 / 0, three editions, gates).
+  `feat/people-pages` keeps the granular history (private remote only); new work branches from `main`.
+- **Next action:** Marc: approve the `app-store-submission` environment for the v1.22.0 run, then do the two-meetings manual check in `docs/manual-checks-1.17.md`.
+
+## Earlier (2026-11-23 12:30, superseded)
 
 - Branch `feat/people-pages` (local only, from `feat/drive-1123-ideas`): people pages (`docs/people-directory.md`) and voice
   profiles (#2944 phase 2, `docs/voice-profiles-plan.md`) known people in the prompt (`summarise.known_people`), people offered in the participants question and the
   "Name Voices…" window, all off or menu-only. DistavoCore 1966 / 0 failures,
   DistavoEmbedded 94 / 0, Direct Debug and App Store Release builds succeeded, live run on synthetic voices passed.
-- **Next action:** Marc: in the Debug build switch on Settings > Transcription > "Recognise remembered voices", open "Name Voices…", name the recurring voices, then record or reprocess a meeting and compare the note; then decide the model licence scope and the PRIVACY.md wording.
 
 ## Earlier (2026-11-23 02:00, superseded)
 

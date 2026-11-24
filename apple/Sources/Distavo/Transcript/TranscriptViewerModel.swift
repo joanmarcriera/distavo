@@ -29,6 +29,9 @@ final class TranscriptViewerModel: ObservableObject {
     private let knownRules: () -> [ReplacementRule]
     /// Adds rules (and any name-like terms) to Settings; "Learn from this transcript" (#3584).
     private let learn: ([ReplacementRule]) -> Void
+    /// True while the note of a base is being re-summarised from elsewhere (the Notes window): that run read the
+    /// transcript in two steps, so a save in between could give one note half of each.
+    private let noteIsBeingRewritten: (String) -> Bool
 
     // MARK: Published state
     @Published private(set) var base: String = ""
@@ -39,7 +42,18 @@ final class TranscriptViewerModel: ObservableObject {
     @Published private(set) var plainText = ""
     /// Bumped whenever the displayed text must be replaced wholesale.
     @Published private(set) var contentID = 0
-    @Published var isEditing = false { didSet { if isEditing { highlight = nil } } }
+    @Published var isEditing = false {
+        didSet {
+            if isEditing { highlight = nil; selectedSegments = [] }
+            // What was selected while Edit was on counts again once it is off (nothing was typed).
+            else if oldValue { selectionChanged(lastSelection) }
+        }
+    }
+    private var lastSelection = NSRange(location: NSNotFound, length: 0)
+    /// The segments under the selection while reading (not editing): what "Move to Speaker" acts on.
+    @Published private(set) var selectedSegments: [Int] = []
+    /// Set for one content load: the part to select instead of going back to the top.
+    private(set) var selectAfterLoad: NSRange?
     @Published private(set) var dirty = false
     @Published private(set) var highlight: Int?
     @Published private(set) var isPlaying = false
@@ -78,7 +92,9 @@ final class TranscriptViewerModel: ObservableObject {
          didSave: @escaping (String) -> Void,
          resummarise: @escaping (String) async -> (ok: Bool, message: String),
          knownRules: @escaping () -> [ReplacementRule] = { [] },
-         learn: @escaping ([ReplacementRule]) -> Void = { _ in }) {
+         learn: @escaping ([ReplacementRule]) -> Void = { _ in },
+         noteIsBeingRewritten: @escaping (String) -> Bool = { _ in false }) {
+        self.noteIsBeingRewritten = noteIsBeingRewritten
         self.workDir = workDir; self.notes = notes
         self.findSource = findSource; self.didSave = didSave; self.resummarise = resummarise
         self.knownRules = knownRules; self.learn = learn
@@ -107,6 +123,7 @@ final class TranscriptViewerModel: ObservableObject {
             show(t)
         } else {
             transcript = nil; layout = nil
+            selectAfterLoad = nil; selectedSegments = []
             plainText = clean.isEmpty ? "No transcript was saved for this note." : clean
             editedText = plainText; dirty = false
             headerRanges = []; headerLineIndices = []
@@ -114,9 +131,12 @@ final class TranscriptViewerModel: ObservableObject {
         }
     }
 
-    private func show(_ t: TranscriptSegments) {
+    private func show(_ t: TranscriptSegments, selecting segments: [Int] = []) {
         transcript = t
+        lastSelection = NSRange(location: NSNotFound, length: 0)   // it was a range of the text shown before
         let l = TranscriptLayout(t)
+        selectAfterLoad = l.range(ofSegments: segments)
+        selectedSegments = segments
         layout = l; plainText = l.text; editedText = l.text
         headerRanges = l.lines.compactMap { if case .header = $0.kind { return $0.range } else { return nil } }
         headerLineIndices = l.headerLineIndices
@@ -135,6 +155,64 @@ final class TranscriptViewerModel: ObservableObject {
         if isDirty { highlight = nil }
     }
 
+    // MARK: This part was someone else
+
+    func selectionChanged(_ range: NSRange) {
+        lastSelection = range
+        let now = (isEditing || dirty) ? [] : (layout?.segmentIndices(in: range) ?? [])
+        if now != selectedSegments { selectedSegments = now }
+    }
+
+    /// The speakers a part can be given to, in the order they first speak.
+    var speakerChoices: [String] { transcript.map(TranscriptEditing.speakers) ?? [] }
+
+    /// The speaker of the selected part when it is all one speaker's (that choice would change nothing).
+    var selectionSpeaker: String? {
+        guard let t = transcript else { return nil }
+        let who = Set(selectedSegments.filter(t.segments.indices.contains).map { t.segments[$0].speaker ?? "" })
+        return who.count == 1 ? who.first : nil
+    }
+
+    /// Two people came out as one speaker: the selected part now belongs to `speaker`, or to a new speaker
+    /// (nil), who gets the next free label and is named afterwards in Notes > Rename Speakers. Saved at once
+    /// like any transcript edit (originals kept, "Revert to original transcript" undoes it); the note is not
+    /// touched until it is re-summarised.
+    func moveSelection(to speaker: String?) {
+        guard !dirty, !isEditing, !busy, let t = transcript, !selectedSegments.isEmpty else { return }
+        guard !refusedWhileRewriting("Not changed") else { return }
+        let moved = selectedSegments
+        // A label the recording had before an edit or a rename is still taken.
+        let who = speaker ?? TranscriptEditing.newSpeakerLabel(in: t, alsoUsed: TranscriptEditStore.takenLabels(workDir: workDir, base: base))
+        let edited = TranscriptEditing.reassigning(moved, to: who, in: t)
+        guard edited != t else { return }
+        do {
+            try TranscriptEditStore.save(edited, workDir: workDir, base: base, expecting: loaded)
+        } catch let e as TranscriptEditStore.StoreError where e.changedOnDisk {
+            changedOnDisk = true
+            message = "Not changed: the transcript changed on disk (another action rewrote it) since this window loaded it. Reload to see the new transcript."
+            return
+        } catch {
+            message = "Not changed: \(error.localizedDescription)"
+            return
+        }
+        let count = zip(t.segments, edited.segments).filter { $0.speaker != $1.speaker }.count
+        show(edited, selecting: moved)
+        loaded = TranscriptEditStore.fingerprint(workDir: workDir, base: base)
+        canRevert = TranscriptEditStore.isModified(workDir: workDir, base: base)
+        hasCleanTranscript = true
+        noteIsStale = true
+        message = "\(count) part\(count == 1 ? "" : "s") moved to \(who). The note still shows the old speakers: re-summarise to rewrite it."
+            + (speaker == nil ? " Give \(who) a name in Notes > Rename Speakers." : "")
+        didSave(base)
+    }
+
+    /// Says so and returns true while this note is being re-summarised: the transcript is not written under it.
+    private func refusedWhileRewriting(_ what: String) -> Bool {
+        guard noteIsBeingRewritten(base) else { return false }
+        message = "\(what): this note is being re-summarised right now. Try again when it has finished\(dirty ? " (your edits are still shown)" : "")."
+        return true
+    }
+
     /// Throw away unsaved edits.
     func discardChanges() {
         guard let t = transcript else { return }
@@ -146,6 +224,7 @@ final class TranscriptViewerModel: ObservableObject {
     @discardableResult
     func save() -> Bool {
         guard dirty, let t = transcript, let l = layout else { return true }
+        guard !refusedWhileRewriting("Not saved") else { return false }
         guard let edits = l.edits(from: editedText, original: t) else {
             message = "Could not save: the transcript structure changed. Discard the changes and try again."
             return false
@@ -185,6 +264,7 @@ final class TranscriptViewerModel: ObservableObject {
     }
 
     func revertToOriginal() {
+        guard !refusedWhileRewriting("Not reverted") else { return }
         do {
             try TranscriptEditStore.revert(workDir: workDir, base: base, expecting: loaded)
         } catch let e as TranscriptEditStore.StoreError where e.changedOnDisk {

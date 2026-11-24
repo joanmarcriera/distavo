@@ -19,7 +19,49 @@ struct NotesView: View {
     /// sheet stays about that note whatever the list does behind it.
     @State private var regenerating: NoteEntry?
     @State private var renaming: NoteEntry?
+    @State private var splitting: NoteEntry?   // D077
     @FocusState private var fieldFocused: Bool
+
+    /// The Rename Speakers sheet (its own function: the closure list is too much for one `body` expression).
+    private func renameSheet(_ entry: NoteEntry) -> some View {
+        let dirs = controller.notesFolders
+        return RenameSpeakersView(
+            note: RenamableNote(base: entry.base, title: entry.title),
+            detect: { controller.detectedSpeakers(base: $0) },
+            resetMapping: { SpeakerRename.resetMapping(workDir: dirs.work, base: $0) },
+            preview: { SpeakerRename.preview(mapping: $1, base: $0, notesDir: dirs.notes) },
+            mergeCopies: { SpeakerRename.mergeCopies(workDir: dirs.work, base: $0) },
+            onReset: { base in
+                renaming = nil
+                Task { await controller.resetSpeakers(base: base); await model.refresh() }
+            },
+            onApply: { base, mapping in
+                renaming = nil
+                Task { await controller.renameSpeakers(base: base, mapping: mapping); await model.refresh() }
+            },
+            onCancel: { renaming = nil },
+            voiceProfilesOn: controller.voiceProfilesOn,
+            onApplyAndRemember: { base, mapping, voices in
+                renaming = nil
+                Task {
+                    // The rename first (when there is one), then the voices under their new names (#2944).
+                    if !mapping.isEmpty { await controller.renameSpeakers(base: base, mapping: mapping) }
+                    await controller.rememberVoices(base: base, names: voices)
+                    await model.refresh()
+                }
+            },
+            voiceGuesses: { SpeakerNames.voiceGuesses(workDir: dirs.work, base: $0) },
+            onConfirm: { base, names in
+                // Under the scan lock, like every other write to the names sidecar.
+                Task {
+                    await controller.runExclusivePass(onlyIf: { true }) {
+                        _ = try? SpeakerNames.confirmVoiceNames(names, workDir: dirs.work, base: base)
+                    }
+                    controller.log("Voice-recognised names confirmed: \(names.count)")   // a count only
+                    await model.refresh()
+                }
+            })
+    }
 
     var body: some View {
         HSplitView {
@@ -56,24 +98,10 @@ struct NotesView: View {
                 },
                 onCancel: { regenerating = nil })
         }
-        .sheet(item: $renaming) { entry in
-            let dirs = controller.notesFolders
-            RenameSpeakersView(
-                note: RenamableNote(base: entry.base, title: entry.title),
-                detect: { controller.detectedSpeakers(base: $0) },
-                resetMapping: { SpeakerRename.resetMapping(workDir: dirs.work, base: $0) },
-                preview: { SpeakerRename.preview(mapping: $1, base: $0, notesDir: dirs.notes) },
-                mergeCopies: { SpeakerRename.mergeCopies(workDir: dirs.work, base: $0) },
-                onReset: { base in
-                    renaming = nil
-                    Task { await controller.resetSpeakers(base: base); await model.refresh() }
-                },
-                onApply: { base, mapping in
-                    renaming = nil
-                    Task { await controller.renameSpeakers(base: base, mapping: mapping); await model.refresh() }
-                },
-                onCancel: { renaming = nil })
+        .sheet(item: $splitting) { entry in
+            SplitRecordingSheet(entry: entry, controller: controller, close: { splitting = nil })
         }
+        .sheet(item: $renaming) { entry in renameSheet(entry) }
     }
 
     // MARK: List
@@ -237,9 +265,11 @@ struct NotesView: View {
         case .exportTranscript: controller.exportTranscript(entry)
         case .copyTranscript: controller.copyTranscript(entry)
         case .exportClips: controller.exportKeyMomentClips(base: entry.base)
+        case .exportSalesCall: controller.exportSalesCall(entry)
         case .regenerate: regenerating = entry
         case .renameSpeakers: renaming = entry
         case .compare: controller.compareVersions(entry)
+        case .splitRecording: splitting = entry
         }
     }
 }
@@ -292,8 +322,8 @@ private struct NoteDetailView: View {
 
     private static let groups: [(title: String, actions: [NoteAction])] = [
         ("Read", [.open, .reveal, .openTranscript, .ask]),
-        ("Export", [.exportTranscript, .copyTranscript, .exportClips]),
-        ("Change", [.regenerate, .renameSpeakers, .compare]),
+        ("Export", [.exportTranscript, .copyTranscript, .exportClips, .exportSalesCall]),
+        ("Change", [.regenerate, .renameSpeakers, .compare, .splitRecording]),
     ]
 
     var body: some View {

@@ -34,9 +34,13 @@ struct NotesPane: View {
             SettingCaption("The language of the finished note. The language people speak is a separate setting: Transcription › Spoken language. Apple Intelligence writes English for languages it does not support.")
         }
 
+        NoteChecksSection(model: model)   // drive 2026-11-23
         TemplatesSection(model: model)
         ActionItemsSection(model: model)
         CalendarSection(model: model)   // #2946
+
+        NamesSection(model: model)
+        SalesExportSection(model: model)
 
         ObsidianSection(model: model)
 

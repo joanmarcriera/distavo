@@ -7,6 +7,9 @@ import Foundation
 /// are a closed set of side-effect-light verbs. None carries a path, none reads,
 /// moves or deletes files, none changes settings. `recordStart` is the only
 /// command with a real-world effect; the app must confirm it with the user.
+/// `dayLog` (D102) is the one exception that writes: it (re)writes the derived
+/// `notes/day-logs/<date>-day.md` (`DayLog`), whose name comes only from a
+/// strictly validated `yyyy-MM-dd`; it never touches a note, a recording or a setting.
 /// Anything not in the allow-list parses to `nil` (the caller logs and ignores).
 public enum AutomationCommand: Equatable, Sendable {
     /// `distavo://open-latest-note` — reveal the newest note.
@@ -22,6 +25,9 @@ public enum AutomationCommand: Equatable, Sendable {
     case recordStart
     /// `distavo://record/stop` — stop the built-in recorder.
     case recordStop
+    /// `distavo://daylog` (today) or `distavo://daylog?date=YYYY-MM-DD` — write that day's log (D102).
+    /// The only query item read anywhere, and only this exact one: a strict, real calendar date.
+    case dayLog(date: String?)
 
     /// URL scheme registered in every edition's Info.plist.
     public static let scheme = "distavo"
@@ -33,7 +39,7 @@ public enum AutomationCommand: Equatable, Sendable {
     public var requiresConfirmation: Bool { self == .recordStart }
 
     /// Parse a URL string. Strict allow-list: query items and fragments are
-    /// ignored (never interpreted), userinfo/port are rejected, and the
+    /// ignored (never interpreted) except `daylog`'s single `date`, userinfo/port are rejected, and the
     /// host+path must match a known command exactly (case-insensitive, one
     /// optional trailing slash). Percent-escapes are NOT decoded, so
     /// `record%2Fstart` or `%2e%2e/` are simply unknown.
@@ -53,6 +59,12 @@ public enum AutomationCommand: Equatable, Sendable {
         case ("notes", ""): return .notes
         case ("record", "/start"): return .recordStart
         case ("record", "/stop"): return .recordStop
+        case ("daylog", ""):
+            // No query = today. Otherwise exactly one item, `date`, a real yyyy-MM-dd (no decoding).
+            guard let items = comps.percentEncodedQueryItems else { return .dayLog(date: nil) }
+            guard items.count == 1, items[0].name == "date", let value = items[0].value,
+                  DayLog.date(fromISO: value, timeZone: TimeZone(identifier: "UTC")!) != nil else { return nil }
+            return .dayLog(date: value)
         default: return nil
         }
     }

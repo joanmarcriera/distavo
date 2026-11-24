@@ -70,7 +70,7 @@ public final class SearchIndex: @unchecked Sendable {
 
     /// Same base-dir convention as `Config.defaultConfigURL` (inside the container when sandboxed).
     public static var defaultURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        Config.homeDir
             .appendingPathComponent("Library/Application Support/Distavo/search-index.sqlite")
     }
 

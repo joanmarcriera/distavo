@@ -29,7 +29,8 @@ public enum SummaryChecks {
     ///   - context: the note context the prompt was built from.
     ///   - applyCorrections: `summarise.apply_corrections`; false leaves the corrections list as advice only.
     public static func apply(summary: String, transcript: String, context: NoteContext,
-                             applyCorrections: Bool = false) -> SummaryCheckOutcome {
+                             applyCorrections: Bool = false, nameCheck: Bool = false,
+                             nameGlossary: NameGlossary = NameGlossary()) -> SummaryCheckOutcome {
         // Speaker labels respelled / listed on lines of their own by small models (#1793); every style.
         // Prompt scaffolding copied into the note (Step headings, instruction sentences) goes first (#4010).
         let scrubbed = SpeakerLabelNormaliser.normalise(ScaffoldingScrubber.scrub(summary), transcript: transcript)
@@ -46,7 +47,23 @@ public enum SummaryChecks {
         let fixed = applyCorrections ? TranscriptionCorrections.apply(text, transcript: transcript)
                                      : TranscriptionCorrections.Result(text: text, applied: [])
         let correctionNotes = TranscriptionCorrections.note(for: fixed).map { [$0] } ?? []
-        return SummaryCheckOutcome(text: fixed.text, notes: context.summaryNotes + correctionNotes + ledgerNotes)
+        // One person spelled several ways in the note (opt-in `summarise.name_check`): reported, never rewritten.
+        var body = fixed.text
+        var nameNotes: [String] = []
+        if nameCheck {
+            // The user's names glossary merges their listed spellings first (names.txt), then the drift check
+            // reports whatever is still spelled several ways, then task owners nobody named become "unassigned".
+            // Owners are checked BEFORE the merge: a model that wrote the heard spelling keeps its owner.
+            let owners = ActionItemOwners.check(body, transcript: transcript, noteOwner: context.noteOwner,
+                                                participants: context.participants, glossary: nameGlossary)
+            body = owners.text
+            let merged = nameGlossary.apply(to: body)
+            body = merged.text
+            nameNotes += NameGlossary.note(merged: merged.merged).map { [$0] } ?? []
+            nameNotes += NameConsistency.note(for: NameConsistency.suspectGroups(in: body)).map { [$0] } ?? []
+            nameNotes += ActionItemOwners.note(cleared: owners.cleared).map { [$0] } ?? []
+        }
+        return SummaryCheckOutcome(text: body, notes: context.summaryNotes + correctionNotes + ledgerNotes + nameNotes)
     }
 }
 

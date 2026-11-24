@@ -166,6 +166,13 @@ extension WatcherController {
             showNotes()
         case .recordStop:
             capture.stopRecording()
+        case .dayLog(let date):
+            // Writes only the derived day-logs/<date>-day.md (DayLog); the date is already validated.
+            // One throttle key for every date (a page cycling dates is throttled too), and only the past
+            // year up to today, so a link cannot fill the folder with empty logs.
+            guard hub.throttle.allow(.dayLog(date: nil), now: ProcessInfo.processInfo.systemUptime),
+                  DayLog.allowedFromLink(isoDate: date, today: Date(), timeZone: .current) else { return }
+            writeDayLog(isoDate: date, fromLink: true)   // a link never rewrites an existing log
         case .recordStart:
             guard MeetingCaptureController.isSupported, !capture.isRecording,
                   !hub.recordPromptShowing else { return }
@@ -205,7 +212,10 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
     /// A normal quit is not a crash (#6759): clear the in-flight `.processing` marker so the next launch does
     /// not set that recording aside.
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { AutomationHub.shared.controller?.clearMarkersOnQuit() }
+        MainActor.assumeIsolated {
+            AutomationHub.shared.controller?.capture.stopForQuit()   // a recording in progress is saved, not left for recovery
+            AutomationHub.shared.controller?.clearMarkersOnQuit()
+        }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

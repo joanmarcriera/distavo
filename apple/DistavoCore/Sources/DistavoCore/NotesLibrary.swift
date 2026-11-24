@@ -48,8 +48,8 @@ public struct NoteEntry: Identifiable, Equatable, Sendable {
 /// What can be done to a selected note.
 public enum NoteAction: String, CaseIterable, Sendable {
     case open, reveal, openTranscript, ask
-    case exportTranscript, copyTranscript, exportClips
-    case regenerate, renameSpeakers, compare
+    case exportTranscript, copyTranscript, exportClips, exportSalesCall
+    case regenerate, renameSpeakers, compare, splitRecording
 
     public var label: String {
         switch self {
@@ -60,14 +60,16 @@ public enum NoteAction: String, CaseIterable, Sendable {
         case .exportTranscript: return "Export Transcript…"
         case .copyTranscript: return "Copy Transcript"
         case .exportClips: return "Export Key Moments…"
+        case .exportSalesCall: return "Export Sales Call…"
         case .regenerate: return "Regenerate…"
         case .renameSpeakers: return "Rename Speakers…"
         case .compare: return "Compare Versions…"
+        case .splitRecording: return "Split Recording…"
         }
     }
 
     /// True for the actions that rewrite the note (they wait for the scan lock).
-    public var rewritesNote: Bool { self == .regenerate || self == .renameSpeakers }
+    public var rewritesNote: Bool { self == .regenerate || self == .renameSpeakers || self == .splitRecording }
 }
 
 /// A regenerate that was asked for and has not finished.
@@ -237,7 +239,7 @@ public enum NotesLibrary {
     /// The date (and time, when present) a recording name carries, e.g.
     /// `Meeting_2026-10-07_11.18.17` or `2026-10-05_Event_Title`. The formatter is
     /// built per call with the given zone (never a cached static one).
-    static func dateInName(_ base: String, timeZone: TimeZone) -> Date? {
+    public static func dateInName(_ base: String, timeZone: TimeZone) -> Date? {
         let pattern = #"(\d{4})-(\d{2})-(\d{2})(?:[_ T](\d{2})[.:](\d{2})(?:[.:](\d{2}))?)?"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let m = regex.firstMatch(in: base, range: NSRange(base.startIndex..., in: base)) else { return nil }
@@ -315,7 +317,7 @@ public enum NotesLibrary {
             return .unavailable("wait for the regenerate to finish")
         }
         switch action {
-        case .open, .reveal, .ask:
+        case .open, .reveal, .ask, .exportSalesCall:
             return .available
         case .openTranscript:
             return e.hasCleanTranscript || e.hasSegments ? .available : .unavailable(noTranscript)
@@ -330,6 +332,10 @@ public enum NotesLibrary {
             return e.speakerCount > 0 ? .available : .unavailable("no speakers found")
         case .compare:
             return e.versionCount >= 2 ? .available : .unavailable("only one version")
+        case .splitRecording:
+            // D077: the cut points come from the timed transcript; a variant (`base@...`) shares its source.
+            if e.isVariant { return .unavailable("split the original note, not a variant") }
+            return e.hasSegments ? .available : .unavailable(noTimestamps)
         }
     }
 

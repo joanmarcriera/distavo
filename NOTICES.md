@@ -88,6 +88,10 @@ downloaded models" button, in Settings):
   to detect the meeting's spoken language when "Automatic" is selected).
 - **SpeakerKit pyannote CoreML models** — https://huggingface.co/argmaxinc/speakerkit-coreml
   (derived from the pyannote community diarization pipeline, MIT).
+- **Voice model for "Recognise remembered voices"** (optional, downloaded only when that setting is
+  used) — https://huggingface.co/FluidInference/speaker-diarization-coreml, the `pyannote_segmentation`
+  and `wespeaker_v2` Core ML files: conversions of `pyannote/segmentation-3.0` (MIT, © CNRS) and
+  `pyannote/wespeaker-voxceleb-resnet34-LM` (CC-BY-4.0; WeSpeaker ResNet34 trained on VoxCeleb).
 - **NVIDIA Parakeet TDT 0.6B v3** and the **Barcelona Supercomputing Center Catalan
   Whisper models** — see above.
 

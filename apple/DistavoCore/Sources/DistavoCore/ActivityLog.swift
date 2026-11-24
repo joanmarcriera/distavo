@@ -18,7 +18,7 @@ public final class ActivityLog {
     }
 
     public static var defaultURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        Config.homeDir
             .appendingPathComponent("Library/Logs/Distavo/distavo.log")
     }
 

@@ -48,15 +48,30 @@ final class NotesConfigTests: XCTestCase {
     }
 
     /// Everything is off on a fresh install except the duplicate-call link (review B, `LinkDuplicateCallsConfigTests`).
-    func testFreshInstallRecommendationLeavesEverythingOffExceptDuplicateCallLinking() {
+    func testFreshInstallRecommendationLeavesEverythingOffExceptDuplicateCallLinkingAndWarnings() {
         for (supported, memory) in [(true, 32 << 30), (false, 8 << 30)] as [(Bool, UInt64)] {
             var expected = NotesConfig()
             expected.linkDuplicateCalls = true
+            expected.warningsOnTop = true   // D082, drive 2026-11-23
             XCTAssertEqual(Config.recommendedForThisMac(embeddedSupported: supported, memoryBytes: memory).notes, expected)
         }
     }
 
     func testTermsAreNormalised() {
         XCTAssertEqual(NotesConfig(trackedTerms: [" GDPR ", "gdpr", "a, b", ""]).terms, ["GDPR", "a", "b"])
+    }
+}
+
+final class RefreshPeoplePagesConfigTests: XCTestCase {
+    func testOffForAnOldConfigAndForAFreshInstall() throws {
+        let old = try JSONDecoder().decode(NotesConfig.self, from: Data(#"{"frontmatter":true}"#.utf8))
+        XCTAssertFalse(old.refreshPeoplePages)
+        XCTAssertFalse(Config.recommendedForThisMac().notes.refreshPeoplePages)
+        XCTAssertFalse(try JSONDecoder().decode(NotesConfig.self, from: Data(#"{"refresh_people_pages":"yes"}"#.utf8)).refreshPeoplePages)
+    }
+    func testRoundTrips() throws {
+        let data = try JSONEncoder().encode(NotesConfig(refreshPeoplePages: true))
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"refresh_people_pages\":true"))
+        XCTAssertTrue(try JSONDecoder().decode(NotesConfig.self, from: data).refreshPeoplePages)
     }
 }

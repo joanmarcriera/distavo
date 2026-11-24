@@ -26,6 +26,16 @@ For each recording it processes, Distavo creates:
   `~/Library/Application Support/Distavo/`.
 - **Logs**: `~/Library/Logs/Distavo/distavo.log`.
 
+- **Remembered voices** (optional, off by default; not in the Mac App Store
+  edition): if you switch on "Recognise remembered voices" and tick "Remember
+  this voice" for a speaker you named, Distavo stores a voiceprint of that
+  person (a list of numbers computed from their speech) in
+  `~/Library/Application Support/Distavo/voice-profiles.json`, readable only by
+  your macOS account. A voiceprint is biometric data about another person:
+  remember a voice only when that person agreed. It never leaves your Mac, is
+  never written to notes, logs or issue reports, and you can delete each voice
+  or all of them in Settings > Transcription.
+
 All of these are written in **cleartext** under your home directory. Distavo
 does not encrypt them; protect them with your normal macOS account and disk
 encryption (FileVault).

@@ -70,10 +70,23 @@ public actor LanguageDetector {
 
             await coordinator.report("Detecting language…")
             var out: [LanguageDetection] = []
-            for slice in slices {
-                let (code, probs) = try await whisper.detectLangauge(audioArray: slice)
-                out.append(LanguageDetection(code: code, probability: Self.probability(fromLogProb: probs[code])))
+            do {
+                for slice in slices {
+                    let (code, probs) = try await whisper.detectLangauge(audioArray: slice)
+                    // Per-language scores feed "Languages I speak" (D085): the best LISTED language when the
+                    // top one is not in the list. Converted like the top one; tiny values dropped.
+                    let scores = probs.reduce(into: [String: Float]()) { acc, entry in
+                        let p = Self.probability(fromLogProb: entry.value)
+                        if p >= 0.001 { acc[entry.key] = p }
+                    }
+                    out.append(LanguageDetection(code: code, probability: Self.probability(fromLogProb: probs[code]),
+                                                 scores: scores))
+                }
+            } catch {
+                await whisper.unloadModels()   // #4019
+                throw error
             }
+            await whisper.unloadModels()       // #4019
             return out
         }
     }

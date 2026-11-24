@@ -61,6 +61,33 @@ public enum StereoBalancer {
     /// the app's real activity log; tests inject a scratch one).
     public static func balance(from source: URL, to destination: URL,
                                 activityLog: ActivityLog = ActivityLog()) throws {
+        // The result is written beside the destination and moved into place in one step, and the source is
+        // removed only after that move. A process that dies mid-write (quit, crash, power) therefore leaves
+        // the untouched source and a stray staging file, never a truncated file under the final name (which
+        // start-up recovery would take for the finished recording and delete the good source).
+        let staging = destination.appendingPathExtension(stagingExtension)
+        try? FileManager.default.removeItem(at: staging)
+        // The balancing code consumes its input (it deletes or moves it), so it is given a second name for the
+        // same bytes (a hard link, no copy): the real source keeps its name until the result is in place.
+        let input = source.deletingLastPathComponent().appendingPathComponent(".\(source.lastPathComponent).balancing-source")
+        try? FileManager.default.removeItem(at: input)
+        try FileManager.default.linkItem(at: source, to: input)
+        defer { try? FileManager.default.removeItem(at: input) }
+        do {
+            try write(from: input, to: staging, activityLog: activityLog)
+            if FileManager.default.fileExists(atPath: destination.path) { try FileManager.default.removeItem(at: destination) }
+            try FileManager.default.moveItem(at: staging, to: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
+        try? FileManager.default.removeItem(at: source)
+    }
+
+    /// Extension of the file a balance is written to before it takes the final name.
+    public static let stagingExtension = "balancing"
+
+    private static func write(from source: URL, to destination: URL, activityLog: ActivityLog) throws {
         let stats = try analyzeChannels(url: source)
 
         if stats.channelCount == 2, stats.peaks[1] <= silenceFloor {

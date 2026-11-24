@@ -18,6 +18,8 @@ public enum MeetingShapeGate {
     public enum Verdict: Equatable, Sendable {
         case meeting
         case soloMemo
+        /// A recorded course, video or narrated walkthrough played back: scripted prompts, one voice leading.
+        case playback(reason: String)
         case notAMeeting(reason: String)
     }
 
@@ -58,10 +60,42 @@ public enum MeetingShapeGate {
         if voices > maxPlausibleSpeakers {
             return .notAMeeting(reason: "\(voices) different voices and no participants list")
         }
+        if let why = playbackReason(spoken: spoken) { return .playback(reason: why) }
         // No usable label (diarisation off, failed or all SPEAKER_UNKNOWN) says nothing about the number
         // of people: stay on the normal meeting path. Only exactly one real label is a solo memo.
         if speakers.count == 1 { return .soloMemo }
         return .meeting
+    }
+
+    /// Phrases a course or tutorial narrator says to a learner, never one colleague to another.
+    /// Only phrases that a live colleague does not say: on-screen course prompts and course framing. Everyday
+    /// work speech ("by the end of this week", "this training budget", "click next" in a screen share) is left out.
+    static let playbackCues: [String] = [
+        "press the start button", "click the start button", "click the next button", "pause the video",
+        "knowledge check", "select the correct answer", "in the next lesson", "welcome to this course",
+        "welcome to this module", "at the end of this module", "in this module you will",
+        "in this lesson you will", "in this course you will", "in this course we will",
+    ]
+    /// Distinct cues needed, and the share of the words the leading voice must hold (a narrator, not a conversation).
+    public static let minPlaybackCues = 3
+    public static let minNarratorShare = 0.8
+
+    /// Why this reads as a played-back course or video rather than a live conversation, or nil.
+    /// Needs both signals: scripted learner prompts AND one voice carrying the talk.
+    static func playbackReason(spoken: [Segment]) -> String? {
+        // Without real speaker labels (diarisation off) one voice cannot be told from many: never playback.
+        guard spoken.contains(where: { $0.speaker != "SPEAKER_UNKNOWN" && !$0.speaker.isEmpty }) else { return nil }
+        let text = spoken.map { TranscriptCleaner.normaliseSpace($0.text).lowercased() }.joined(separator: " ")
+        let hits = playbackCues.filter { text.contains($0) }
+        guard hits.count >= minPlaybackCues else { return nil }
+        var perLabel: [String: Int] = [:]
+        for seg in spoken {
+            perLabel[seg.speaker.isEmpty ? "SPEAKER_UNKNOWN" : seg.speaker, default: 0] +=
+                TranscriptCleaner.normaliseSpace(seg.text).split(separator: " ").count
+        }
+        let total = perLabel.values.reduce(0, +)
+        guard total > 0, let top = perLabel.values.max(), Double(top) / Double(total) >= minNarratorShare else { return nil }
+        return "scripted prompts such as '" + hits[0] + "' and one narrating voice"
     }
 
     /// Labels holding at least `minVoiceShare` of the labelled words.
@@ -114,4 +148,7 @@ public enum MeetingShapeGate {
         ## Decisions and follow-ups
         Bullets for anything the speaker decided or said they must do. Write "none stated" if there are none.
         """)!
+
+    /// Template for a played-back course or video (also bundled as id `playback`, pickable per recording).
+    public static var playbackTemplate: SummaryTemplate { SummaryTemplateCatalog.playback }
 }

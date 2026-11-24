@@ -30,6 +30,22 @@ struct RenameSpeakersView: View {
     /// Called with the note and current-label -> new-name; the window closes right after.
     let onApply: (String, [String: String]) -> Void
     let onCancel: () -> Void
+    /// Voice profiles (#2944): whether to offer "Remember this voice" (Settings > Transcription), and what to
+    /// call INSTEAD of `onApply` when a voice is ticked: the note, the mapping (may be empty) and the final
+    /// names of the ticked speakers. One call, so the rename is done before the voices are read.
+    var voiceProfilesOn: Bool = false
+    var onApplyAndRemember: (String, [String: String], [String]) -> Void = { _, _, _ in }
+    @State private var remember: Set<String> = []
+    /// Names this note got from voice recognition and the owner has not confirmed (`SpeakerNames.byVoice`),
+    /// and what to call with the ones ticked "this is right".
+    var voiceGuesses: (String) -> [String] = { _ in [] }
+    var onConfirm: (String, [String]) -> Void = { _, _ in }
+    @State private var guessed: Set<String> = []
+    @State private var confirmed: Set<String> = []
+    /// Ticked guesses whose name the owner left as it is (a changed name is theirs anyway).
+    private var confirmedNames: [String] {
+        speakers.map(\.label).filter { confirmed.contains($0) && guessed.contains($0) && changes[$0] == nil }
+    }
 
     private var selectedBase: String { note.base }
     @State private var speakers: [DetectedSpeaker] = []
@@ -39,7 +55,13 @@ struct RenameSpeakersView: View {
          resetMapping: @escaping (String) -> [String: String],
          preview: @escaping (String, [String: String]) -> [SpeakerRename.NoteChange],
          mergeCopies: @escaping (String) -> [URL], onReset: @escaping (String) -> Void,
-         onApply: @escaping (String, [String: String]) -> Void, onCancel: @escaping () -> Void) {
+         onApply: @escaping (String, [String: String]) -> Void, onCancel: @escaping () -> Void,
+         voiceProfilesOn: Bool = false,
+         onApplyAndRemember: @escaping (String, [String: String], [String]) -> Void = { _, _, _ in },
+         voiceGuesses: @escaping (String) -> [String] = { _ in [] },
+         onConfirm: @escaping (String, [String]) -> Void = { _, _ in }) {
+        self.voiceGuesses = voiceGuesses; self.onConfirm = onConfirm
+        self.voiceProfilesOn = voiceProfilesOn; self.onApplyAndRemember = onApplyAndRemember
         self.note = note; self.detect = detect; self.resetMapping = resetMapping
         self.preview = preview; self.mergeCopies = mergeCopies; self.onReset = onReset
         self.onApply = onApply; self.onCancel = onCancel
@@ -53,6 +75,16 @@ struct RenameSpeakersView: View {
             if !new.isEmpty, new != s.label { out[s.label] = new }
         }
         return out
+    }
+    /// Final names of the ticked speakers that carry a real name (never a diariser label).
+    private var rememberNames: [String] {
+        guard voiceProfilesOn else { return [] }
+        return speakers.filter { remember.contains($0.label) }
+            .map { (names[$0.label] ?? $0.label).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter(Self.isRealName)
+    }
+    private static func isRealName(_ s: String) -> Bool {
+        !s.isEmpty && s.range(of: #"^SPEAKER_\d{1,3}$"#, options: .regularExpression) == nil
     }
     private var hasEmptyName: Bool {
         speakers.contains { (names[$0.label] ?? $0.label).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
@@ -91,6 +123,20 @@ struct RenameSpeakersView: View {
                                     TextField("Name", text: Binding(
                                         get: { names[s.label] ?? s.label },
                                         set: { names[s.label] = $0 }))
+                                    if guessed.contains(s.label), (names[s.label] ?? s.label) == s.label {
+                                        Toggle("Named by voice recognition. Tick if this is right", isOn: Binding(
+                                            get: { confirmed.contains(s.label) },
+                                            set: { if $0 { confirmed.insert(s.label) } else { confirmed.remove(s.label) } }))
+                                            .font(.caption)
+                                            .help("Until you confirm it, a name Distavo recognised by voice is a guess: it is shown as “recognised by voice” on that person's page and never creates a page.")
+                                    }
+                                    if voiceProfilesOn {
+                                        Toggle("Recognise them automatically next time", isOn: Binding(
+                                            get: { remember.contains(s.label) },
+                                            set: { if $0 { remember.insert(s.label) } else { remember.remove(s.label) } }))
+                                            .font(.caption)
+                                            .disabled(!Self.isRealName((names[s.label] ?? s.label).trimmingCharacters(in: .whitespacesAndNewlines)))
+                                    }
                                 }
                             }
                         }
@@ -119,6 +165,10 @@ struct RenameSpeakersView: View {
                         Button("Show copies") { NSWorkspace.shared.activateFileViewerSelecting(copies) }
                     }
                 }
+                if voiceProfilesOn {
+                    Text("“Recognise them automatically next time” keeps a voiceprint of that person on this Mac, so Distavo puts their name in future notes without asking. Tick it for people you meet again and who agreed; leave it off for a one-off voice. Voiceprints can be deleted in Settings > Transcription.")
+                        .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
                 if hasEmptyName {
                     Text("A name cannot be empty.").font(.caption).foregroundStyle(.orange)
                 } else if invalidName != nil {
@@ -135,7 +185,7 @@ struct RenameSpeakersView: View {
                 }
                 Button("Apply") { confirmAndApply() }
                     .keyboardShortcut(.defaultAction)
-                    .disabled(changes.isEmpty || hasEmptyName || invalidName != nil)
+                    .disabled((changes.isEmpty && rememberNames.isEmpty && confirmedNames.isEmpty) || hasEmptyName || invalidName != nil)
             }
         }
         .padding(16)
@@ -156,11 +206,19 @@ struct RenameSpeakersView: View {
             alert.addButton(withTitle: "Cancel")
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
-        onApply(selectedBase, changes)
+        let voices = rememberNames
+        let sure = confirmedNames
+        if !sure.isEmpty { onConfirm(selectedBase, sure) }
+        // Only a confirmation: there is nothing to rename (and no "nothing to rename" message to show).
+        if changes.isEmpty, voices.isEmpty { onCancel(); return }
+        if voices.isEmpty { onApply(selectedBase, changes) } else { onApplyAndRemember(selectedBase, changes, voices) }
     }
 
     private func reload() {
         speakers = selectedBase.isEmpty ? [] : detect(selectedBase)
         names = [:]
+        remember = []
+        guessed = Set(selectedBase.isEmpty ? [] : voiceGuesses(selectedBase))
+        confirmed = []
     }
 }

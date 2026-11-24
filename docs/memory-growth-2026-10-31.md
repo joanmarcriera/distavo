@@ -51,3 +51,40 @@ about 8.5 GB `Malloc Small` (many small heap allocations that are never freed or
 - Instruments Allocations with "Mark Generation" between runs; growth surviving generations points at suspect 1.
 - A gated live test like `PipelineFootprintTests` around `EmbeddedTranscriber.transcribe` with a short fixture,
   asserting footprint after run 5 vs run 30 (needs the models, so `DISTAVO_EMBEDDED_LIVE=1`).
+
+## Update 2026-11-16 (drive distavo15)
+
+Proposed fix 1 applied (not yet confirmed by Instruments): `EmbeddedTranscriber.transcribe`, `loadDiarization` and
+`LanguageDetector.detect` now call `unloadModels()` on every exit (success and error). `NotesLibraryCache.keep(only:)`
+already prunes after every scan (fix 4; suspect 4 is closed, test in `NotesLibraryTests`). Still open: fix 2 (load the
+audio array once per recording) and the Mac-side `leaks`/`vmmap` confirmation above. `swift build` OK; `swift test`
+in DistavoEmbedded runs 0 XCTest cases here (swift-testing 0 suites), so no regression evidence beyond the build.
+
+## Measured 2026-11-23 (drive 2026-11-23-0030, lane distavo-build)
+
+Harness: `ModelUnloadSoakTests` (DistavoEmbedded, skipped unless `DISTAVO_SOAK=1`) on a 54 s SYNTHETIC clip made with
+`say` (no real recording), large-v3 turbo, en, one process, `phys_footprint` after each run. Mac with the
+models already downloaded; the installed Distavo was running beside it, so absolute numbers carry some noise.
+
+| Steps per run (`DISTAVO_SOAK_STEPS`) | runs | growth run 2 to last | per run |
+|---|---|---|---|
+| full (detector + WhisperKit + SpeakerKit), BEFORE the unload fix | 10 | +660 MB | ~80 MB |
+| full, AFTER the unload fix (this commit) | 10 | +706 MB | ~88 MB |
+| detect (language detector only) | 6 | -1 MB | flat |
+| diarize (SpeakerKit only) | 6 | +2 MB | flat |
+| whisper (WhisperKit transcribe as in production, no diarisation) | 6 | +346 MB | ~85 MB |
+| load / gpuload (WhisperKit load + unload, no audio) | 6 | +7 / -6 MB | flat |
+| decode (ONE WhisperKit kept loaded, plain transcribe) | 6 | 0 MB | flat |
+| holes (kept model, transcribe + HoleRecovery) | 6 | +45 MB | ~10 MB |
+| loaddecode (fresh WhisperKit per run, transcribe, unload) | 6 | +204 MB | ~50 MB |
+
+Reading: the growth is per WhisperKit INSTANCE that has decoded audio. Load + unload alone is flat, and one
+instance reused for every file is flat; a fresh instance per file leaks about 50 MB even after `unloadModels()`,
+and HoleRecovery adds about 10 MB per file on top. So `unloadModels()` (fix 1) is kept, since it frees the
+weights deterministically, but it does NOT bound the growth. Model load cost per file: about 4.4 s (turbo,
+load + unload, warm cache); a full 54 s clip took 10-12 s end to end before and after the fix.
+
+Next fix (needs a decision, it changes the memory principle "no model held between meetings"): keep one
+WhisperKit instance per model loaded while files keep coming and release it after an idle period (for example
+10 minutes), instead of a new instance per file. Then re-run `DISTAVO_SOAK_STEPS=full`; pass = growth within
+300 MB over 10 runs.

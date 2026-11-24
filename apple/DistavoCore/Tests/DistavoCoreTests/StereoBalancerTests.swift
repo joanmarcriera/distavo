@@ -255,3 +255,62 @@ final class StereoBalancerTests: XCTestCase {
         XCTAssertLessThan(rms[0], 0.0005)
     }
 }
+
+/// The final recording is written beside its name and moved into place (review 2026-11-23: a quit during the
+/// write once left a truncated file under the final name, and recovery then deleted the good `.part`).
+final class StereoBalancerCrashSafetyTests: XCTestCase {
+    private func wav(_ url: URL, channels: Int, amplitude: Float, seconds: Double = 2) throws {
+        let rate = 16_000, frames = Int(seconds * Double(rate))
+        var pcm = Data(capacity: frames * channels * 2)
+        for i in 0..<frames {
+            for c in 0..<channels {
+                let v = Int16(max(-1, min(1, amplitude * (c == 0 ? 1 : 0.9) * sinf(Float(i) * 0.05))) * 32767)
+                withUnsafeBytes(of: v.littleEndian) { pcm.append(contentsOf: $0) }
+            }
+        }
+        var d = Data()
+        func u32(_ v: Int) { withUnsafeBytes(of: UInt32(v).littleEndian) { d.append(contentsOf: $0) } }
+        func u16(_ v: Int) { withUnsafeBytes(of: UInt16(v).littleEndian) { d.append(contentsOf: $0) } }
+        d.append("RIFF".data(using: .ascii)!); u32(36 + pcm.count); d.append("WAVEfmt ".data(using: .ascii)!)
+        u32(16); u16(1); u16(channels); u32(rate); u32(rate * channels * 2); u16(channels * 2); u16(16)
+        d.append("data".data(using: .ascii)!); u32(pcm.count); d.append(pcm)
+        try d.write(to: url)
+    }
+
+    private func dir() throws -> URL {
+        let d = TestTemp.root.appendingPathComponent("distavo-balance-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
+        return d
+    }
+
+    func testNothingIsLeftBesideTheResultAndTheSourceIsConsumed() throws {
+        for (channels, amplitude) in [(2, Float(0.02)), (2, 0.6), (1, 0.02), (1, 0.6)] {
+            let d = try dir()
+            let part = d.appendingPathComponent("take.wav.part"), final = d.appendingPathComponent("take.wav")
+            try wav(part, channels: channels, amplitude: amplitude)
+            try StereoBalancer.balance(from: part, to: final, activityLog: ActivityLog(url: d.deletingLastPathComponent().appendingPathComponent("balance-\(UUID().uuidString).log")))
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: d.path), ["take.wav"], "\(channels) ch, \(amplitude)")
+            XCTAssertGreaterThan((try Data(contentsOf: final)).count, 1000)
+        }
+    }
+
+    func testAFailedBalanceKeepsTheSourceAndLeavesNoFinalFile() throws {
+        let d = try dir()
+        let part = d.appendingPathComponent("take.wav.part"), final = d.appendingPathComponent("take.wav")
+        let garbage = Data("this is not audio".utf8)
+        try garbage.write(to: part)
+        XCTAssertThrowsError(try StereoBalancer.balance(from: part, to: final, activityLog: ActivityLog(url: d.deletingLastPathComponent().appendingPathComponent("balance-\(UUID().uuidString).log"))))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: d.path), ["take.wav.part"])
+        XCTAssertEqual(try Data(contentsOf: part), garbage)
+    }
+
+    func testStaleStagingFilesOfAnInterruptedRunAreReplaced() throws {
+        let d = try dir()
+        let part = d.appendingPathComponent("take.wav.part"), final = d.appendingPathComponent("take.wav")
+        try wav(part, channels: 2, amplitude: 0.02)
+        try Data("half".utf8).write(to: final.appendingPathExtension(StereoBalancer.stagingExtension))
+        try Data("old".utf8).write(to: d.appendingPathComponent(".take.wav.part.balancing-source"))
+        try StereoBalancer.balance(from: part, to: final, activityLog: ActivityLog(url: d.deletingLastPathComponent().appendingPathComponent("balance-\(UUID().uuidString).log")))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: d.path), ["take.wav"])
+    }
+}

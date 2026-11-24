@@ -98,6 +98,13 @@ public struct TranscribeConfig: Codable, Equatable {
     /// Label speakers from the recorder's stereo channels (left = owner's mic, right = remote) instead of the
     /// diariser, when both channels carry signal (#6353, `ChannelSpeakerLabeller`). Absent in older configs -> false.
     public var channelSpeakers: Bool
+    /// Voice profiles (#2944 phase 2, `VoiceProfiles.swift`): recognise the voices the owner chose to remember
+    /// and name those speakers in new notes. Stores biometric data, so absent in older configs -> false, and
+    /// `recommendedForThisMac()` leaves it off too.
+    public var voiceProfiles: Bool
+    /// "Languages I speak" (D085, task 4016): ISO codes the detector may pick from. Detections outside the list
+    /// are dropped before routing (`EngineRouter.choose`). Absent in older configs -> `[]` = no restriction.
+    public var spokenLanguages: [String]
 
     /// The user's own rules first (they win), then every enabled pack's rules.
     public var effectiveReplacements: [ReplacementRule] {
@@ -109,6 +116,8 @@ public struct TranscribeConfig: Codable, Equatable {
         case replacementPacks = "replacement_packs"
         case fuzzyVocabulary = "fuzzy_vocabulary"
         case channelSpeakers = "channel_speakers"
+        case voiceProfiles = "voice_profiles"
+        case spokenLanguages = "spoken_languages"
         case backend, whisperxURL = "whisperx_url", model, embeddedModel = "embedded_model"
         case language, diarize, numSpeakers = "num_speakers"
         case preferredCatalanModel = "preferred_catalan_model"
@@ -121,8 +130,11 @@ public struct TranscribeConfig: Codable, Equatable {
                 preferredCatalanModel: String = "bsc-los", languagePacks: [String] = [],
                 vocabulary: [String] = [], replacements: [ReplacementRule] = [],
                 replacementPacks: [String] = [], fuzzyVocabulary: Bool = false,
-                channelSpeakers: Bool = false) {
+                channelSpeakers: Bool = false, spokenLanguages: [String] = [],
+                voiceProfiles: Bool = false) {
         self.channelSpeakers = channelSpeakers
+        self.voiceProfiles = voiceProfiles
+        self.spokenLanguages = spokenLanguages
         self.replacementPacks = replacementPacks
         self.fuzzyVocabulary = fuzzyVocabulary
         self.backend = backend; self.whisperxURL = whisperxURL; self.model = model
@@ -153,6 +165,8 @@ public struct TranscribeConfig: Codable, Equatable {
         replacementPacks = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .replacementPacks))?.elements ?? d.replacementPacks
         fuzzyVocabulary = (try? c.decodeIfPresent(Bool.self, forKey: .fuzzyVocabulary)).flatMap { $0 } ?? d.fuzzyVocabulary
         channelSpeakers = (try? c.decodeIfPresent(Bool.self, forKey: .channelSpeakers)).flatMap { $0 } ?? d.channelSpeakers
+        voiceProfiles = (try? c.decodeIfPresent(Bool.self, forKey: .voiceProfiles)).flatMap { $0 } ?? d.voiceProfiles
+        spokenLanguages = (try? c.decodeIfPresent(LossyList<String>.self, forKey: .spokenLanguages))?.elements ?? d.spokenLanguages
     }
 
     /// Enabled packs that actually exist in the catalog, in catalog order.
@@ -245,9 +259,28 @@ public struct SummariseConfig: Codable, Equatable {
     /// (Vikunja #6666). **false for any config predating the key** (the prompt stays byte-identical);
     /// true only for fresh installs via `recommendedForThisMac()`.
     public var neutralDefault: Bool
+    /// Name hygiene: the owner's name from Settings is pinned in the prompt when it is a real personal name
+    /// (`OwnerName`), and a footer note says when one person's name is spelled several ways in the note
+    /// (`NameConsistency`). false for a config predating the key (prompt byte-identical); true for fresh installs.
+    public var nameCheck: Bool
+    /// Known people (`PeoplePages.participants`): a participant or recognised speaker who has a page in
+    /// `notes/people/` brings the role and organisation the owner wrote there into the summary prompt.
+    /// false for a config predating the key AND for fresh installs (prompt byte-identical).
+    public var knownPeople: Bool
+    /// Resolve "tomorrow", "Friday", "end of next week" in task lines against the recording date (`RelativeDates`,
+    /// D083). false for a config predating the key (note byte-identical); true for fresh installs.
+    public var resolveRelativeDates: Bool
+    /// Plan / follow-up / key-people bullets must carry a transcript quote (`StepVerifier`, D059): the Ollama
+    /// prompt asks for them and the note keeps, marks or drops each one. false for a config predating the key
+    /// (prompt and note byte-identical); true for fresh installs. On-device summaries are never checked.
+    public var verifySteps: Bool
 
     enum CodingKeys: String, CodingKey {
+        case verifySteps = "verify_steps"
+        case resolveRelativeDates = "resolve_relative_dates"
         case neutralDefault = "neutral_default"
+        case nameCheck = "name_check"
+        case knownPeople = "known_people"
         case nonMeetingGuard = "non_meeting_guard"
         case actionItems = "action_items"
         case applyCorrections = "apply_corrections"
@@ -270,8 +303,13 @@ public struct SummariseConfig: Codable, Equatable {
                 template: String = "", customTemplate: String = "",
                 folderTemplates: [String: String] = [:],
                 actionItems: Bool = false, nonMeetingGuard: Bool = false,
-                applyCorrections: Bool = false, neutralDefault: Bool = false) {
+                applyCorrections: Bool = false, neutralDefault: Bool = false, nameCheck: Bool = false,
+                resolveRelativeDates: Bool = false, verifySteps: Bool = false, knownPeople: Bool = false) {
+        self.verifySteps = verifySteps
+        self.knownPeople = knownPeople
+        self.resolveRelativeDates = resolveRelativeDates
         self.neutralDefault = neutralDefault
+        self.nameCheck = nameCheck
         self.actionItems = actionItems; self.nonMeetingGuard = nonMeetingGuard
         self.applyCorrections = applyCorrections
         self.backend = backend; self.server = server; self.local = local
@@ -317,6 +355,10 @@ public struct SummariseConfig: Codable, Equatable {
         nonMeetingGuard = ((try? c.decodeIfPresent(Bool.self, forKey: .nonMeetingGuard)) ?? nil) ?? d.nonMeetingGuard
         applyCorrections = ((try? c.decodeIfPresent(Bool.self, forKey: .applyCorrections)) ?? nil) ?? d.applyCorrections
         neutralDefault = ((try? c.decodeIfPresent(Bool.self, forKey: .neutralDefault)) ?? nil) ?? d.neutralDefault
+        nameCheck = ((try? c.decodeIfPresent(Bool.self, forKey: .nameCheck)) ?? nil) ?? d.nameCheck
+        knownPeople = ((try? c.decodeIfPresent(Bool.self, forKey: .knownPeople)) ?? nil) ?? d.knownPeople
+        resolveRelativeDates = ((try? c.decodeIfPresent(Bool.self, forKey: .resolveRelativeDates)) ?? nil) ?? d.resolveRelativeDates
+        verifySteps = ((try? c.decodeIfPresent(Bool.self, forKey: .verifySteps)) ?? nil) ?? d.verifySteps
     }
 }
 
@@ -406,6 +448,8 @@ public struct Config: Codable, Equatable {
     /// Obsidian-friendly output (Vikunja #2954): frontmatter, auto title/tags,
     /// tracked terms, vault copy. Absent in older configs -> everything off.
     public var notes: NotesConfig
+    /// Hand-off of sales calls to the sales tool (drive 2026-11-23). Off and empty for any config predating it.
+    public var salesExport: SalesExportConfig
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
@@ -427,6 +471,7 @@ public struct Config: Codable, Equatable {
         case calendar
         case schedule
         case notes
+        case salesExport = "sales_export"
     }
 
     public init(watchIntervalSeconds: Int = 20,
@@ -451,7 +496,8 @@ public struct Config: Codable, Equatable {
                 recording: RecordingOptions = .init(),
                 calendar: CalendarConfig = .init(),
                 schedule: ScheduleConfig = .init(),
-                notes: NotesConfig = .init()) {
+                notes: NotesConfig = .init(),
+                salesExport: SalesExportConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
@@ -471,6 +517,7 @@ public struct Config: Codable, Equatable {
         self.calendar = calendar
         self.schedule = schedule
         self.notes = notes
+        self.salesExport = salesExport
     }
 
     public init(from decoder: Decoder) throws {
@@ -496,6 +543,7 @@ public struct Config: Codable, Equatable {
         micSilenceWarningSeconds = min(max((try? c.decodeIfPresent(Int.self, forKey: .micSilenceWarningSeconds)).flatMap { $0 } ?? d.micSilenceWarningSeconds, 0), 120)
         benchmark = (try? c.decodeIfPresent([BenchmarkResult].self, forKey: .benchmark)) ?? d.benchmark
         notes = (try? c.decodeIfPresent(NotesConfig.self, forKey: .notes)) ?? d.notes
+        salesExport = (try? c.decodeIfPresent(SalesExportConfig.self, forKey: .salesExport)) ?? d.salesExport
         // `when_done` (an array); unknown entries are dropped rather than
         // failing the whole config. A config predating it falls back to the
         // legacy `open_when_done` scalar, migrated 1:1; either absent leaves `[]`.
@@ -526,22 +574,39 @@ public struct Config: Codable, Equatable {
 
     // MARK: Paths
 
+    /// The home folder every Distavo path hangs from. In a DEBUG build, `DISTAVO_TEST_HOME=<existing folder>`
+    /// in the environment replaces it, so a test build can run on a COPY of the data (config, work folder,
+    /// notes, recordings, log, search index, voices) beside the real one. Release builds ignore the variable.
+    /// Not redirected: UserDefaults (window state, `search.indexEnabled`) and the downloaded models.
+    public static let homeDir: URL = {
+        #if DEBUG
+        if let test = ProcessInfo.processInfo.environment["DISTAVO_TEST_HOME"], !test.isEmpty {
+            var isDir: ObjCBool = false
+            if FileManager.default.fileExists(atPath: test, isDirectory: &isDir), isDir.boolValue {
+                return URL(fileURLWithPath: test, isDirectory: true).standardizedFileURL
+            }
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
+    }()
+
     /// Base for resolving bare-relative path settings (mirrors Python DATA_BASE_DIR).
     public static var dataBaseDir: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Documents/Distavo")
+        homeDir.appendingPathComponent("Documents/Distavo")
     }
 
     /// Default config location (matches the Python app for cross-compat migration).
     public static var defaultConfigURL: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Distavo/watcher-config.json")
+        homeDir.appendingPathComponent("Library/Application Support/Distavo/watcher-config.json")
     }
 
     /// Expand `~`; absolute values unchanged; bare-relative values resolve under
     /// `dataBaseDir` (never the install/repo dir).
     public static func resolvePath(_ value: String) -> URL {
-        let expanded = (value as NSString).expandingTildeInPath
+        // "~" is `homeDir` (the user's home, or the test home of a DEBUG build); "~other" is left to the system.
+        let expanded = value == "~" ? homeDir.path
+            : value.hasPrefix("~/") ? homeDir.path + String(value.dropFirst(1))
+            : (value as NSString).expandingTildeInPath
         if (expanded as NSString).isAbsolutePath { return URL(fileURLWithPath: expanded) }
         return dataBaseDir.appendingPathComponent(expanded).standardizedFileURL
     }
@@ -572,12 +637,22 @@ public struct Config: Codable, Equatable {
         cfg.summarise.template = SummaryTemplateCatalog.autoID
         // ...and when nothing matches they get neutral sections, not the job-search layout (#6666).
         cfg.summarise.neutralDefault = true
+        // ...pin the owner name and flag names spelled several ways in one note.
+        cfg.summarise.nameCheck = true
         // ...and apply the note's own transcription corrections to its body (#6354); old configs keep them as advice.
         cfg.summarise.applyCorrections = true
+        // ...and resolve relative dates in task lines against the recording date (D083).
+        cfg.summarise.resolveRelativeDates = true
+        // ...and keep only plan steps the transcript supports (D059).
+        cfg.summarise.verifySteps = true
         // Fresh installs link the same call captured twice (#4014); old configs keep notes untouched.
         cfg.notes.linkDuplicateCalls = true
+        // ...and see the note's warnings under its title, not only in the footer (D082).
+        cfg.notes.warningsOnTop = true
         // Fresh installs let the recorder try other microphones when the first is silent (#4039).
         cfg.recording.micAutoSwitch = true
+        // ...and stop a forgotten recording (kept) after three unanswered silence notices (D027).
+        cfg.recording.stopAfterUnansweredNotices = 3
         if embeddedSupported {
             cfg.transcribe.backend = "embedded"
             // Fresh installs let Distavo pick the engine per meeting (spec §5.2).

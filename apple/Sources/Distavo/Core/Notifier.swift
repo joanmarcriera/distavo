@@ -1,5 +1,6 @@
 import Foundation
 import UserNotifications
+import DistavoCore
 
 /// Thin wrapper over UserNotifications (replaces rumps.notification).
 ///
@@ -9,14 +10,11 @@ import UserNotifications
 /// delegate are sandbox-safe and need no extra entitlement, so this is the
 /// same in every edition.
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
-    /// The user's choice on a silence notification.
-    enum SilenceAction { case stop, keep }
-
+    /// The user's choice on a silence notification: `SilenceNoticeAction` (DistavoCore, D027) maps the
+    /// three buttons (Stop and keep / Keep recording / Stop and discard).
     static let silenceCategory = "distavo.silence"
     /// Fixed identifier so the suggestion never stacks and can be withdrawn.
     static let silenceIdentifier = "distavo.silence"
-    private static let stopActionID = "distavo.silence.stop"
-    private static let keepActionID = "distavo.silence.keep"
 
     /// Meeting auto-detect offer (Vikunja #2945): "Record" / "Not now".
     enum MeetingAction { case record, notNow }
@@ -28,20 +26,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     @MainActor var onMeetingAction: ((MeetingAction) -> Void)?
 
     /// Called on the main actor when the user taps a silence action.
-    @MainActor var onSilenceAction: ((SilenceAction) -> Void)?
+    @MainActor var onSilenceAction: ((SilenceNoticeAction) -> Void)?
 
     /// Become the notification delegate and register the silence category.
     /// Call once at launch, before the first notification is posted.
     func configure() {
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        let stop = UNNotificationAction(identifier: Self.stopActionID,
-                                        title: "Stop recording", options: [])
-        let keep = UNNotificationAction(identifier: Self.keepActionID,
-                                        title: "Keep recording", options: [])
+        // "Stop and discard" opens the confirmation (discard() asks first), so it brings the app forward.
+        let silenceActions = SilenceNoticeAction.buttons.map { button in
+            UNNotificationAction(identifier: button.id, title: button.title,
+                                 options: button.id == SilenceNoticeAction.stopDiscardID ? [.destructive, .foreground] : [])
+        }
         center.setNotificationCategories([
             UNNotificationCategory(identifier: Self.silenceCategory,
-                                   actions: [stop, keep], intentIdentifiers: [], options: []),
+                                   actions: silenceActions, intentIdentifiers: [], options: []),
             UNNotificationCategory(identifier: Self.meetingCategory,
                                    actions: [UNNotificationAction(identifier: Self.recordActionID,
                                                                   title: "Record", options: [.foreground]),
@@ -128,12 +127,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             }
             return
         }
-        let action: SilenceAction
-        switch response.actionIdentifier {
-        case Self.stopActionID: action = .stop
-        case Self.keepActionID: action = .keep
-        default: return   // a plain tap on the banner: nothing to do
-        }
+        // Only the three buttons act; a plain tap on the banner (or a dismissal) does nothing.
+        guard SilenceNoticeAction.buttons.contains(where: { $0.id == response.actionIdentifier }) else { return }
+        let action = SilenceNoticeAction(identifier: response.actionIdentifier)
         // Deliver from a run-loop callout, not a main-queue job: "Stop" ends
         // in a modal dialog, and AppKit does not service main-queue work
         // while a modal loop started from a queued job is up.

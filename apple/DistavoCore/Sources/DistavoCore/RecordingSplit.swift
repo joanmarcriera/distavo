@@ -157,10 +157,15 @@ public enum RecordingSplit {
             try? FileManager.default.removeItem(at: temp)
             throw error
         }
-        if FileManager.default.fileExists(atPath: destination.path) {
-            _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
-        } else {
-            try FileManager.default.moveItem(at: temp, to: destination)
+        do {
+            if FileManager.default.fileExists(atPath: destination.path) {
+                _ = try FileManager.default.replaceItemAt(destination, withItemAt: temp)
+            } else {
+                try FileManager.default.moveItem(at: temp, to: destination)
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: temp)   // never leave gigabytes of hidden temp behind
+            throw error
         }
         return end - start
     }
@@ -171,6 +176,17 @@ public enum RecordingSplit {
     /// carry them).
     public static func halfBases(of base: String) -> (first: String, second: String) {
         ("\(base) part 1", "\(base) part 2")
+    }
+
+    /// `halfBases(of:)` that collides with none of `existing`: "<base> part 1" / "<base> part 2", else
+    /// "<base> part 1 (2)" / "<base> part 2 (2)", and so on (the Notes window split, D077).
+    public static func halfBases(of base: String, existing: Set<String>) -> (first: String, second: String) {
+        var k = 1
+        while true {
+            let names = k == 1 ? halfBases(of: base) : ("\(base) part 1 (\(k))", "\(base) part 2 (\(k))")
+            if !existing.contains(names.0), !existing.contains(names.1) { return names }
+            k += 1
+        }
     }
 
     /// The per-recording sidecars a half inherits: only `.language.json` (spoken language, note language,

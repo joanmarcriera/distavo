@@ -3,8 +3,8 @@ import Foundation
 // Obsidian-friendly output settings (Vikunja #2954): the `notes` section of the config.
 //
 // Every key decodes to OFF / empty for a config that predates it, and
-// `Config.recommendedForThisMac()` leaves them off (the exception is `link_duplicate_calls`, on for fresh
-// installs only), so with the defaults a note is byte-identical to what earlier versions wrote and the
+// `Config.recommendedForThisMac()` leaves them off (the exceptions are `link_duplicate_calls` and
+// `warnings_on_top`, on for fresh installs only), so with the defaults a note is byte-identical to what earlier versions wrote and the
 // prompt is untouched.
 // Decoding is lenient (a wrong-typed value falls back to the default rather than
 // failing the whole config load).
@@ -28,6 +28,13 @@ public struct NotesConfig: Codable, Equatable, Sendable {
     /// 2026-11-09: **false for any config predating the key** (no sidecars, no footer line, no sheet copy);
     /// true only for fresh installs via `Config.recommendedForThisMac()`.
     public var linkDuplicateCalls: Bool
+    /// Put the warnings the pipeline knows (cut-off recording, words removed, one name spelled several ways,
+    /// unsure language) in a "> [!warning] Check this note" block under the title (`NoteWarnings`, D082).
+    /// **false for any config predating the key** (note byte-identical); true for fresh installs.
+    public var warningsOnTop: Bool
+    /// Refresh the people pages (`PeoplePages.update`) after every note, not only from the menu. Off by default
+    /// and for any config predating the key: the people folder is the owner's and nothing writes there unasked.
+    public var refreshPeoplePages: Bool
 
     enum CodingKeys: String, CodingKey {
         case frontmatter
@@ -35,12 +42,16 @@ public struct NotesConfig: Codable, Equatable, Sendable {
         case trackedTerms = "tracked_terms"
         case vaultDir = "vault_dir", vaultSubfolder = "vault_subfolder"
         case linkDuplicateCalls = "link_duplicate_calls"
+        case warningsOnTop = "warnings_on_top"
+        case refreshPeoplePages = "refresh_people_pages"
     }
 
     public init(frontmatter: Bool = false, autoTitle: Bool = false, autoTags: Bool = false,
                 trackedTerms: [String] = [], vaultDir: String = "", vaultSubfolder: String = "",
-                linkDuplicateCalls: Bool = false) {
+                linkDuplicateCalls: Bool = false, warningsOnTop: Bool = false, refreshPeoplePages: Bool = false) {
+        self.refreshPeoplePages = refreshPeoplePages
         self.linkDuplicateCalls = linkDuplicateCalls
+        self.warningsOnTop = warningsOnTop
         self.frontmatter = frontmatter; self.autoTitle = autoTitle; self.autoTags = autoTags
         self.trackedTerms = trackedTerms
         self.vaultDir = vaultDir; self.vaultSubfolder = vaultSubfolder
@@ -62,6 +73,8 @@ public struct NotesConfig: Codable, Equatable, Sendable {
         vaultDir = text(.vaultDir, d.vaultDir)
         vaultSubfolder = text(.vaultSubfolder, d.vaultSubfolder)
         linkDuplicateCalls = flag(.linkDuplicateCalls, d.linkDuplicateCalls)
+        warningsOnTop = flag(.warningsOnTop, d.warningsOnTop)
+        refreshPeoplePages = flag(.refreshPeoplePages, d.refreshPeoplePages)
     }
 
     /// The tracked terms, trimmed, de-duplicated, comma-split (same rules as the vocabulary).

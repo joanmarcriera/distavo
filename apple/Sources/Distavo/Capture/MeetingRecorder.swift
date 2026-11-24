@@ -281,6 +281,12 @@ final class MeetingRecorder {
 
     }
 
+    /// Balance and publish the second half of a take that was split at Stop (`TwoMeetingsSplit`), exactly as
+    /// `finalizeDeferred` does for the first: `part` is a `.wav.part` beside its final name `url`.
+    func finalizeHalf(part: URL, to url: URL) {
+        queue.async { Self.finalize(part: part, to: url) }
+    }
+
     /// Stop and throw the take away (Vikunja #2068): the `.part` file is
     /// deleted before it could ever be renamed to a `.wav` the folder scanner
     /// would pick up, so nothing is transcribed. Returns the discarded name.

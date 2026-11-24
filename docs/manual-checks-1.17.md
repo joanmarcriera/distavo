@@ -427,3 +427,27 @@ and one real note. Use invented names only (Anna, Joan, Pere, Laia).
 4. Regenerate a recorded accountant call with "Advice call": every rate, amount and condition appears as said, with the speaker and
    timestamp, and no figure the adviser gave is credited to the note owner.
 
+
+## Was this two meetings? (`recording.ask_two_meetings`)
+
+Headless tests cover the rule (`TwoMeetingsSplitTests`), the cut and the sidecars (`TwoMeetingsSplitFileTests`). They cannot
+prove that a real room is quiet enough for the rule, that the once-a-second levels line up with the file, or the dialogs.
+Run this on a copy of the data (`DISTAVO_TEST_HOME`, Debug build), never on the real folder. Off by default: switch on
+Settings > Recording > "Ask whether a long recording was two meetings".
+
+1. Record two real conversations back to back, each over ten minutes, the whole over an hour, with one to two minutes in
+   which nobody speaks in between (people may move about). Type one Quick Note and mark one key moment in each. Stop.
+   Expected: "Was this two meetings?" names the time the first conversation ended, within a few seconds. Return = Keep as One.
+2. Keep as One: the "Who was in this meeting?" window follows as always and one recording is saved, the same as with the
+   option off.
+3. Repeat and choose Split in Two: after a few seconds "Who was in the first meeting? (until mm:ss)" and then "Who was in
+   the second meeting? (from mm:ss)" appear; the second is not pre-filled with the people of the first. Two files are in
+   the recordings folder, the second named `Meeting <date> <time of its own start>.wav`; no `.part` and no hidden
+   `.split-` file is left. Play the end of the first and the start of the second: no word is cut, the first
+   ends with the quiet stretch and the second opens with about ten seconds of it; the two lengths add up to the take.
+4. In the work folder each base has its own `.speakers.json` (and `.language.json` if a language or template was picked);
+   the Quick Note and the key moment of the second conversation are under the second base, timed from its start.
+5. Both notes arrive; each has only its own speakers.
+6. Not asked: a recording of over an hour with no pause; a 40-minute recording with a two-minute pause; a recording
+   stopped by the silence auto-stop or the length limit (nobody is there to answer).
+7. With the option off: nothing is asked for the recording of step 1.

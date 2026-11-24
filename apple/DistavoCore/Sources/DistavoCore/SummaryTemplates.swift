@@ -244,6 +244,35 @@ public enum SummaryTemplateCatalog {
         SummaryTemplate.parse(id: id, name: name, summary: summary, outline: outline)!
     }
 
+    /// Id of the sales-call log template (who, firm, their work, objections, next step and date, promises).
+    public static let salesCallLogID = "sales_call_log"
+    /// Id of the played-back course / video template.
+    public static let playbackID = "playback"
+
+    /// A recorded course, video or demonstration played back: lecture notes, no counterpart, no follow-up or email.
+    /// Used by `MeetingShapeGate` when a transcript looks like one, and pickable per recording.
+    static let playback: SummaryTemplate = bundled(playbackID, "Training playback", "A recorded course or video played back.", """
+        This is a recorded course, video or demonstration being played back, NOT a live meeting. There is no \
+        counterpart and nothing to follow up with anyone: do not write an opportunity, a follow-up plan or an \
+        email, do not thank anyone, do not invent attendees, and do not treat the narrator as a participant or the \
+        note owner as a speaker. Say only what the narrator said.
+
+        ## Topic
+        One sentence on what the material is about.
+
+        ## Key points
+        A list in the narrator's own terms, in order.
+
+        ## Steps, terms and tools
+        Any procedure, product, acronym or tool named, one line each. Write "none stated" if there are none.
+        """)
+
+    /// Footer line when a note was written with the playback template (chosen by hand or by the gate), so the
+    /// reader knows why it has no attendees or follow-up. nil for any other template.
+    public static func playbackNote(for template: SummaryTemplate?) -> String? {
+        template?.id == playbackID ? "Written as notes of a played-back course or video: no attendees or follow-up were invented" : nil
+    }
+
     /// Stand-up, 1:1, interview, sales call, lecture - in picker order.
     public static let bundledTemplates: [SummaryTemplate] = [
         bundled("standup", "Stand-up", "Per-person updates, plans and blockers.", """
@@ -340,6 +369,30 @@ public enum SummaryTemplateCatalog {
         ## Suggested follow-up email
         Written by the seller to the prospect, in a professional but natural tone. Do not make it long.
         """),
+        bundled(salesCallLogID, "Sales call (call log)", "Who, firm, their work, objections, next step and date, what we promised.", """
+        This is a sales call we made to a prospect. Fill the sections from what was said and nothing else. Do not invent names, firms, prices, dates or promises: write "none stated" for anything the transcript does not give. Separate what the prospect said from what we said.
+
+        ## Who
+        Name and role of each person from the prospect side, as they gave them.
+
+        ## Firm
+        The prospect's organisation, on one line with nothing else.
+
+        ## What they said about their work
+        What they do, where and at what scale, how they handle it today, their own words where short.
+
+        ## Objections raised
+        One bullet per objection or doubt, with the reason given.
+
+        ## Next step and date
+        The agreed next step and its date or time, exactly as stated. "none stated" if no step was agreed.
+
+        ## What we promised
+        One bullet per thing the seller promised to send, check or do.
+
+        ## Possible transcription corrections
+        """),
+        playback,
         bundled("lecture", "Lecture", "Key concepts, examples, terms and questions.", """
         This is a lecture, talk or seminar. Capture what was taught, in the speaker's own terms, for someone revising later. Do not add material the speaker did not cover.
 

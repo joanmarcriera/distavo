@@ -1,6 +1,36 @@
 # Project State
 
-## Resume here (2026-11-14 03:40)
+## Resume here (2026-11-24 17:30)
+
+- **1.22.0 (build 25)** is cut from `release/1.22` (PR https://github.com/joanmarcriera/distavo/pull/21), a squash of
+  `feat/people-pages` plus "Was this two meetings?" (`recording.ask_two_meetings`, off by default, lossless cut after review).
+  `ops/pre-tag-check.sh --full v1.22.0` all PASS (DistavoCore 2200+ / 0 failures, DistavoEmbedded 95 / 0, three editions, gates).
+  `feat/people-pages` keeps the granular history (private remote only); new work branches from `main`.
+- **Next action:** Marc: approve the `app-store-submission` environment for the v1.22.0 run, then do the two-meetings manual check in `docs/manual-checks-1.17.md`.
+
+## Earlier (2026-11-23 12:30, superseded)
+
+- Branch `feat/people-pages` (local only, from `feat/drive-1123-ideas`): people pages (`docs/people-directory.md`) and voice
+  profiles (#2944 phase 2, `docs/voice-profiles-plan.md`) known people in the prompt (`summarise.known_people`), people offered in the participants question and the
+  "Name Voices…" window, all off or menu-only. DistavoCore 1966 / 0 failures,
+  DistavoEmbedded 94 / 0, Direct Debug and App Store Release builds succeeded, live run on synthetic voices passed.
+
+## Earlier (2026-11-23 02:00, superseded)
+
+- Branch `feat/drive-1123-ideas` (on forgejo-work, from `feat/drive-1123-use` e743ece): the 8 ideas of
+  `distavo-ideas/BUILD-NOW.md` (spoken languages, relative dates, warnings on top, repeated silence notice, plan-step
+  quotes, split recording, day log; memory fix landed but does NOT bound the growth). DistavoCore 1928 / 0 failures,
+  DistavoEmbedded 93 / 0, Direct Debug build succeeded; two Opus reviews applied. Read `docs/whats-new-2026-11-23.md`.
+- **Next action:** Marc: try the Debug build per `docs/whats-new-2026-11-23.md`, decide the WhisperKit instance reuse (task 4019), then the merge order of the three drive branches.
+
+## Earlier (2026-11-23 00:45, superseded)
+
+- Branch `feat/drive-1123-use` (919d386, on forgejo-work, from `feat/drive-1122-notes`): names glossary (`names.txt`), owner-checked
+  task owners, `sales_call_log` + `playback` templates, sales-call export (`SalesCallExport`, Notes window action, Settings).
+  swift test 1821 / 0 failures; Direct Debug build succeeded. Read `docs/use-drive-2026-11-23.md`.
+
+## Earlier (2026-11-14 03:40, superseded)
+
 
 - **v1.21.0 (build 24) released** from `main` @ 756afe3 (PR #19), tag `v1.21.0` on origin.
   Direct: https://github.com/joanmarcriera/distavo/releases/tag/v1.21.0 ; https://distavo.com/appcast.xml serves 1.21.0.

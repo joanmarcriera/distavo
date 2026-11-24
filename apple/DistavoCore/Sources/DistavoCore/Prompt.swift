@@ -299,14 +299,17 @@ public enum Prompt {
                              customInstruction: String? = nil, glossary: [String] = [], calendarAttendees: [String] = [],
                              template: SummaryTemplate? = nil,
                              scratchpad: ScratchpadNotes? = nil,
-                             truncated: Bool = false) -> String {
+                             truncated: Bool = false, pinOwnerName: Bool = false,
+                             verifySteps: Bool = false) -> String {
         let hint = participants?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let padBlock = scratchpad?.promptBlock() ?? ""
-        let block = (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
+        let block = (pinOwnerName ? OwnerName.promptBlock(noteOwner) : "")   // "" unless on AND a real personal name
+            + (hint.isEmpty ? "" : participantsBlock.replacingOccurrences(of: "{participants}", with: hint))
             + calendarAttendeesText(calendarAttendees)   // #2946; "" = byte-identical
             + glossaryText(glossary)
             + padBlock   // typed notes (#2949); "" = byte-identical
             + TruncationCheck.promptBlock(truncated)   // #4013; "" = byte-identical
+            + StepVerifier.promptBlock(verifySteps)    // D059; "" = byte-identical
         var base = style == .factsFirst
             ? factsFirstTemplate.replacingOccurrences(of: "{meeting_datetime}", with: meetingDateText(meetingDate))
             : Self.template
@@ -337,9 +340,16 @@ public enum Prompt {
         return opening + (base
             .replacingOccurrences(of: "{note_owner}", with: noteOwner)
             .replacingOccurrences(of: "Known speaker label for the note owner: {user_speaker}.\n",
-                                  with: "Known speaker label for the note owner: {user_speaker}.\n" + block)
+                                  with: "Known speaker label for the note owner: {user_speaker}.\n" + Self.literal(block))
             .replacingOccurrences(of: "{user_speaker}", with: userSpeaker)
             .replacingOccurrences(of: "{transcript_text}", with: transcript)) + closing + instructionBlock
+    }
+
+    /// Text the owner, a calendar or a people page supplied goes into the prompt as text: a `{placeholder}`
+    /// in it must not be expanded by the replacements that follow (it once could duplicate the transcript).
+    static func literal(_ s: String) -> String {
+        guard s.contains("{") else { return s }
+        return s.replacingOccurrences(of: "{", with: "(").replacingOccurrences(of: "}", with: ")")
     }
 
     /// Longest custom instruction honoured, in characters (the rest is cut): it

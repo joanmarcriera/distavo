@@ -39,6 +39,11 @@ struct TranscriptionPane: View {
             if let detected = model.controller.lastDetectedLanguages {
                 SettingCaption("Last recording: detected \(detected).")
             }
+            if model.usesBuiltInTranscription,
+               EmbeddedModelCatalog.isAutomatic(model.draft.transcribe.language) {
+                SpokenLanguagesSection(model: model)
+            }
+            VoiceProfilesSection(model: model)   // #2944
             Stepper("Number of speakers: \(model.draft.transcribe.numSpeakers == 0 ? "Auto" : String(model.draft.transcribe.numSpeakers))",
                     value: $model.draft.transcribe.numSpeakers, in: 0...10)
                 .withHelp("Roughly how many people are speaking. Auto lets Distavo estimate it. A wrong number merges or splits speakers, so set it only when you know.")

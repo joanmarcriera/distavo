@@ -1,11 +1,13 @@
-• Long meetings: recordings of several hours are now transcribed in parts, so a four-hour meeting gets a transcript and a note instead of stopping Distavo.
-• A forgotten recording stops itself after 8 hours, is saved and transcribed, and Distavo tells you. Change the limit in Settings, Recording.
-• If Distavo ever stops while processing a recording, that recording is set aside and you are told, instead of it being tried again at every launch.
-• Safer notes: leaked working steps are removed, a summary that loops is retried and never lost, and every facts-ledger row is checked against the transcript.
-• A recording that stops mid-conversation is flagged, and the summary says so instead of inventing next steps.
-• Settings, Recording: an optional compact recording format (about half the size) and how much space your recordings use.
-• Your own name now reaches the summary, so a misheard name or a colleague "standing in for" someone is not taken for you.
-• Recordings dropped from a phone are dated from their file name or their own metadata.
-• A warning when your microphone is silent while the call is audible, with the likely reason, and an optional switch to another microphone.
-• An optional keyboard shortcut starts and stops a recording.
-• Return now keeps the recording in the delete confirmation, and System Settings no longer opens by itself after Save.
+• People pages: one page per person you have met, built only from names you confirmed, with their meetings, role and organisation. Menu, Update People Pages.
+• Meeting Brief: before a meeting, the last meetings and the open tasks for each person in it.
+• Merge People joins two spellings of one person, and can be undone.
+• Two meetings in one recording: split a recording in two from the Notes window, or let Distavo ask when a long recording with a quiet gap stops (Settings, Recording). Each meeting gets its own note and its own speakers.
+• Transcript: Move to Speaker gives a selected part to another or a new speaker.
+• Quick Notes: type the objective of the meeting and who is in it while you record.
+• Day log: one note per day listing that day's meetings.
+• Safer notes: every generated plan step needs a quote from the transcript, relative dates in tasks are resolved against the recording date, and warnings appear at the top of the note.
+• "Languages I speak" limits language detection to your own short list.
+• A names list keeps the spelling of the people and products you mention; tasks are only given to an owner the transcript supports.
+• New templates for sales calls and for played-back courses, and a sales-call export.
+• The silence notice repeats, then stops and keeps the recording; you can also stop and discard from the notice.
+• Fixes: two recordings with the same cleaned-up name no longer collide, and an interrupted recording is never deleted in favour of a shorter copy.

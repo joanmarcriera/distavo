@@ -64,6 +64,22 @@ pending recording is processed; a waiting regenerate has a **Cancel** button in 
 be stopped). The Queue stays a separate window because it lists recordings, including ones with no
 note yet, in processing order; its Done rows and regenerate rows offer **Show in Notes**.
 
+## Split Recording… (D077, drive 2026-11-23)
+
+Change > **Split Recording…** on a note with a timed transcript (not on a variant). The sheet lists the silences of
+a minute or more where the speakers change (`RecordingSplit.candidates`), each with its time, length and the speakers
+before and after; with no such silence it lists every silence of a minute or more. On **Split**:
+`RecordingSplitAction.perform` writes `<name> part 1` and `<name> part 2` beside the original (names that collide with
+nothing), copies `.language.json` to both, re-times the key moments, marks the original done and moves the old note
+to its `.prev-` backup; then a scan processes both halves. The original audio is never changed.
+
+Manual check (needs the app and a real two-meeting recording):
+1. Select the note, Split Recording…: the silence between the two calls is listed with different speakers each side.
+2. Split. Two new files appear in the recordings folder, the old note disappears from the list (its `.prev-`
+   backup is in the notes folder), and two new notes arrive after processing.
+3. The original recording is still in place, byte for byte; it is not processed again.
+4. A note without timestamps shows "no timestamps saved" under the disabled button.
+
 ## What did not change
 
 - Everything that rewrites a note keeps its safety: `.prev-` backup, atomic write, under the scan lock

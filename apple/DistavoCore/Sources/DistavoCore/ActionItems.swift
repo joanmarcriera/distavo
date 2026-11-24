@@ -271,6 +271,8 @@ public enum ActionItems {
             at: notesDir, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else { return [] }
         var candidates: [(url: URL, date: Date)] = []
         for case let url as URL in walker {
+            // Day logs (D102) repeat other notes' tasks as plain text; never read them as notes.
+            if url.lastPathComponent == DayLog.folderName { walker.skipDescendants(); continue }
             guard url.pathExtension.lowercased() == "md",
                   !NoteVersions.isBackupName(url.lastPathComponent),
                   let v = try? url.resourceValues(forKeys: Set(keys)),

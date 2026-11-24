@@ -26,7 +26,16 @@ final class QuickNotesModel: ObservableObject {
 
     @Published private(set) var items: [Item] = []
     @Published var draft = ""
+    @Published var objectiveDraft = ""
+    /// Who is in the meeting, typed while recording; pre-fills the participants question at stop.
+    @Published var people = "" { didSet { if people != oldValue { persist() } } }
     @Published private(set) var isActive = false
+    /// People from the people pages, offered in the panel (set by the capture controller).
+    var peopleSuggestions: () -> [PeoplePages.Known] = { [] }
+    /// Read once when the panel opens (the pages are files: never from the view body).
+    @Published private(set) var known: [PeoplePages.Known] = []
+    /// What was typed in People for the recording that just ended (read by the stop path, then cleared).
+    private(set) var lastPeople = ""
 
     /// "Mark key moment" button in the panel (Vikunja #2950); set by the capture controller.
     var onMarkKeyMoment: (() -> Void)?
@@ -40,22 +49,39 @@ final class QuickNotesModel: ObservableObject {
     func begin(workDir: URL, base: String, startedAt: Date) {
         end()
         self.workDir = workDir; self.base = base; self.startedAt = startedAt
-        items = []; draft = ""; isActive = true
+        items = []; draft = ""; objectiveDraft = ""; people = ""; lastPeople = ""; isActive = true
     }
+
+    /// An objective for this meeting: a must-include line, so the note says what the meeting did about it.
+    func commitObjective() {
+        guard isActive, let startedAt else { return }
+        let line = ScratchpadNotes.objective(objectiveDraft, offsetSeconds: Int(Date().timeIntervalSince(startedAt)))
+        objectiveDraft = ""
+        guard let line else { return }
+        items.append(Item(offsetSeconds: line.offsetSeconds, text: line.text, flagged: line.flagged))
+        persist()
+    }
+
+    func addPerson(_ p: PeoplePages.Known) { people = PeoplePages.adding(p, to: people) }
 
     /// The recording stopped (kept): an uncommitted draft is committed (so a
     /// note typed but not yet Returned survives Stop or a silence auto-stop),
     /// everything is flushed to disk, the sidecar stays and the panel closes.
     func end() {
         commitDraft()
+        commitObjective()
+        lastPeople = snapshot().cleanPeople ?? ""
         flush()
         reset()
     }
 
     private func reset() {
-        panel?.close(); panel = nil
+        // The recording is forgotten BEFORE the panel closes: a field that commits its text while closing
+        // must find nothing to write to (it once could bring back the notes of a deleted recording).
+        pending?.cancel(); pending = nil
         isActive = false; workDir = nil; base = nil; startedAt = nil
-        items = []; draft = ""
+        panel?.close(); panel = nil
+        items = []; draft = ""; objectiveDraft = ""; people = ""
     }
 
     /// The recording was thrown away: nothing may outlive it.
@@ -94,7 +120,8 @@ final class QuickNotesModel: ObservableObject {
     private static let debounce: TimeInterval = 0.5
 
     private func snapshot() -> ScratchpadNotes {
-        ScratchpadNotes(lines: items.map { .init(offsetSeconds: $0.offsetSeconds, text: $0.text, flagged: $0.flagged) })
+        ScratchpadNotes(lines: items.map { .init(offsetSeconds: $0.offsetSeconds, text: $0.text, flagged: $0.flagged) },
+                        people: people.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : people)
     }
 
     /// Schedule a debounced write; `flush()` (at `end()`) makes it final.
@@ -118,7 +145,7 @@ final class QuickNotesModel: ObservableObject {
     /// Write (or, when empty, remove) the sidecar. A failed write is only
     /// logged: losing a note must never disturb the recording.
     private nonisolated static func write(_ pad: ScratchpadNotes, workDir: URL, base: String) {
-        if pad.sanitised().isEmpty { ScratchpadNotes.delete(workDir: workDir, base: base); return }
+        if !pad.hasContent { ScratchpadNotes.delete(workDir: workDir, base: base); return }
         do { try pad.save(workDir: workDir, base: base) }
         catch { print("[Distavo] could not save the quick notes: \(error.localizedDescription)") }
     }
@@ -129,8 +156,9 @@ final class QuickNotesModel: ObservableObject {
     func showPanel() {
         guard isActive else { return }
         if let panel { panel.makeKeyAndOrderFront(nil); return }
+        known = peopleSuggestions()
         let panel = QuickNotesPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 360, height: 300),
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 400),
             styleMask: [.titled, .closable, .resizable, .utilityWindow, .nonactivatingPanel],
             backing: .buffered, defer: false)
         panel.title = "Quick Notes"
@@ -158,6 +186,22 @@ private struct QuickNotesView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            TextField("Objective of this meeting…  (Return to add)", text: $model.objectiveDraft)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { model.commitObjective() }
+                .help("The note will say, under Highlights, what the meeting did about each objective")
+            HStack {
+                TextField("People in this meeting, e.g. Anna (Acme) - buyer, Pere", text: $model.people)
+                    .textFieldStyle(.roundedBorder)
+                    .help("Fills “Other participants” when you stop the recording; you can still edit it there")
+                if !model.known.isEmpty {
+                    Menu("Add") {
+                        ForEach(model.known, id: \.name) { p in Button(p.participantsEntry) { model.addPerson(p) } }
+                    }
+                    .fixedSize()
+                }
+            }
+            Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if model.items.isEmpty {
@@ -193,6 +237,6 @@ private struct QuickNotesView: View {
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(12)
-        .frame(minWidth: 320, minHeight: 220)
+        .frame(minWidth: 340, minHeight: 300)
     }
 }

@@ -267,8 +267,18 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
     /// Stop a built-in recording after this many hours (`RecordingDurationCap`); 0 = no limit. 8 for any
     /// config predating the key and for fresh installs: it is a safety net for a forgotten Stop.
     public var maxDurationHours: Int
+    /// Forgotten recordings (D027): repeat the silence suggestion while the silence lasts and stop (keeping the
+    /// take) after this many unanswered ones (`SilenceMonitor`). Acts only with `suggest_stop_on_silence` on.
+    /// 0 = off (one suggestion per stretch, as before) for any config predating the key; 3 for fresh installs.
+    public var stopAfterUnansweredNotices: Int
+    /// "Was this two meetings?" when a recording stops (`TwoMeetingsSplit`): asked only for a recording of an
+    /// hour or more with a quiet gap of a minute or more between two stretches of talk. Off for any config
+    /// predating the key and for fresh installs (inert-until-switched-on rule): with it off nothing is asked
+    /// and the stop path is exactly as before.
+    public var askTwoMeetings: Bool
 
     public static let clipSecondsRange = 0...600
+    public static let unansweredNoticesRange = 0...20
 
     public init(bookmarkHotkeyEnabled: Bool = false, bookmarkHotkey: HotkeySpec = .default,
                 clipLeadSeconds: Int = RecordingBookmarks.defaultLeadSeconds,
@@ -277,7 +287,11 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
                 recordHotkeyEnabled: Bool = false,
                 recordHotkey: HotkeySpec = .recordDefault,
                 storageFormat: RecordingStorageFormat = .full,
-                maxDurationHours: Int = RecordingDurationCap.defaultHours) {
+                maxDurationHours: Int = RecordingDurationCap.defaultHours,
+                stopAfterUnansweredNotices: Int = 0,
+                askTwoMeetings: Bool = false) {
+        self.askTwoMeetings = askTwoMeetings
+        self.stopAfterUnansweredNotices = Self.clampNotices(stopAfterUnansweredNotices)
         self.storageFormat = storageFormat
         self.maxDurationHours = RecordingDurationCap.clamp(maxDurationHours)
         self.micAutoSwitch = micAutoSwitch
@@ -299,6 +313,8 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
         case recordHotkey = "record_hotkey"
         case storageFormat = "storage_format"
         case maxDurationHours = "max_duration_hours"
+        case stopAfterUnansweredNotices = "stop_after_unanswered_notices"
+        case askTwoMeetings = "ask_two_meetings"
     }
 
     public init(from decoder: Decoder) throws {
@@ -318,6 +334,13 @@ public struct RecordingOptions: Codable, Equatable, Sendable {
             .flatMap(RecordingStorageFormat.init(rawValue:)) ?? d.storageFormat
         maxDurationHours = RecordingDurationCap.clamp(
             (try? c.decodeIfPresent(Int.self, forKey: .maxDurationHours)).flatMap { $0 } ?? d.maxDurationHours)
+        stopAfterUnansweredNotices = Self.clampNotices(
+            (try? c.decodeIfPresent(Int.self, forKey: .stopAfterUnansweredNotices)).flatMap { $0 } ?? d.stopAfterUnansweredNotices)
+        askTwoMeetings = (try? c.decodeIfPresent(Bool.self, forKey: .askTwoMeetings)).flatMap { $0 } ?? d.askTwoMeetings
+    }
+
+    static func clampNotices(_ n: Int) -> Int {
+        min(max(n, unansweredNoticesRange.lowerBound), unansweredNoticesRange.upperBound)
     }
 
     /// Why the record shortcut cannot be used right now, or nil. The same combination must not be

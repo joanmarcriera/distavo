@@ -218,8 +218,11 @@ public actor EmbeddedTranscriber {
                 download: true)
             var results: [TranscriptionResult]
             var recoveryNotes: [String] = []    // footer sentences from the second pass over dropped speech (#3579)
+            // #4019: unload explicitly on every exit; CoreML keeps compiled-model buffers alive past ARC.
+            var loadedWhisper: WhisperKit?
             do {
                 let whisper = try await WhisperKit(whisperConfig)
+                loadedWhisper = whisper
                 // I3: verify whenever this is a custom-repo model that has
                 // never been verified — not only on `firstRun`. A download
                 // interrupted right after the model files land (but before
@@ -275,16 +278,20 @@ public actor EmbeddedTranscriber {
                     await self.report("Could not check for dropped speech (\(type(of: error))) — keeping the transcript as is.")
                 }
                 results = transcribed
+                await whisper.unloadModels()
+                loadedWhisper = nil
                 // `whisper` goes out of scope here: the 1–4 GB model is released
                 // before SpeakerKit loads (spec §6 peak-memory rule).
                 await coordinator.noteDownload(id: model.id, fraction: nil)
             } catch let retry as RetryableDependencyError {
+                await loadedWhisper?.unloadModels()
                 // A manifest mismatch (see `verifyManifest` above) is already
                 // the right shape for the pipeline — don't let `pipelineError`
                 // reclassify it as a permanent failure below.
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw retry
             } catch let manifestPermanent as EmbeddedTranscriberError {
+                await loadedWhisper?.unloadModels()
                 // A second consecutive manifest failure (I2, spec §7) is
                 // already the typed, permanent error the pipeline should see
                 // — passing it through `pipelineError` would re-wrap its own
@@ -294,6 +301,7 @@ public actor EmbeddedTranscriber {
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw manifestPermanent
             } catch {
+                await loadedWhisper?.unloadModels()
                 await coordinator.noteDownload(id: model.id, fraction: nil)
                 throw Self.pipelineError(error, model: model.displayName)
             }
@@ -327,9 +335,17 @@ public actor EmbeddedTranscriber {
         let speakerKit: SpeakerKit
         do { speakerKit = try await SpeakerKit(speakerConfig) }
         catch { throw pipelineError(error, model: "speaker identification") }
-        let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
-        return try await speakerKit.diarize(
-            audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers > 0 ? numSpeakers : nil))   // 0 = auto (#3580)
+        // #4019: release the segmenter/embedder on every exit.
+        do {
+            let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: wavURL.path)
+            let result = try await speakerKit.diarize(
+                audioArray: audio, options: PyannoteDiarizationOptions(numberOfSpeakers: numSpeakers > 0 ? numSpeakers : nil))   // 0 = auto (#3580)
+            await speakerKit.unloadModels()
+            return result
+        } catch {
+            await speakerKit.unloadModels()
+            throw error
+        }
     }
 
     /// SpeakerKit diarisation of a WhisperKit result (shared with the detector-free path).

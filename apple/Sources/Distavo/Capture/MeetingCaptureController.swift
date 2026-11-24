@@ -38,6 +38,23 @@ final class MeetingCaptureController: ObservableObject {
         /// The recording reached `recording.max_duration_hours` (`RecordingDurationCap`). Nobody may be at the
         /// Mac, so like a silence stop it never asks the speakers question.
         case durationCap(hours: Int)
+        /// Distavo is quitting (Quit, log out, restart, an update). No question and no calendar wait: the
+        /// recorder is closed cleanly, the typed notes and people are saved, and the take is finalised at the
+        /// next launch (finalising needs time a quitting process does not have).
+        case quitting
+    }
+
+    /// A start is between its first check and the recorder running (a permission prompt may be open).
+    private var isStarting = false
+    /// The "Who was in this meeting?" window of the previous recording is open.
+    private var stopQuestionOpen = false
+
+    /// Quit while recording: stop through the normal path so the take, the typed notes and the typed people
+    /// are saved, instead of leaving a `.part` for crash recovery.
+    func stopForQuit() {
+        guard isRecording else { return }
+        log("Distavo is quitting while recording - stopping the recording first")
+        stop(reason: .quitting)
     }
 
     /// The tap TCC category settled in macOS 14.4 — hide the feature below it.
@@ -61,6 +78,9 @@ final class MeetingCaptureController: ObservableObject {
     let keyMoments = KeyMomentsModel()
 
     private var silenceMonitor: SilenceMonitor?
+    /// "Was this two meetings?" (`TwoMeetingsSplit`): fed the same once-a-second levels as the silence monitor,
+    /// read once at Stop and only with `recording.ask_two_meetings` on; reset per recording.
+    private var twoMeetings = TwoMeetingsDetector(now: 0)
     /// Call-end stop (#4007): fed once a second only while `CallEndStop.isArmed`; reset per recording.
     private var callEndPolicy = CallEndStop.policy()
     /// Longest-recording cap (8 h by default); fed the monotonic elapsed time once a second, reset per recording.
@@ -99,6 +119,10 @@ final class MeetingCaptureController: ObservableObject {
         self.notify = notify
         self.log = log
         quickNotes.onMarkKeyMoment = { [weak self] in self?.markKeyMoment() }   // #2950
+        quickNotes.peopleSuggestions = { [weak self] in
+            guard let self else { return [] }
+            return PeoplePages.suggestions(notesDir: Config.resolvePath(self.configProvider().notesDir))
+        }
         recoverOrphanedRecordings()
     }
 
@@ -113,6 +137,14 @@ final class MeetingCaptureController: ObservableObject {
             await MainActor.run {
                 for url in recovered {
                     self?.log("Recovered interrupted meeting recording: \(url.lastPathComponent)")
+                    // The people typed in Quick Notes before the crash are still the answer to "who was there".
+                    if let self {
+                        let config = self.configProvider()
+                        let base = DistavoState.baseFor(recordingsDir: self.folderProvider(), path: url)
+                        if let people = ScratchpadNotes.load(workDir: Config.resolvePath(config.workDir), base: base)?.cleanPeople {
+                            self.keepTypedPeople(people, for: url, config: config)
+                        }
+                    }
                 }
             }
         }
@@ -209,7 +241,8 @@ final class MeetingCaptureController: ObservableObject {
         guard DiscardPrompt.shouldDelete(buttonIndex: response) else { return }
         // The user may have stopped it through the other menu item while the
         // alert was up; nothing to discard then.
-        guard isRecording else { return }
+        // ... or stopped it and started another: that one is not the take this question was about.
+        guard isRecording, (self.recorder as? MeetingRecorder) === recorder else { return }
         timer?.invalidate()
         timer = nil
         endSilenceTracking()
@@ -223,10 +256,20 @@ final class MeetingCaptureController: ObservableObject {
     }
 
     private func start() async {
-        guard Self.isSupported, !isRecording else { return }
+        // One start at a time: a second click while the microphone prompt is open once started a second
+        // recorder whose tap and timer were never released.
+        guard Self.isSupported, !isRecording, !isStarting else { return }
+        guard !stopQuestionOpen else {
+            // Its once-a-second checks (silence, call end, the limit) could not run behind that window.
+            notify("Answer the question about the last recording first",
+                   "The “Who was in this meeting?” window is still open. Save or skip it, then start recording.")
+            return
+        }
+        isStarting = true
+        defer { isStarting = false }
         guard runPreflightIfNeeded() else { return }
         guard await ensureMicrophoneAccess() else { return }
-        guard #available(macOS 14.4, *) else { return }
+        guard #available(macOS 14.4, *), !isRecording else { return }
 
         let recorder = MeetingRecorder()
         recorder.storageFormat = configProvider().recording.storageFormat   // #6670
@@ -276,6 +319,7 @@ final class MeetingCaptureController: ObservableObject {
         silenceMonitor = SilenceMonitor(policy: SilencePolicy(config: configProvider()),
                                         now: ProcessInfo.processInfo.systemUptime)
         silenceNotice = nil
+        twoMeetings = TwoMeetingsDetector(now: ProcessInfo.processInfo.systemUptime)
         callEndPolicy = CallEndStop.policy()
         durationCap = RecordingDurationCap(hours: configProvider().recording.maxDurationHours)
         capStartUptime = ProcessInfo.processInfo.systemUptime
@@ -334,39 +378,53 @@ final class MeetingCaptureController: ObservableObject {
         // blocking dialog would sit there (freezing other main-thread work)
         // while the recording waited, untranscribed. It behaves exactly like
         // answering Skip: no speakers sidecar, no language override.
-        let ask = config.askSpeakersOnStop && silenceMinutes == nil && capHours == nil
+        var quitting = false
+        if case .quitting = reason { quitting = true }
+        let ask = config.askSpeakersOnStop && silenceMinutes == nil && capHours == nil && !quitting
         // Hold the take back as a `.part` while we ask about the speakers, so
         // the answer is on disk before the scanner can see the recording.
         let recStart = recorder.startedAt ?? startedAt ?? Date()
         // Calendar lookup (#2946) happens AFTER the recorder has stopped, off the main
         // thread with a timeout, so a slow calendar store can never delay Stop; the take
         // stays a `.part` until it is done.
-        let wantsCalendar = CalendarRecordingStep.wantsLookup(config: config)
-        let outcome = recorder.stop(deferFinalize: ask || wantsCalendar)
+        let wantsCalendar = !quitting && CalendarRecordingStep.wantsLookup(config: config)
+        // "Was this two meetings?" (`TwoMeetingsSplit`): only with the option on, and only when somebody is at
+        // the Mac to answer (never after a silence stop, the length limit or a quit). nil = nothing changes.
+        let splitOffer = config.recording.askTwoMeetings && silenceMinutes == nil && capHours == nil && !quitting
+            ? twoMeetings.suggestion() : nil
+        // Quitting: the take stays a `.part`. Finalising runs in the background and the process is about to
+        // exit, so it is left to start-up recovery (which also restores the people typed in Quick Notes).
+        let outcome = recorder.stop(deferFinalize: ask || wantsCalendar || quitting || splitOffer != nil)
         self.recorder = nil
         isRecording = false
         quickNotes.end()   // keeps the sidecar, closes the panel
+        // Read now: a recording started while the calendar lookup below runs would clear it.
+        let typedPeople = quickNotes.lastPeople
         keyMoments.end()   // keeps the sidecar, releases the hotkey
 
         guard let outcome else { return }
         guard wantsCalendar else {
             finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                       capHours: capHours, ask: ask, recStart: recStart, calendarMatch: nil, heldForCalendar: false)
+                       capHours: capHours, ask: ask, recStart: recStart, calendarMatch: nil,
+                       heldForCalendar: splitOffer != nil, typedPeople: typedPeople, split: splitOffer)
             return
         }
         Task { @MainActor [weak self] in
             let match = await CalendarRecordingStep.lookup(start: recStart, config: config)
             self?.finishStop(recorder: recorder, outcome: outcome, config: config, silenceMinutes: silenceMinutes,
-                             capHours: capHours, ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true)
+                             capHours: capHours, ask: ask, recStart: recStart, calendarMatch: match, heldForCalendar: true,
+                             typedPeople: typedPeople, split: splitOffer)
         }
     }
 
     /// Everything after the recorder stopped: the calendar step, the notifications and the
-    /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup.
+    /// speakers window. `heldForCalendar`: the take was kept as a `.part` for the lookup (or for `split`).
+    /// `split`: the quiet gap `TwoMeetingsSplit` found, nil when the option is off or there is none.
     @available(macOS 14.4, *)
     private func finishStop(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, config: Config,
                             silenceMinutes: Int?, capHours: Int? = nil, ask: Bool, recStart: Date,
-                            calendarMatch: CalendarMatch?, heldForCalendar: Bool) {
+                            calendarMatch: CalendarMatch?, heldForCalendar: Bool, typedPeople: String = "",
+                            split: TwoMeetingsSplit.Suggestion? = nil) {
         // #2946: the sidecars move (and the file is renamed) while the take is still a `.part`.
         var savedURL = outcome.url
         if let calendarMatch {
@@ -374,20 +432,44 @@ final class MeetingCaptureController: ObservableObject {
                 calendarMatch, recording: outcome.url, start: recStart, config: config,
                 recordingsDir: folderProvider(), log: log)
         }
+        // Raised before the question, not after it: while the modal is up there is no recorder, and a new
+        // recording started by the shortcut would have its once-a-second checks stalled behind it.
+        if split != nil { stopQuestionOpen = true }
+        let asTwo = split.map(askTwoMeetings) ?? false
+        if split != nil { stopQuestionOpen = false }
+        if let split, asTwo {
+            finishAsTwo(recorder: recorder, outcome: outcome, savedURL: savedURL, config: config, ask: ask,
+                        recStart: recStart, calendarMatch: calendarMatch, typedPeople: typedPeople, split: split)
+            return
+        }
+        finishSaved(recorder: recorder, outcome: outcome, savedURL: savedURL, config: config,
+                    silenceMinutes: silenceMinutes, capHours: capHours, ask: ask, calendarMatch: calendarMatch,
+                    heldForCalendar: heldForCalendar, typedPeople: typedPeople)
+    }
+
+    /// The "no system audio" notice is a problem for a call but not for an in-person meeting
+    /// (microphone only, #3586): when the speakers question is coming, it waits for that answer.
+    private func noSystemAudioNotice(stoppedBySilence: Bool, microphoneHeard: Bool) {
+        // Never opens System Settings unasked (#4022); the policy only picks the wording and rate-limits the hint.
+        let key = "permissionNudge.lastHint"
+        let last = UserDefaults.standard.object(forKey: key) as? Date
+        let kind = PermissionNudgePolicy.notice(
+            stoppedBySilence: stoppedBySilence, microphoneHeard: microphoneHeard,
+            lastHint: last, now: Date())
+        if kind == .permissionHint { UserDefaults.standard.set(Date(), forKey: key) }
+        notify(PermissionNudgePolicy.title(kind), PermissionNudgePolicy.body(kind))
+        log("Warning: recording contained no system audio (permission denied or nothing was playing)")
+    }
+
+    /// The take is saved as ONE recording under `savedURL`: the notifications and the speakers window.
+    @available(macOS 14.4, *)
+    private func finishSaved(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, savedURL: URL, config: Config,
+                             silenceMinutes: Int?, capHours: Int?, ask: Bool,
+                             calendarMatch: CalendarMatch?, heldForCalendar: Bool, typedPeople: String) {
         if heldForCalendar && !ask { recorder.finalizeDeferred(as: savedURL) }
         log("Meeting recording saved: \(savedURL.lastPathComponent) (\(elapsedLabel))")
-        // The "no system audio" notice is a problem for a call but not for an in-person meeting
-        // (microphone only, #3586): when the speakers question is coming, it waits for that answer.
         func noSystemAudioNotice() {
-            // Never opens System Settings unasked (#4022); the policy only picks the wording and rate-limits the hint.
-            let key = "permissionNudge.lastHint"
-            let last = UserDefaults.standard.object(forKey: key) as? Date
-            let kind = PermissionNudgePolicy.notice(
-                stoppedBySilence: silenceMinutes != nil, microphoneHeard: outcome.microphoneHeard,
-                lastHint: last, now: Date())
-            if kind == .permissionHint { UserDefaults.standard.set(Date(), forKey: key) }
-            notify(PermissionNudgePolicy.title(kind), PermissionNudgePolicy.body(kind))
-            log("Warning: recording contained no system audio (permission denied or nothing was playing)")
+            self.noSystemAudioNotice(stoppedBySilence: silenceMinutes != nil, microphoneHeard: outcome.microphoneHeard)
         }
         if let capHours {
             // The cap message wins: it is the one thing the user must know (the meeting may still be going).
@@ -418,6 +500,9 @@ final class MeetingCaptureController: ObservableObject {
         if let silenceMinutes {
             log("Recording stopped automatically after \(silenceMinutes) min of silence")
         }
+        // No question this time (auto-stop, or the question is switched off): the people typed in Quick
+        // Notes are the answer.
+        if !ask { keepTypedPeople(typedPeople, for: savedURL, config: config) }
         if ask {
             // Start detection on the still-`.part` file (deferred finalize
             // means it isn't renamed/balanced yet) before the modal alert, so
@@ -428,7 +513,10 @@ final class MeetingCaptureController: ObservableObject {
             // (or was skipped), so `StereoBalancer.balance` — which deletes
             // the `.part` file — never races the detector reading it.
             let detection = startLanguageDetection(partURL: savedURL.appendingPathExtension("part"))
+            stopQuestionOpen = true
+            defer { stopQuestionOpen = false }
             let inPerson = askSpeakers(for: savedURL, config: config, detection: detection,
+                        typedOthers: typedPeople,
                         prefillOthers: config.calendar.attendeesAsParticipants
                             ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "",
                         systemAudioHeard: outcome.systemAudioHeard)
@@ -447,6 +535,134 @@ final class MeetingCaptureController: ObservableObject {
                 _ = await detection?.value
                 recorder.finalizeDeferred(as: savedURL)
             }
+        }
+    }
+
+    // MARK: Was this two meetings? (`TwoMeetingsSplit`)
+
+    /// Asks whether the recording was two meetings back to back. Return = keep as one.
+    private func askTwoMeetings(_ split: TwoMeetingsSplit.Suggestion) -> Bool {
+        let text = TwoMeetingsSplit.question(for: split)
+        let alert = NSAlert()
+        alert.messageText = text.title
+        alert.informativeText = text.body
+        for title in TwoMeetingsSplit.buttonTitles { alert.addButton(withTitle: title) }
+        NSApp.activate(ignoringOtherApps: true)
+        let index = alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+        let yes = TwoMeetingsSplit.shouldSplit(buttonIndex: index)
+        log("Quiet gap of \(Int(split.gap.duration.rounded())) s at \(TwoMeetingsSplit.clock(split.gap.start)) in a "
+            + "recording of \(TwoMeetingsSplit.clock(split.duration)): asked whether it was two meetings - "
+            + (yes ? "split in two" : "kept as one"))
+        return yes
+    }
+
+    /// "Split in Two": the held-back take is cut at the gap (off the main thread: it is copied once), what
+    /// was typed and marked goes to the half its time falls in, and the speakers question is asked once per
+    /// half, so each gets its own `.speakers.json` and `.language.json`. The second half is named by its own
+    /// start time. If the cut fails nothing has changed and the take is saved as one, as if "Keep as One".
+    @available(macOS 14.4, *)
+    private func finishAsTwo(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, savedURL: URL, config: Config,
+                             ask: Bool, recStart: Date, calendarMatch: CalendarMatch?, typedPeople: String,
+                             split: TwoMeetingsSplit.Suggestion) {
+        let fm = FileManager.default
+        let cut = split.cut
+        let part = savedURL.appendingPathExtension("part")
+        let folder = savedURL.deletingLastPathComponent()
+        let secondStart = recStart.addingTimeInterval(cut.second.lowerBound)
+        // A free name at the second meeting's own start (a second later if that one is taken).
+        let secondURL = (0..<5).lazy
+            .map { folder.appendingPathComponent(MeetingRecorder.fileName(for: secondStart.addingTimeInterval(Double($0)))) }
+            .first { !fm.fileExists(atPath: $0.path) && !fm.fileExists(atPath: $0.appendingPathExtension("part").path) }
+        // No new recording until both halves are asked about and handed over (same guard as the speakers window).
+        stopQuestionOpen = true
+        Task { @MainActor [weak self] in
+            var failure = "no free file name for the second half"
+            var done = false
+            if let secondURL {
+                let secondPart = secondURL.appendingPathExtension("part")
+                let error = await Task.detached(priority: .userInitiated) { () -> String? in
+                    do { try TwoMeetingsSplit.splitPart(part: part, cut: cut, secondPart: secondPart); return nil }
+                    catch { return error.localizedDescription }
+                }.value
+                done = error == nil
+                failure = error ?? failure
+            }
+            guard let self else { return }   // the take is still a `.part`: finalised at the next launch
+            defer { self.stopQuestionOpen = false }
+            guard done, let secondURL else {
+                self.log("Could not split the recording (\(failure)) - keeping it as one")
+                self.notify("Could not split the recording", "It is saved as one recording, exactly as it was recorded.")
+                self.finishSaved(recorder: recorder, outcome: outcome, savedURL: savedURL, config: config,
+                                 silenceMinutes: nil, capHours: nil, ask: ask, calendarMatch: calendarMatch,
+                                 heldForCalendar: true, typedPeople: typedPeople)
+                return
+            }
+            self.finishHalves(recorder: recorder, outcome: outcome, first: savedURL, second: secondURL, config: config,
+                              ask: ask, calendarMatch: calendarMatch, typedPeople: typedPeople, split: split)
+        }
+    }
+
+    /// Both halves exist as `.part` files: sidecars, the speakers question per half, hand-over to the pipeline.
+    @available(macOS 14.4, *)
+    private func finishHalves(recorder: MeetingRecorder, outcome: MeetingRecorder.Outcome, first: URL, second: URL,
+                              config: Config, ask: Bool, calendarMatch: CalendarMatch?, typedPeople: String,
+                              split: TwoMeetingsSplit.Suggestion) {
+        let recordingsDir = folderProvider()
+        let recDir = recordingsDir.standardizedFileURL.path
+        let full = second.standardizedFileURL.path
+        let secondSource = full.hasPrefix(recDir + "/") ? String(full.dropFirst(recDir.count + 1)) : second.lastPathComponent
+        do {
+            let moved = try TwoMeetingsSplit.routeSidecars(
+                workDir: Config.resolvePath(config.workDir),
+                firstBase: DistavoState.baseFor(recordingsDir: recordingsDir, path: first),
+                secondBase: DistavoState.baseFor(recordingsDir: recordingsDir, path: second),
+                cut: split.cut, secondSource: secondSource)
+            if moved.lines + moved.marks > 0 {
+                log("Moved \(moved.lines) typed notes and \(moved.marks) key moments to the second recording")
+            }
+        } catch {
+            log("Could not move the typed notes or key moments to the second recording: \(error.localizedDescription)")
+        }
+        log("Recording split in two at the quiet gap: \(first.lastPathComponent) and \(second.lastPathComponent)")
+
+        var inPerson = false
+        if ask {
+            let headings = TwoMeetingsSplit.speakersHeadings(for: split)
+            for (url, heading, isFirst) in [(first, headings.first, true), (second, headings.second, false)] {
+                // Same order as for one recording: detection on the `.part`, the question, then the hand-over.
+                let detection = startLanguageDetection(partURL: url.appendingPathExtension("part"))
+                let answer = askSpeakers(
+                    for: url, config: config, detection: detection,
+                    // What was typed, and the calendar event, belong to the meeting the recording started with.
+                    typedOthers: isFirst ? typedPeople : "",
+                    prefillOthers: isFirst && config.calendar.attendeesAsParticipants
+                        ? (calendarMatch?.attendees ?? []).joined(separator: ", ") : "",
+                    systemAudioHeard: outcome.systemAudioHeard, heading: heading,
+                    // The second meeting must not be pre-filled with the people just entered for the first.
+                    suggestFromHistory: isFirst)
+                inPerson = inPerson || answer
+                if isFirst, calendarMatch != nil {
+                    CalendarRecordingStep.pruneAttendees(recording: url, recordingsDir: recordingsDir, config: config)
+                }
+                Task {
+                    _ = await detection?.value
+                    if isFirst { recorder.finalizeDeferred(as: url) }
+                    else { recorder.finalizeHalf(part: url.appendingPathExtension("part"), to: url) }
+                }
+            }
+        } else {
+            keepTypedPeople(typedPeople, for: first, config: config)
+            recorder.finalizeDeferred(as: first)
+            recorder.finalizeHalf(part: second.appendingPathExtension("part"), to: second)
+        }
+        notify("Recording split into two meetings",
+               "\(first.lastPathComponent) and \(second.lastPathComponent) - Distavo will transcribe them shortly.")
+        // The whole take was heard or not; it is not known per half.
+        if !outcome.systemAudioHeard && !inPerson {
+            noSystemAudioNotice(stoppedBySilence: false, microphoneHeard: outcome.microphoneHeard)
+        } else if !outcome.microphoneHeard {
+            notify("The microphone was silent in that recording",
+                   "Check the Microphone permission in System Settings → Privacy & Security, and your input device.")
         }
     }
 
@@ -526,6 +742,7 @@ final class MeetingCaptureController: ObservableObject {
         let levels = recorder.drainLevels()
         let event = monitor.ingest(mic: levels.mic, system: levels.system,
                                    at: ProcessInfo.processInfo.systemUptime)
+        twoMeetings.ingest(mic: levels.mic, system: levels.system, at: ProcessInfo.processInfo.systemUptime)
         silenceMonitor = monitor
         if startLevelCheck.ingest(mic: levels.mic, system: levels.system) {
             log("Warning: no sound at all in the first \(startLevelCheck.window) s of recording")
@@ -553,13 +770,20 @@ final class MeetingCaptureController: ObservableObject {
 
         switch event {
         case .autoStop(let silentFor):
+            if monitor.stoppedByNotices(silentFor: silentFor) {
+                log("Recording stopped after \(monitor.policy.stopAfterUnansweredNotices) unanswered silence notices (kept)")   // D027
+            }
             stop(reason: .silence(minutes: max(1, Int((silentFor / 60).rounded()))))
         case .suggestStop(let silentFor):
             let minutes = max(1, Int((silentFor / 60).rounded()))
             log("No sound for \(minutes) min - suggested stopping the recording")
             silenceNotice = "silent \(minutes) min"
+            // D027: with repeated notices, say when Distavo will stop (and keep) on its own.
+            let tail = monitor.minutesUntilStopAfterNotices.map {
+                " If nobody answers, Distavo stops and keeps the recording in \($0) min."
+            } ?? ""
             suggestSilence("Still recording — no sound for \(minutes) min",
-                           "Stop the recording, or keep going?")
+                           "Stop the recording, or keep going?" + tail)
         case .none:
             if monitor.suggestionActive {
                 silenceNotice = "silent \(max(1, Int(monitor.silentFor / 60))) min"
@@ -646,12 +870,24 @@ final class MeetingCaptureController: ObservableObject {
 
     // MARK: Speakers question (Vikunja #2182)
 
+    /// The people typed in Quick Notes become the participants of the recording when nothing else answered
+    /// the question (never over an answer that is already there).
+    private func keepTypedPeople(_ people: String, for url: URL, config: Config) {
+        guard !people.isEmpty else { return }
+        let workDir = Config.resolvePath(config.workDir)
+        let base = DistavoState.baseFor(recordingsDir: folderProvider(), path: url)
+        guard SpeakerHints.load(workDir: workDir, base: base) == nil else { return }
+        try? SpeakerHints(participants: "Other participants: \(people)").save(workDir: workDir, base: base)
+        log("People typed in Quick Notes saved for \(url.lastPathComponent)")   // no names in the log
+    }
+
     /// Ask who was in the meeting and save the answer as `SpeakerHints` in the
     /// work dir under the recording's base name. Skip/empty saves nothing, so
     /// the prompt stays exactly as it was for this recording.
     @discardableResult
     private func askSpeakers(for url: URL, config: Config, detection: Task<[LanguageDetection], Never>?,
-                             prefillOthers: String = "", systemAudioHeard: Bool = false) -> Bool {
+                             typedOthers: String = "", prefillOthers: String = "", systemAudioHeard: Bool = false,
+                             heading: String? = nil, suggestFromHistory: Bool = true) -> Bool {
         let owner = config.noteOwner.trimmingCharacters(in: .whitespaces)
         let ownerLabel = owner.isEmpty || owner == "Me" ? "me" : "\(owner), me"
 
@@ -662,12 +898,17 @@ final class MeetingCaptureController: ObservableObject {
         count.alignment = .right
         // Recommended values from earlier sheets (#3943): editable, never sent unless left in.
         let suggested = SpeakerSuggestions.make(
-            history: SpeakerSuggestions.recentHistory(workDir: Config.resolvePath(config.workDir)),
+            history: suggestFromHistory ? SpeakerSuggestions.recentHistory(workDir: Config.resolvePath(config.workDir)) : [],
             calendarOthers: prefillOthers)
         let myRole = NSTextField(string: suggested.role ?? "")
         myRole.placeholderString = "e.g. candidate, host, the one taking notes"
         let others = NSTextField(string: suggested.others)   // calendar attendees (#2946) or last used, editable
         if let o = suggested.othersOrigin { others.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
+        // What the owner typed in Quick Notes during this recording wins over any suggestion.
+        if !typedOthers.isEmpty {
+            others.stringValue = typedOthers
+            others.toolTip = "Typed in Quick Notes during the recording - edit or clear"
+        }
         if let o = suggested.roleOrigin { myRole.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
         others.placeholderString = "e.g. Edward, Cambridge University — interviewer"
         others.usesSingleLineMode = false
@@ -681,6 +922,7 @@ final class MeetingCaptureController: ObservableObject {
         let inPersonHelp = NSTextField(wrappingLabelWithString: boxPolicy.help)
         inPersonHelp.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         inPersonHelp.textColor = .secondaryLabelColor
+        inPersonHelp.isSelectable = false   // plain help text: nothing to select or drag
         // Names and jargon for this meeting only (#3584): merged ahead of the global vocabulary.
         let meetingTerms = NSTextField(string: suggested.terms.joined(separator: ", "))
         if let o = suggested.termsOrigin { meetingTerms.toolTip = "Suggested (\(o.rawValue)) - edit or clear" }
@@ -744,16 +986,26 @@ final class MeetingCaptureController: ObservableObject {
         countWarning.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         countWarning.textColor = .systemOrange
         var userEditedCount = false
+        // A suggested participants line the owner has not touched never sets the count (`prefilledCount`).
+        var ownerGaveTheList = !typedOthers.isEmpty
+        let initialCount = count.stringValue
         let countObserver = NotificationCenter.default.addObserver(
             forName: NSControl.textDidChangeNotification, object: count, queue: .main) { _ in userEditedCount = true }
         let refreshCount: () -> Void = {
             let listed = "Other participants: " + others.stringValue
-            if !userEditedCount { count.stringValue = SpeakerHints.suggestedCount(listed).map(String.init) ?? count.stringValue }
-            countWarning.stringValue = SpeakerHints.mismatchWarning(
-                count: Int(count.stringValue.trimmingCharacters(in: .whitespaces)), participants: listed) ?? ""
+            if !userEditedCount {
+                count.stringValue = SpeakerHints.prefilledCount(participants: listed, ownerGaveTheList: ownerGaveTheList)
+                    .map(String.init) ?? initialCount
+            }
+            // The warning compares a count with a list: nothing to compare while the list is only a suggestion.
+            countWarning.stringValue = ownerGaveTheList || userEditedCount ? (SpeakerHints.mismatchWarning(
+                count: Int(count.stringValue.trimmingCharacters(in: .whitespaces)), participants: listed) ?? "") : ""
         }
         let othersObserver = NotificationCenter.default.addObserver(
-            forName: NSControl.textDidChangeNotification, object: others, queue: .main) { _ in refreshCount() }
+            forName: NSControl.textDidChangeNotification, object: others, queue: .main) { _ in
+                ownerGaveTheList = true
+                refreshCount()
+            }
         let countCheckObserver = NotificationCenter.default.addObserver(
             forName: NSControl.textDidChangeNotification, object: count, queue: .main) { _ in refreshCount() }
         defer { [countObserver, othersObserver, countCheckObserver].forEach(NotificationCenter.default.removeObserver) }
@@ -782,14 +1034,35 @@ final class MeetingCaptureController: ObservableObject {
             let i = recentPopup.indexOfSelectedItem - 1
             guard recentSets.indices.contains(i) else { return }
             others.stringValue = recentSets[i]
+            ownerGaveTheList = true
             refreshCount()
             recentPopup.selectItem(at: 0)
         }
         recentPopup.target = recentTarget
         recentPopup.action = #selector(LanguagePickerActionTarget.picked)
+        // People pages (`PeoplePages`, menu "Update People Pages"): one pick ADDS that person, with the role and
+        // organisation written on their page, to "Other participants" (still editable). Nothing without pages.
+        let people = PeoplePages.suggestions(notesDir: Config.resolvePath(config.notesDir))
+        let peoplePopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        peoplePopup.addItem(withTitle: "Add a person…")
+        for p in people {
+            let entry = p.participantsEntry
+            peoplePopup.addItem(withTitle: entry.count > 60 ? String(entry.prefix(57)) + "…" : entry)
+        }
+        let peopleTarget = LanguagePickerActionTarget {
+            let i = peoplePopup.indexOfSelectedItem - 1
+            guard people.indices.contains(i) else { return }
+            others.stringValue = PeoplePages.adding(people[i], to: others.stringValue)
+            ownerGaveTheList = true
+            refreshCount()
+            peoplePopup.selectItem(at: 0)
+        }
+        peoplePopup.target = peopleTarget
+        peoplePopup.action = #selector(LanguagePickerActionTarget.picked)
         let sourceNote = NSTextField(wrappingLabelWithString: suggested.sourceLine ?? "")
         sourceNote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         sourceNote.textColor = .secondaryLabelColor
+        sourceNote.isSelectable = false
         var rows = [
             row("People who spoke:", count, width: 60),
             row("", countWarning, width: 300),
@@ -797,6 +1070,7 @@ final class MeetingCaptureController: ObservableObject {
             row("Other participants:", others, width: 300),
         ]
         if !recentSets.isEmpty { rows.append(row("", recentPopup, width: 300)) }
+        if !people.isEmpty { rows.append(row("", peoplePopup, width: 300)) }
         rows.append(row("Terms for this meeting:", meetingTerms, width: 300))
         if suggested.sourceLine != nil { rows.append(row("", sourceNote, width: 300)) }
         if boxPolicy.visible {
@@ -815,7 +1089,14 @@ final class MeetingCaptureController: ObservableObject {
         form.orientation = .vertical
         form.alignment = .trailing
         form.spacing = 8
-        form.frame = NSRect(x: 0, y: 0, width: 450, height: detection == nil ? 300 : 350)
+        // #6982/#6983: the sheet used to be a fixed 300/350 pt tall, but with every row showing (recent people, source
+        // line, in-person box and help, language status) the rows need ~430 pt, so they overlapped: text drawn over
+        // text over NSAlert's own message (the mangled text of #6982), and the stack's top rows (the people count)
+        // stuck out of the alert's 350 pt container, so a click there hit the alert's selectable message text, not the
+        // field (#6983). Size to the content; `apple/scripts/stop-sheet-layout-check.swift` hit-tests it headless.
+        form.layoutSubtreeIfNeeded()
+        let sheetFrame = AccessoryFormSizing.frame(fittingWidth: form.fittingSize.width, fittingHeight: form.fittingSize.height)
+        form.frame = NSRect(x: 0, y: 0, width: sheetFrame.width, height: sheetFrame.height)
 
         // Update the status label and pre-select the popup as soon as
         // detection finishes — even while the alert's modal loop is running,
@@ -840,7 +1121,7 @@ final class MeetingCaptureController: ObservableObject {
         }
 
         let alert = NSAlert()
-        alert.messageText = "Who was in this meeting?"
+        alert.messageText = heading ?? "Who was in this meeting?"
         alert.informativeText = "Distavo uses this to name the speakers and write the notes and follow-up email from your side. Leave it blank to skip. (Turn this question off in Settings.)"
         alert.accessoryView = form
         alert.addButton(withTitle: "Save")
@@ -848,9 +1129,13 @@ final class MeetingCaptureController: ObservableObject {
         NSApp.activate(ignoringOtherApps: true)
         alert.window.initialFirstResponder = myRole
         // NSControl.target is weak: keep both popup targets alive for the modal run.
-        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget, recentTarget)) { alert.runModal() }
+        let response = withExtendedLifetime((languagePickerTarget, noteLanguageTarget, templateTarget, recentTarget, peopleTarget)) { alert.runModal() }
         let inPerson = inPersonBox.state == .on
-        guard response == .alertFirstButtonReturn else { return false }
+        guard response == .alertFirstButtonReturn else {
+            // Skipped: what the owner typed in Quick Notes during the recording is still their answer.
+            keepTypedPeople(typedOthers, for: url, config: config)
+            return false
+        }
 
         let recordingsDir = folderProvider()
         let base = DistavoState.baseFor(recordingsDir: recordingsDir, path: url)
@@ -902,8 +1187,9 @@ final class MeetingCaptureController: ObservableObject {
 
         do {
             try hints.save(workDir: workDir, base: base)
+            // Counts only: the participants line holds names, employers and roles.
             log("Speakers noted for \(url.lastPathComponent): "
-                + [hints.count.map { "\($0) people" }, hints.participants].compactMap { $0 }.joined(separator: "; "))
+                + [hints.count.map { "\($0) people" }, hints.participants.map { _ in "participants given" }].compactMap { $0 }.joined(separator: "; "))
         } catch {
             log("Could not save the speakers for \(url.lastPathComponent): \(error.localizedDescription)")
         }

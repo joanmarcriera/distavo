@@ -220,7 +220,11 @@ extension Pipeline {
             participants: renamed.participants, transcript: transcript)
         var context = NoteContext(
             noteOwner: cfg.noteOwner, userSpeaker: OwnerSpeakerLabel.effective(configured: renamed.userSpeaker, transcript: transcript),   // #3857
-            participants: renamed.participants,
+            participants: cfg.summarise.knownPeople
+                ? PeoplePages.participants(renamed.participants,
+                                           alsoPresent: Array((SpeakerNames.load(workDir: workDir, base: base)?.names ?? [:]).values),
+                                           notesDir: Config.resolvePath(cfg.notesDir))
+                : renamed.participants,
             meetingDate: calendarMatch?.recordingStart ?? sourcePath.flatMap { meetingDate(for: $0) },
             promptStyle: cfg.summarise.promptStyle, noteLanguage: noteLanguage,
             // The user's instruction, plus the title/tags request when #2954 asks for it.
@@ -229,15 +233,20 @@ extension Pipeline {
             // transcript was already cleaned WITH the replacement map, so replacements
             // are deliberately not re-applied here (Vikunja #2939).
             glossary: Vocabulary.normalisedTerms((hints?.terms ?? []) + (hints?.participantTerms ?? [])
-                + OwnerIdentity.terms(noteOwner: cfg.noteOwner) + cfg.transcribe.vocabulary + (hints?.roleTerms(
+                + OwnerIdentity.terms(noteOwner: cfg.noteOwner) + cfg.transcribe.vocabulary
+                + (cfg.summarise.nameCheck ? NameGlossary.load(supportDir: NameGlossary.defaultSupportDir).terms : []) + (hints?.roleTerms(
                 configuredLanguage: cfg.transcribe.language,
                 override: LanguageOverride.load(workDir: workDir, base: sourceBase)) ?? [])),   // this meeting's terms first (#3584)
             template: ActionItemsPrompt.effectiveTemplate(   // action items (#2941)
                 resolvedTemplate.template,
-                style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems),
+                style: cfg.summarise.promptStyle, enabled: cfg.summarise.actionItems,
+                namedOwnersOnly: cfg.summarise.nameCheck),
             scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949: keeps the highlights
             calendarAttendees: calendarAttendees)   // #2946
         if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+        if let note = SummaryTemplateCatalog.playbackNote(for: resolvedTemplate.template) { context.summaryNotes.append(note) }
+        context.pinOwnerName = cfg.summarise.nameCheck
+        if case .ollama = target { context.verifySteps = cfg.summarise.verifySteps }   // D059
         // #4013: recompute the "stops mid-conversation" flag as processOne does. It needs the
         // source audio length; without the source (moved, compacted away) nothing is judged.
         if let source = sourcePath, FileManager.default.fileExists(atPath: source.path),
@@ -283,8 +292,13 @@ extension Pipeline {
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }   // #2949
                 // Same post-summary checks as processOne (1.19).
                 var checked = SummaryChecks.apply(summary: cleaned, transcript: transcript, context: context,
-                                                applyCorrections: cfg.summarise.applyCorrections)
+                                                applyCorrections: cfg.summarise.applyCorrections,
+                                                nameCheck: cfg.summarise.nameCheck,
+                                                nameGlossary: cfg.summarise.nameCheck ? NameGlossary.load(supportDir: NameGlossary.defaultSupportDir) : NameGlossary())
                 cleaned = checked.text
+                let refined = NoteRefinements.apply(summary: cleaned, transcript: transcript, context: context, config: cfg)
+                cleaned = refined.text
+                checked.notes.append(contentsOf: refined.notes)
                 if languageRetried, let requested = context.noteLanguage,
                    let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {
                     checked.notes.append(note)
@@ -328,7 +342,9 @@ extension Pipeline {
                 sourceName: sourcePath?.lastPathComponent,
                 timed: TranscriptSegments.load(workDir: workDir, base: base), cleanTranscript: transcript,
                 dominantCode: TranscriptMeta.load(workDir: workDir, base: base)?.dominantLanguage,
-                existingNote: previousText, calendar: calendarMatch)
+                existingNote: previousText, calendar: calendarMatch,
+                warnings: NoteWarnings.Signals(wordsRemoved: GuardReport.load(workDir: workDir, base: base),
+                                               unsureLanguage: NoteWarnings.carriedUnsureLanguage(in: previousText)))
 
             // 5. Keep the old version, then write the new one.
             try FileManager.default.createDirectory(at: notesDir, withIntermediateDirectories: true)

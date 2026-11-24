@@ -1,6 +1,23 @@
 # Voice profiles: implementation plan (Vikunja #2944, phase 2)
 
-Status: **plan only, no code** (drive 2026-10-24). Read `docs/voice-profiles-feasibility.md` first: it records
+Status: **built on `feat/people-pages` (2026-11-23), not calibrated, not clicked through in a running app.**
+What exists: steps 2 to 5 below with FluidAudio as the embedding source. Verified: 12 core tests on synthetic
+vectors; `VoiceEmbedderLiveTests` (`DISTAVO_VOICE_LIVE=1`) on synthetic `say` voices: same voice 0.95, other
+voices 0.18 to 0.35, so the 0.60 threshold and 0.10 margin separate them; Direct and App Store builds.
+Differences from the plan: several samples per person (one per microphone path, best score wins) instead of
+one running mean; the sample is taken from the source recording when the owner ticks the box, so no voiceprint
+of an unnamed speaker is ever written. Recognition runs right after transcription and before the summary
+(`VoiceRecognition.relabel`): the transcript, the timed transcript and the prompt carry the person's name, the
+owner is found by their own remembered voice, the names are saved as an ordinary rename mapping (Rename
+Speakers can reset them) and the note footer says which speakers were named by voice. Real recordings, no ground truth (`VoiceBenchLiveTests`, `DISTAVO_VOICE_BENCH=1`, numbers only, 2026-11-23): 15 recordings
+with audio, 38 unnamed speakers with enough speech, 17 s to embed them all. Two speakers of the same meeting
+(certainly different people) score -0.02 to 0.40, with one pair at 0.95 (the diariser split one person in two).
+The best match in another meeting is either at most 0.49 or at least 0.63, nothing in between, so 0.60 sits in
+the gap; it groups the 38 speakers into 22 voices, 10 of them in two to four meetings. "Name Voices…" (menu)
+is the way to turn those into names. Still open: the real-audio 90% check and threshold
+(Gates), the privacy wording for the App Store, the licence scope of the legacy model files (the model card
+says the `pyannote_segmentation` / `wespeaker_v2` files are outside its stated licence scope; their upstreams
+are MIT and CC-BY-4.0), and the manual checklist. Original plan follows (drive 2026-10-24). Read `docs/voice-profiles-feasibility.md` first: it records
 what SpeakerKit and FluidAudio expose and the privacy analysis. This note turns it into an ordered,
 edition-gated plan with the acceptance tests split into what CI can prove and what needs real audio.
 

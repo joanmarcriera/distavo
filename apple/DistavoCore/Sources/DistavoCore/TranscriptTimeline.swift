@@ -240,6 +240,38 @@ public struct TranscriptLayout: Equatable, Sendable {
         return !headerLines.contains(line)
     }
 
+    /// The segments a selection covers, for "this part was someone else": every segment whose paragraph the
+    /// selection touches (a caret inside one counts), and for a touched speaker header the whole turn under it.
+    /// In document order, each index once.
+    public func segmentIndices(in selection: NSRange) -> [Int] {
+        guard selection.location >= 0 else { return [] }
+        let from = selection.location, to = selection.location + max(0, selection.length)
+        var out: [Int] = [], wholeTurn = false
+        for line in lines {
+            // A caret at the very end of a line belongs to that line; a selection must overlap it.
+            let lineEnd = line.range.location + line.range.length
+            let touched = selection.length == 0 ? (from >= line.range.location && from <= lineEnd)
+                                                : (from < lineEnd && to > line.range.location) || (line.range.length == 0 && from <= lineEnd && to >= lineEnd)
+            switch line.kind {
+            // The whole turn only when the selection STARTS on its speaker line; a drag that merely crosses
+            // one takes the paragraphs it touches.
+            case .header: wholeTurn = touched && from >= line.range.location
+            case .segment(let index): if touched || wholeTurn { out.append(index) }
+            }
+        }
+        return out
+    }
+
+    /// The stretch of the document from the first to the last of these segments' paragraphs; nil when none is shown.
+    public func range(ofSegments indices: [Int]) -> NSRange? {
+        let wanted = Set(indices)
+        let ranges = lines.compactMap { line -> NSRange? in
+            if case .segment(let i) = line.kind, wanted.contains(i) { return line.range } else { return nil }
+        }
+        guard let first = ranges.first, let last = ranges.last else { return nil }
+        return NSRange(location: first.location, length: last.location + last.length - first.location)
+    }
+
     /// Line numbers of the speaker headers (not editable).
     public var headerLineIndices: Set<Int> {
         Set(lines.indices.filter { if case .header = lines[$0].kind { return true } else { return false } })
@@ -289,6 +321,40 @@ public enum TranscriptEditing {
         return out
     }
 
+    /// The speaker labels of a transcript in the order they first speak.
+    public static func speakers(in transcript: TranscriptSegments) -> [String] {
+        var seen = Set<String>(), out: [String] = []
+        for s in transcript.segments { if let who = s.speaker, !who.isEmpty, seen.insert(who).inserted { out.append(who) } }
+        return out
+    }
+
+    /// A label for a speaker the diariser did not tell apart: the next free `SPEAKER_nn` after every label in
+    /// the transcript and in `alsoUsed` (the labels a rename already gave a name to, which may no longer appear).
+    public static func newSpeakerLabel(in transcript: TranscriptSegments, alsoUsed: Set<String> = []) -> String {
+        func number(_ label: String) -> Int? {
+            guard label.hasPrefix("SPEAKER_") else { return nil }
+            let digits = label.dropFirst("SPEAKER_".count)
+            return !digits.isEmpty && digits.allSatisfy { $0.isASCII && $0.isNumber } ? Int(digits) : nil
+        }
+        let used = Set(transcript.segments.compactMap(\.speaker)).union(alsoUsed)
+        var next = (used.compactMap(number).max() ?? -1) + 1
+        while used.contains(String(format: "SPEAKER_%02d", next)) { next += 1 }
+        return String(format: "SPEAKER_%02d", next)
+    }
+
+    /// "This part was someone else": the segments at `indices` now belong to `speaker` (text, timings and word
+    /// timings unchanged). Indices outside the transcript and an empty label change nothing.
+    public static func reassigning(_ indices: [Int], to speaker: String, in transcript: TranscriptSegments) -> TranscriptSegments {
+        let who = speaker.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !who.isEmpty else { return transcript }
+        var out = transcript
+        for i in Set(indices) where out.segments.indices.contains(i) && out.segments[i].speaker != who {
+            out.segments[i].speaker = who
+            out.segments[i].words = out.segments[i].words?.map { var w = $0; if w.speaker != nil { w.speaker = who }; return w }
+        }
+        return out
+    }
+
     /// The cleaned, speaker-grouped transcript the summariser reads - exactly
     /// what `Pipeline.processOne` caches (without the trailing newline it adds)
     /// for the same segments, because it IS `TranscriptCleaner.clean`. A
@@ -298,6 +364,145 @@ public enum TranscriptEditing {
         TranscriptCleaner.clean(transcript.segments.map {
             Segment(speaker: $0.speaker ?? "", text: $0.text, start: $0.start, end: $0.end)
         })
+    }
+
+    /// `renderClean(edited)` for a save, with every turn the edit left alone kept exactly as the cached clean
+    /// transcript has it. The cached text is not always what the segments render to: the pipeline applies the
+    /// replacement rules per TURN (a rule spanning two segments only shows there), and a segment the engine gave
+    /// no times is in the clean transcript but not in the timed one, sometimes as a turn of its own.
+    /// Re-rendering everything would drop both from a transcript in which the owner only moved one part or
+    /// fixed one word.
+    ///
+    /// A three-way merge by turn, and a careful one: losing a turn is worse than losing a respelling.
+    ///  - The turns of the previous segments must line up with the cached turns in exactly ONE way (`aligned`);
+    ///    otherwise the plain render is returned, which holds every timed word once.
+    ///  - A turn the edit left alone is taken from the cached text.
+    ///  - A turn the edit changed is rendered from its segments.
+    ///  - A cached-only turn stays where it was when what surrounds it can still be told: next to a turn that
+    ///    was left alone, or between turns whose words changed but not their speakers. Inside a stretch whose
+    ///    turns were joined or split (Move to Speaker) it is left out: where it belonged can no longer be told.
+    public static func renderClean(_ edited: TranscriptSegments, previous: TranscriptSegments, cachedClean: String?) -> String {
+        let fresh = renderClean(edited)
+        guard let cachedClean else { return fresh }
+        let rendered = renderClean(previous).components(separatedBy: "\n\n")
+        let cached = cachedClean.trimmingCharacters(in: .newlines).components(separatedBy: "\n\n")
+        let now = fresh.components(separatedBy: "\n\n")
+        // Nothing a turn is made of changed (a word timing, a save without an edit): the cached text stands.
+        if now == rendered { return cached.joined(separator: "\n\n") }
+        guard rendered != cached, let pair = aligned(rendered, with: cached) else { return fresh }
+        var survives = [Bool](repeating: true, count: rendered.count), isNew = [Bool](repeating: false, count: now.count)
+        for change in now.difference(from: rendered) {
+            switch change {
+            case .remove(let offset, _, _): survives[offset] = false
+            case .insert(let offset, _, _): isNew[offset] = true
+            }
+        }
+        /// The cached-only turns that sat before previous turn `i` (before the end, for `rendered.count`).
+        func gap(_ i: Int) -> ArraySlice<String> {
+            cached[(i == 0 ? 0 : pair[i - 1].upperBound + 1)..<(i == rendered.count ? cached.count : pair[i].lowerBound)]
+        }
+        var out: [String] = [], old = 0, n = 0
+        while true {
+            // One stretch the edit changed: the previous turns that are gone, and the turns written instead.
+            let first = old
+            while old < rendered.count, !survives[old] { old += 1 }
+            var written: [String] = []
+            while n < now.count, isNew[n] { written.append(now[n]); n += 1 }
+            let gone = rendered[first..<old]
+            if gone.count == written.count, zip(gone, written).allSatisfy({ header($0) == header($1) }) {
+                // Words changed, speakers did not: every turn stands where its old one stood.
+                for (k, turn) in written.enumerated() { out += gap(first + k); out.append(turn) }
+                out += gap(old)
+            } else {
+                // Turns were joined or split: only what sat before the stretch and after it is certain.
+                out += gap(first)
+                out += written
+                if old > first { out += gap(old) }
+            }
+            guard old < rendered.count, n < now.count else { break }
+            out += cached[pair[old]]
+            old += 1; n += 1
+        }
+        // Whatever the walk could not place (it cannot happen while the diff and the two lists agree).
+        out += now[min(n, now.count)...]
+        return out.joined(separator: "\n\n")
+    }
+
+    private static func header(_ turn: String) -> Substring { turn.prefix { $0 != "\n" } }
+
+    /// For each rendered turn the cached turns it is, or nil when that cannot be told for sure.
+    ///
+    /// When the two files have the same speakers in the same order they are taken turn for turn (see below).
+    /// Otherwise two turns can be one only when they have the same speaker line and begin and end with the
+    /// same letters (spaces, case and punctuation aside: "chat GPT" and "ChatGPT" are the same letters). That
+    /// is what a turn covering the same stretch looks like when a rule respelt something in it or an untimed
+    /// sentence sits in its middle; a turn cut at another point ends differently and is refused. A rendered turn can also be several cached turns of its speaker with
+    /// other turns in between (someone without times spoke in the middle), but then only when their letters
+    /// together are exactly its letters. Every rendered turn must be placed, in order, and there must be only
+    /// one way to do it: the earliest and the latest possible placement are compared. Every cached piece must
+    /// be a turn ("[Speaker]" first).
+    static func aligned(_ rendered: [String], with cached: [String]) -> [ClosedRange<Int>]? {
+        let n = rendered.count, m = cached.count
+        guard n > 0, m >= n else { return nil }
+        guard cached.allSatisfy({ let h = header($0); return h.hasPrefix("[") && h.hasSuffix("]") }) else { return nil }
+        func letters(_ turn: String) -> [Character] {
+            Array(turn.dropFirst(header(turn).count).lowercased().filter { $0.isLetter || $0.isNumber })
+        }
+        let rl = rendered.map(letters), cl = cached.map(letters)
+        let rh = rendered.map(header), ch = cached.map(header)
+        func same(_ i: Int, _ j: Int) -> Bool {
+            guard rh[i] == ch[j] else { return false }
+            let a = rl[i], b = cl[j]
+            // Where one speaker goes on in the next turn the cut may have moved, and speech that repeats looks
+            // the same at both ends: such turns are one only letter for letter.
+            let atCut = (i > 0 && rh[i - 1] == rh[i]) || (i + 1 < n && rh[i + 1] == rh[i])
+                || (j > 0 && ch[j - 1] == ch[j]) || (j + 1 < m && ch[j + 1] == ch[j])
+            guard !atCut, !a.isEmpty, !b.isEmpty, max(a.count, b.count) <= min(a.count, b.count) * 3 / 2 + 40 else { return a == b }
+            let k = min(16, a.count, b.count)
+            return a.prefix(k) == b.prefix(k) && a.suffix(k) == b.suffix(k)
+        }
+        /// The cached turns from `j` on (`step` 1) or back from `j` (`step` -1) that are rendered turn `i`.
+        func run(_ i: Int, _ j: Int, _ step: Int) -> ClosedRange<Int>? {
+            guard rh[i] == ch[j] else { return nil }
+            if same(i, j) { return j...j }
+            let want = rl[i]
+            var have = cl[j], e = j, last = j
+            func fits() -> Bool { step > 0 ? want.starts(with: have) : want.reversed().starts(with: have.reversed()) }
+            guard !have.isEmpty, have.count < want.count, fits() else { return nil }
+            while have.count < want.count {
+                e += step
+                guard e >= 0, e < m else { return nil }
+                guard ch[e] == rh[i] else { continue }
+                have = step > 0 ? have + cl[e] : cl[e] + have
+                last = e
+                guard fits() else { return nil }
+            }
+            return have == want ? (step > 0 ? j...last : last...j) : nil
+        }
+        // The same speakers in the same order: turn for turn, whatever a turn holds (a rule respelt its first
+        // word, words without times end it). Only where one speaker goes on in the next turn must the two
+        // files hold the same letters in both turns: the 1,800-character split may fall elsewhere in them.
+        if n == m, zip(rh, ch).allSatisfy(==) {
+            // (All their letters, not only those at the cut: speech that repeats, "Yes. Yes.", looks the same
+            // on both sides of a cut that moved.)
+            let cutsAgree = (0..<n - 1).allSatisfy { rh[$0] != rh[$0 + 1] || (rl[$0] == cl[$0] && rl[$0 + 1] == cl[$0 + 1]) }
+            if cutsAgree { return (0..<n).map { $0...$0 } }
+        }
+        var earliest: [ClosedRange<Int>] = [], j = 0
+        for i in 0..<n {
+            var found: ClosedRange<Int>?
+            while j < m, found == nil { found = run(i, j, 1); if found == nil { j += 1 } }
+            guard let found else { return nil }
+            earliest.append(found); j = found.upperBound + 1
+        }
+        j = m - 1
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            var found: ClosedRange<Int>?
+            while j >= 0, found == nil { found = run(i, j, -1); if found == nil { j -= 1 } }
+            guard let found, found == earliest[i] else { return nil }
+            j = found.lowerBound - 1
+        }
+        return earliest
     }
 }
 
@@ -387,6 +592,22 @@ public enum TranscriptEditStore {
         try? FileManager.default.removeItem(at: originalSpeakersURL(workDir: workDir, base: base))
     }
 
+    /// Every speaker label this recording has or had: in the pristine transcript kept before the first edit and
+    /// in the rename mappings. A new speaker must not reuse one, or "Revert to original transcript" would give
+    /// the new speaker's name to the label's first owner.
+    public static func takenLabels(workDir: URL, base: String) -> Set<String> {
+        var out = Set((SpeakerNames.load(workDir: workDir, base: base)?.names ?? [:]).keys)
+        if let data = try? Data(contentsOf: originalSegmentsURL(workDir: workDir, base: base)),
+           let t = try? JSONDecoder().decode(TranscriptSegments.self, from: data) {
+            out.formUnion(t.segments.compactMap(\.speaker))
+        }
+        if let data = try? Data(contentsOf: originalSpeakersURL(workDir: workDir, base: base)),
+           let names = try? JSONDecoder().decode([String: String].self, from: data) {
+            out.formUnion(names.keys); out.formUnion(names.values)
+        }
+        return out
+    }
+
     /// Persist `edited` as the transcript for `base`, keeping the pristine
     /// copies on first use. Does not touch the note.
     public static func save(_ edited: TranscriptSegments, workDir: URL, base: String,
@@ -397,7 +618,10 @@ public enum TranscriptEditStore {
         guard let currentSegments = try? Data(contentsOf: segURL) else {
             throw StoreError(message: "no timed transcript saved for \(base)")
         }
-        let clean = TranscriptEditing.renderClean(edited)
+        // Turns the edit did not touch stay as the pipeline wrote them (see `renderClean(_:previous:cachedClean:)`).
+        let previous = try? JSONDecoder().decode(TranscriptSegments.self, from: currentSegments)
+        let clean = previous.map { TranscriptEditing.renderClean(edited.sanitised(), previous: $0.sanitised(), cachedClean: try? String(contentsOf: cleanURL, encoding: .utf8)) }
+            ?? TranscriptEditing.renderClean(edited)
         guard !clean.isEmpty else { throw StoreError(message: "the transcript would be empty") }
 
         var writes: [(URL, Data)] = []

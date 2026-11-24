@@ -14,6 +14,11 @@ extension PipelineDeps {
         // Calendar-aware titling (#2946): inert unless `calendar.enabled`; returns [] without access
         // (never prompts from the background pipeline).
         deps.calendarLookup = { start, end in EventKitCalendarProvider.shared.candidates(from: start, to: end) }
+        // Voice profiles (#2944): only consulted when `transcribe.voice_profiles` is on and a voice is stored.
+        // Not in the App Store edition until its privacy answers declare the voiceprint.
+        #if !EDITION_APPSTORE
+        deps.voiceEmbeddings = { audio, ranges in await VoiceEmbedder.embeddings(audio: audio, ranges: ranges) }
+        #endif
 
         let serverTranscribe = deps.transcribe
         deps.transcribe = { wavURL, rawTranscribeConfig in
@@ -72,6 +77,8 @@ extension PipelineDeps {
                 detections: detections, config: transcribeConfig,
                 memoryBytes: HardwareProbe.physicalMemoryBytes)
             if let note = decision.note { await ModelCoordinator.shared.report(note) }
+            // "Languages I speak" (D085): one line per recording when a detection was dropped.
+            if let restricted = decision.restrictionNote { await ModelCoordinator.shared.report(restricted) }
             // Always report the engine + language line (also for a pinned model),
             // plus the recommendation when the router has one (#2667).
             await ModelCoordinator.shared.report(decision.logLine)

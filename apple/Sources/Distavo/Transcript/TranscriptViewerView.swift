@@ -52,14 +52,28 @@ struct TranscriptViewerView: View {
 
             Spacer()
 
+            if model.canEdit {
+                Menu("Move to Speaker") {
+                    ForEach(model.speakerChoices, id: \.self) { who in
+                        Button(who) { model.moveSelection(to: who) }.disabled(who == model.selectionSpeaker)
+                    }
+                    Divider()
+                    Button("A New Speaker") { model.moveSelection(to: nil) }
+                }
+                .fixedSize()
+                .disabled(model.selectedSegments.isEmpty || model.dirty || model.isEditing || model.busy || model.changedOnDisk)
+                .help("When two people came out as one speaker: select what the other person said (or click in it; click a speaker line for the whole turn), then choose who said it. Saved at once; \"Revert to original transcript\" undoes it.")
+            }
             Toggle("Edit", isOn: $model.isEditing)
                 .toggleStyle(.button)
                 .disabled(!model.canEdit)
                 .help("Edit the text of each segment (timings are kept)")
+            // Also without unsaved edits: a move or a revert refused because another action (a speaker rename)
+            // rewrote the transcript needs the way out too.
+            if model.changedOnDisk {
+                Button(model.dirty ? "Reload from disk (discards edits)" : "Reload from disk") { model.reloadFromDisk() }
+            }
             if model.dirty {
-                if model.changedOnDisk {
-                    Button("Reload from disk (discards edits)") { model.reloadFromDisk() }
-                }
                 Button("Discard") { model.discardChanges() }
                 Button("Save") { model.save() }
                     .keyboardShortcut("s", modifiers: .command)
@@ -109,7 +123,9 @@ struct TranscriptViewerView: View {
             followPlayback: model.isPlaying,
             onClick: { model.seek(characterIndex: $0) },
             onSpace: { model.togglePlay() },
-            onTextChange: { model.textChanged($0) })
+            onTextChange: { model.textChanged($0) },
+            onSelectionChange: { model.selectionChanged($0) },
+            selectAfterLoad: model.selectAfterLoad)
     }
 
     private var playbackBar: some View {

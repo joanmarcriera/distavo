@@ -27,13 +27,33 @@ extension Pipeline {
         body: String, footer: String, meta: NoteMeta.Extracted?, config: Config,
         context: NoteContext, sourceName: String?,
         timed: TranscriptSegments?, cleanTranscript: String,
-        dominantCode: String?, existingNote: String?, calendar: CalendarMatch? = nil
+        dominantCode: String?, existingNote: String?, calendar: CalendarMatch? = nil,
+        warnings: NoteWarnings.Signals = .init()
     ) -> String {
         let notes = config.notes
         // #2946: the event title replaces the first `# ` heading of the BODY (frontmatter is
         // added below, so it can never be mistaken for the heading); the section order is untouched.
         let body = calendar.map { CalendarTitle.retitle(note: body, title: $0.title) } ?? body
         if notes == NotesConfig() { return body + footer }
+        let assembled = assemble(body: body, footer: footer, meta: meta, config: config, context: context,
+                                 sourceName: sourceName, timed: timed, cleanTranscript: cleanTranscript,
+                                 dominantCode: dominantCode, existingNote: existingNote, calendar: calendar)
+        // D082: the warnings under the title (after any frontmatter); the footer lines stay.
+        guard notes.warningsOnTop else { return assembled }
+        var signals = warnings
+        signals.truncated = signals.truncated || context.recordingMayBeTruncated
+        // Name drift is a warning only where the footer reports it too (`summarise.name_check`).
+        if config.summarise.nameCheck { signals.nameGroups = NameConsistency.suspectGroups(in: body) }
+        return NoteWarnings.insert(NoteWarnings.bullets(signals), into: assembled)
+    }
+
+    private static func assemble(
+        body: String, footer: String, meta: NoteMeta.Extracted?, config: Config,
+        context: NoteContext, sourceName: String?,
+        timed: TranscriptSegments?, cleanTranscript: String,
+        dominantCode: String?, existingNote: String?, calendar: CalendarMatch?
+    ) -> String {
+        let notes = config.notes
         let spoken = EmbeddedModelCatalog.isAutomatic(config.transcribe.language)
             || config.transcribe.language.isEmpty ? nil : config.transcribe.language
         let turns = timed.map(TrackedTerms.turns(from:)) ?? TrackedTerms.turns(fromCleanTranscript: cleanTranscript)

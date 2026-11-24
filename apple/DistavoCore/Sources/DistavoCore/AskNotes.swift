@@ -266,7 +266,11 @@ public enum AskNotes {
         case .allNotes:
             guard !terms.isEmpty else { return .noMatches("Ask about something specific — I found no searchable words in that question.") }
             let words = window <= 4096 ? 140 : 260
-            let passages = await deps.retrieve(terms.joined(separator: " "), 12, words)
+            // A question that names a confirmed person puts that person's meetings first (`AskPeople`).
+            let theirs = AskPeople.bases(for: question, notesDir: notesDir, workDir: workDir, ownerName: config.noteOwner)
+            let passages = AskPeople.preferring(
+                await deps.retrieve(terms.joined(separator: " "), theirs.isEmpty ? 12 : AskPeople.widenedLimit, words),
+                bases: theirs, limit: 12)
             if Task.isCancelled { return .cancelled }
             excerpts = pack(passages, budget: budget, notesDir: notesDir, workDir: workDir)
             guard !excerpts.isEmpty else {

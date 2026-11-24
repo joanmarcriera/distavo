@@ -49,6 +49,10 @@ struct TranscriptTextView: NSViewRepresentable {
     let onClick: (Int) -> Void
     let onSpace: () -> Void
     let onTextChange: (String) -> Void
+    /// The selection (or caret) moved; reported after the current view update.
+    var onSelectionChange: (NSRange) -> Void = { _ in }
+    /// When the content is replaced: select this and keep the reader where they were, instead of going to the top.
+    var selectAfterLoad: NSRange? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -95,7 +99,7 @@ struct TranscriptTextView: NSViewRepresentable {
         if c.contentID != contentID {
             c.contentID = contentID
             c.highlighted = nil
-            c.setContent(text: text, headers: headerRanges)
+            c.setContent(text: text, headers: headerRanges, select: selectAfterLoad)
             if tv.window?.firstResponder !== tv { tv.window?.makeFirstResponder(tv) }
         }
         if tv.isEditable != isEditing {
@@ -135,8 +139,16 @@ struct TranscriptTextView: NSViewRepresentable {
             })
         }
 
-        func setContent(text: String, headers: [NSRange]) {
+        /// True while the content is being replaced: the caret the replacement leaves behind is not something
+        /// the reader selected (a read-only text view draws no caret, so it would be an invisible target).
+        private var settingContent = false
+
+        func setContent(text: String, headers: [NSRange], select: NSRange? = nil) {
             guard let tv = textView, let storage = tv.textStorage else { return }
+            settingContent = true
+            defer { settingContent = false }
+            let clip = tv.enclosingScrollView?.contentView
+            let origin = clip?.bounds.origin
             let body = NSFont.systemFont(ofSize: 14)
             let para = NSMutableParagraphStyle()
             para.lineSpacing = 3
@@ -154,8 +166,18 @@ struct TranscriptTextView: NSViewRepresentable {
             }
             storage.setAttributedString(attributed)
             tv.typingAttributes = [.font: body, .foregroundColor: NSColor.labelColor, .paragraphStyle: para]
-            tv.setSelectedRange(NSRange(location: 0, length: 0))
-            tv.scroll(.zero)
+            if let select, NSMaxRange(select) <= attributed.length, let clip, let origin,
+               let lm = tv.layoutManager, let tc = tv.textContainer {
+                // A part of the transcript was moved to another speaker: stay where the reader was, with that part selected.
+                lm.ensureLayout(for: tc)
+                tv.setSelectedRange(select)
+                clip.setBoundsOrigin(origin)
+                tv.enclosingScrollView?.reflectScrolledClipView(clip)
+                tv.scrollRangeToVisible(select)
+            } else {
+                tv.setSelectedRange(NSRange(location: 0, length: 0))
+                tv.scroll(.zero)
+            }
         }
 
         private static let highlightAttributes: [NSAttributedString.Key: Any] = [
@@ -191,6 +213,14 @@ struct TranscriptTextView: NSViewRepresentable {
             guard let replacement = replacementString, let parent else { return true }
             return TranscriptLayout.isAllowedChange(
                 in: textView.string, range: range, replacement: replacement, headerLines: parent.headerLineIndices)
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let tv = notification.object as? NSTextView else { return }
+            var range = tv.selectedRange()
+            if settingContent, range.length == 0 { range = NSRange(location: NSNotFound, length: 0) }
+            // Never publish from inside a view update (replacing the content moves the selection too).
+            DispatchQueue.main.async { [weak self] in self?.parent?.onSelectionChange(range) }
         }
 
         func textDidChange(_ notification: Notification) {

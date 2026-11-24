@@ -28,6 +28,15 @@ public enum ActionItemsPrompt {
         """)
     }
 
+    /// The Tasks section with `summarise.name_check` on: an owner only when the transcript names one.
+    static var namedOwnerTasksSection: SummaryTemplate.Section {
+        var s = tasksSection
+        s.instruction = s.instruction.replacingOccurrences(
+            of: "Name the owner as a person (or the note owner), never a speaker label.",
+            with: "Write an owner only when the transcript names one (someone is asked to do it and agrees, says \"I will\", or is named as responsible); name them as a person, never a speaker label. If nobody is named, write \"owner: unassigned\". Never guess an owner from the participants list or from the topic.")
+        return s
+    }
+
     static var decisionsSection: SummaryTemplate.Section {
         .init(heading: decisionsHeading, instruction:
             "One bullet per decision that was explicitly made. Write \"none stated\" if there were none.")
@@ -84,7 +93,7 @@ public enum ActionItemsPrompt {
     /// sections replaced by the strict Tasks / Decisions ones; Tasks is appended when
     /// the layout has no such section. `enabled == false` returns `base` untouched.
     public static func effectiveTemplate(_ base: SummaryTemplate?, style: Prompt.Style,
-                                         enabled: Bool) -> SummaryTemplate? {
+                                         enabled: Bool, namedOwnersOnly: Bool = false) -> SummaryTemplate? {
         guard enabled else { return base }
         let stock = base == nil ? stockTemplate(for: style) : nil
         if base == nil && stock == nil {
@@ -93,18 +102,19 @@ public enum ActionItemsPrompt {
         }
         guard var t = base ?? stock else { return base }
         t.strictTasks = true
+        let tasks = namedOwnersOnly ? namedOwnerTasksSection : tasksSection
         var sections: [SummaryTemplate.Section] = []
         var haveTasks = false, haveDecisions = false
         for s in t.sections {
             if taskTitles.contains(title(s)) {
-                if !haveTasks { sections.append(tasksSection); haveTasks = true }
+                if !haveTasks { sections.append(tasks); haveTasks = true }
             } else if decisionTitles.contains(title(s)) {
                 if !haveDecisions { sections.append(decisionsSection); haveDecisions = true }
             } else {
                 sections.append(s)
             }
         }
-        if !haveTasks { sections.append(tasksSection) }
+        if !haveTasks { sections.append(tasks) }
         t.sections = sections
         return t
     }

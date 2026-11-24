@@ -214,8 +214,10 @@ final class WatcherController: ObservableObject {
         notifier.configure()
         notifier.onSilenceAction = { [weak self] action in
             switch action {
-            case .stop: self?.capture.stopFromSilence()
-            case .keep: self?.capture.keepRecording()
+            case .stopKeep: self?.capture.stopFromSilence()
+            case .keepRecording: self?.capture.keepRecording()
+            // The existing discard path: it shows the "Delete this recording?" confirmation first (#3929).
+            case .stopDiscard: self?.capture.discard()
             }
         }
         notifier.onMeetingAction = { [weak self] action in
@@ -487,7 +489,7 @@ final class WatcherController: ObservableObject {
     }
 
     /// Also used after a speaker rename, so the vault copy never goes stale.
-    private func exportToVault(base: String, note: URL) {
+    func exportToVault(base: String, note: URL) {   // also used by +Voices
         let notes = config.notes
         guard notes.hasVault, !base.contains("@") else { return }
         let workDir = Config.resolvePath(config.workDir)
@@ -546,6 +548,9 @@ final class WatcherController: ObservableObject {
     /// One processing pass under the single-flight lock for the +Queue extension
     /// (waits for a running scan, like `runVariant`). `onlyIf` is re-checked once
     /// the lock is held, so a pass with nothing to do never flashes the icon.
+    /// For `+Feature` files: the controller's one notifier.
+    func notifyUser(title: String, body: String) { notifier.notify(title: title, body: body) }
+
     func runExclusivePass(onlyIf: () -> Bool, _ body: () async -> Void) async {
         while isScanning { try? await Task.sleep(nanoseconds: 500_000_000) }
         isScanning = true
@@ -591,6 +596,11 @@ final class WatcherController: ObservableObject {
             notifier.notify(title: "✅ Transcribed & summarised",
                             body: "\(result.base) — note ready.")
             exportToVault(result)
+            autoExportSalesCall(result)
+            refreshPeoplePagesAfterNote()
+            #if !EDITION_APPSTORE
+            offerToNameVoices(afterNote: result.base)   // #2944: who were the two who spoke most?
+            #endif
             if let sourcePath { runWhenDoneActions(result, sourcePath: sourcePath) }
         case .tooShort:
             status = "Too short: \(result.base)"
@@ -950,6 +960,7 @@ final class WatcherController: ObservableObject {
             logTasksReport(result.notePath)                     // #2941
             notifier.notify(title: "✅ Note regenerated", body: "\(base) — the previous version was kept.")
             exportToVault(result)
+            autoExportSalesCall(result)
         default:
             status = "Idle"
             log("Regenerate not done: \(base) — \(result.message)")
@@ -994,7 +1005,7 @@ final class WatcherController: ObservableObject {
                 indexForSearch(base: base, note: notesDir.appendingPathComponent("\(base).md"))
                 exportToVault(base: base, note: notesDir.appendingPathComponent("\(base).md"))   // #2954
             }
-            log("Renamed speakers in \(base): \(mapping.map { "\($0.key) → \($0.value)" }.sorted().joined(separator: ", "))")
+            log("Renamed speakers in \(base): \(mapping.count) speaker\(mapping.count == 1 ? "" : "s")")   // never the names
             notifier.notify(title: result.changedFiles.isEmpty ? "Nothing to rename" : "✅ Speakers renamed",
                             body: result.changedFiles.isEmpty ? "\(base) has no mention of those speakers."
                                                               : "\(base) — the previous note was kept.")

@@ -108,4 +108,46 @@ enum SandboxFolders {
         #endif
         return body(path)
     }
+
+    // MARK: Sales hand-off folder (drive 2026-11-23)
+    //
+    // Same shape as the vault: chosen in Settings (every edition), a security-scoped bookmark only in the App Store edition.
+
+    #if EDITION_APPSTORE
+    private static let salesKey = "bookmark.sales"
+    #endif
+
+    /// Ask the user for the folder the sales tool reads. nil when cancelled.
+    @MainActor
+    static func chooseSalesFolder() -> URL? {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = "Choose the folder your sales tool reads: each call goes in its own sub-folder"
+        panel.prompt = "Choose"
+        guard panel.runModal() == .OK, let url = panel.url else { return nil }
+        #if EDITION_APPSTORE
+        store(url, key: salesKey)
+        #endif
+        return url
+    }
+
+    static func clearSalesFolder() {
+        #if EDITION_APPSTORE
+        UserDefaults.standard.removeObject(forKey: salesKey)
+        #endif
+    }
+
+    /// Run `body` with access to the hand-off folder (bookmark-resolved under the sandbox, else the plain `path`).
+    static func withSalesAccess<T>(path: String, _ body: (String) -> T) -> T {
+        #if EDITION_APPSTORE
+        if let url = resolve(salesKey) {
+            defer { url.stopAccessingSecurityScopedResource() }
+            return body(url.path)
+        }
+        #endif
+        return body(path)
+    }
 }

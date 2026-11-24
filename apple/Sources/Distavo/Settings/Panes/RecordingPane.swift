@@ -12,6 +12,9 @@ struct RecordingPane: View {
                 Toggle("Ask who was in the meeting when a recording stops",
                        isOn: $model.draft.askSpeakersOnStop)
                     .withHelp("After you stop the built-in recorder, Distavo asks how many people spoke, your role and who the others were, and hands that to the summariser so the notes name the speakers and the follow-up email is written from your side. Skip the question any time.")
+                Toggle("Ask whether a long recording was two meetings",
+                       isOn: $model.draft.recording.askTwoMeetings)
+                    .withHelp("When you stop a recording of an hour or more that has a quiet gap of a minute or more with at least ten minutes of talk on each side, Distavo asks whether it was two meetings back to back. Keep as One changes nothing. Split in Two cuts the recording at the gap and asks who was in each meeting, so each gets its own note and its own speakers; every second of the recording stays in one of the two. Not asked when Distavo stops the recording for silence or for the length limit, and never because of the length alone.")
                 Toggle("Switch to another microphone if the selected one is silent",
                        isOn: $model.draft.recording.micAutoSwitch)
                     .withHelp("If nothing comes in from the microphone for the first few seconds, Distavo tries your other microphones one by one (virtual devices such as BlackHole are skipped) and tells you each time. If none of them picks up sound it goes back to the first and warns you. It never changes your Mac's input setting, and stops looking as soon as any microphone is heard.")
@@ -22,7 +25,17 @@ struct RecordingPane: View {
                     Stepper("\(model.draft.suggestStopSilenceMinutes) min",
                             value: $model.draft.suggestStopSilenceMinutes, in: Config.silenceMinutesRange)
                         .disabled(!model.draft.suggestStopOnSilence)
-                    HelpButton(text: "When nothing has been heard on the microphone or the meeting audio for this long, Distavo shows a notification (and a menu item) offering to stop the recording or keep going. It never stops by itself.")
+                    HelpButton(text: "When nothing has been heard on the microphone or the meeting audio for this long, Distavo shows a notification (and a menu item) offering to stop the recording or keep going. It stops by itself only with the setting below.")
+                }
+                // Forgotten recordings (D027): repeat the notice, then stop and keep.
+                HStack {
+                    Stepper(model.draft.recording.stopAfterUnansweredNotices == 0
+                                ? "Suggest once per silence (no automatic stop)"
+                                : "Repeat the suggestion, stop and keep after \(model.draft.recording.stopAfterUnansweredNotices) unanswered",
+                            value: $model.draft.recording.stopAfterUnansweredNotices,
+                            in: RecordingOptions.unansweredNoticesRange)
+                        .disabled(!model.draft.suggestStopOnSilence)
+                    HelpButton(text: "For a recording you forgot to stop. While the silence lasts the suggestion comes back every few minutes (the time above); when this many go unanswered, Distavo stops the recording, keeps it and processes it as usual. Never before something was heard, so a silent lobby is safe. Keep recording quiets it until the next sound. The notification also offers Stop and discard, which asks before deleting. 0 = one suggestion, never a stop.")
                 }
                 HStack {
                     Toggle("Stop recording automatically after silence", isOn: $model.draft.autoStopOnSilence)

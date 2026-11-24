@@ -312,7 +312,8 @@ public struct MeetingDetector {
             cooldownUntil = o.now + policy.cooldown
             capturingSince = [:]
             frontmost = nil
-            offered = capturingApps ?? []
+            // An unreadable tick (nil) says nothing: what was already handled stays handled.
+            if let capturingApps { offered = capturingApps }
             fallbackOffered = true
             return .none
         }

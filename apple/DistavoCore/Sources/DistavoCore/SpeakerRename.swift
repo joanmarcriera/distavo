@@ -51,15 +51,21 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     /// SHA-256 of the note right after the last rename; "Reset" restores the
     /// original note only while the note still hashes to this (content, not mtime).
     public var lastNoteSHA256: String?
+    /// The names in `names` that voice recognition gave and the owner has not confirmed (#2944). They are
+    /// shown as "recognised by voice" on a people page and never count as evidence (teams, stated roles).
+    /// Absent once the owner saves a rename for this note. Additive field.
+    public var byVoice: [String]?
 
     enum CodingKeys: String, CodingKey {
         case version, names
+        case byVoice = "by_voice"
         case originalNoteSHA256 = "original_note_sha256"
         case lastNoteSHA256 = "last_note_sha256"
     }
 
     public init(version: Int = SpeakerNames.currentVersion, names: [String: String] = [:],
-                originalNoteSHA256: String? = nil, lastNoteSHA256: String? = nil) {
+                originalNoteSHA256: String? = nil, lastNoteSHA256: String? = nil, byVoice: [String]? = nil) {
+        self.byVoice = byVoice
         self.version = version; self.names = names
         self.originalNoteSHA256 = originalNoteSHA256; self.lastNoteSHA256 = lastNoteSHA256
     }
@@ -101,6 +107,33 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
     /// tracked yet is recorded as its own original. Computed against a snapshot,
     /// so a swap composes correctly. Entries that end up as identity (renamed back
     /// to the original label) are dropped.
+    /// The owner says these voice-recognised names are right: they stop being guesses (people pages then
+    /// count the meeting as confirmed). Names that are not guesses change nothing.
+    public func confirming(_ confirmed: [String]) -> SpeakerNames {
+        let yes = Set(confirmed.map { $0.lowercased() })
+        let left = (byVoice ?? []).filter { !yes.contains($0.lowercased()) }
+        // Everything else stays as it is, the note hashes included ("Reset to original labels" needs them).
+        var out = self
+        out.byVoice = left.isEmpty ? nil : left
+        return out
+    }
+
+    /// The voice-recognised names of a recording the owner has not confirmed yet.
+    public static func voiceGuesses(workDir: URL, base: String) -> [String] {
+        guard let n = load(workDir: workDir, base: base) else { return [] }
+        return (n.byVoice ?? []).filter { n.names.values.contains($0) }
+    }
+
+    /// Writes the confirmation; returns whether anything changed. Only the names sidecar is touched.
+    @discardableResult
+    public static func confirmVoiceNames(_ confirmed: [String], workDir: URL, base: String) throws -> Bool {
+        guard let before = load(workDir: workDir, base: base) else { return false }
+        let after = before.confirming(confirmed)
+        guard after != before else { return false }
+        try after.encoded().write(to: url(workDir: workDir, base: base), options: .atomic)
+        return true
+    }
+
     func composing(_ applied: [String: String], presentLabels: Set<String> = []) -> SpeakerNames {
         var next = names
         // Merging into a label that exists in the files but is not tracked yet
@@ -120,7 +153,10 @@ public struct SpeakerNames: Codable, Equatable, Sendable {
         // original was merged into that label.
         let counts = Dictionary(next.values.map { ($0, 1) }, uniquingKeysWith: +)
         next = next.filter { $0.key != $0.value || (counts[$0.value] ?? 0) > 1 }
-        return SpeakerNames(version: version, names: next)
+        // A voice guess the owner did not touch in this rename stays a guess; one they typed or changed is theirs.
+        let touched = Set(applied.keys).union(applied.values)
+        let stillGuessed = (byVoice ?? []).filter { next.values.contains($0) && !touched.contains($0) }
+        return SpeakerNames(version: version, names: next, byVoice: stillGuessed.isEmpty ? nil : stillGuessed)
     }
 
     /// What Regenerate should tell the summariser for this recording: the owner's

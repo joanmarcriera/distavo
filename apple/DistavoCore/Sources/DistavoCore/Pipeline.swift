@@ -142,6 +142,11 @@ public struct NoteContext: Equatable, Sendable {
     public var summaryNotes: [String] = []
     /// The recording stops while people were still talking (`TruncationCheck`, #4013). false = prompt byte-identical.
     public var recordingMayBeTruncated: Bool = false
+    /// `summarise.name_check`: pin the owner's name from Settings in the prompt (`OwnerName`). false = byte-identical.
+    public var pinOwnerName: Bool = false
+    /// `summarise.verify_steps` on an Ollama target (`StepVerifier`, D059): the prompt asks for a quote per plan
+    /// step and the note is checked. false = prompt and note byte-identical.
+    public var verifySteps: Bool = false
 
     public init(noteOwner: String, userSpeaker: String, participants: String? = nil,
                 meetingDate: Date? = nil, promptStyle: Prompt.Style = .classic,
@@ -164,7 +169,7 @@ public struct NoteContext: Equatable, Sendable {
                      participants: participants, style: promptStyle, meetingDate: meetingDate,
                      noteLanguage: noteLanguage, customInstruction: customInstruction, glossary: glossary, calendarAttendees: calendarAttendees,
                      template: template, scratchpad: scratchpad,
-                     truncated: recordingMayBeTruncated)
+                     truncated: recordingMayBeTruncated, pinOwnerName: pinOwnerName, verifySteps: verifySteps)
     }
 }
 
@@ -202,6 +207,14 @@ public struct PipelineDeps {
     /// The source's left/right samples for `transcribe.channel_speakers` (#6353); nil when it is not stereo or
     /// unreadable. Only consulted when that flag is on.
     public var stereoChannels: (URL) async -> StereoChannels?
+    /// Voice samples for `transcribe.voice_profiles` (#2944): speaker -> embedding for the given stretches of a
+    /// recording. nil (the default) keeps the feature inert and DistavoCore model-free; the app wires it to
+    /// `VoiceEmbedder` (DistavoEmbedded). Only consulted when that flag is on.
+    public var voiceEmbeddings: VoiceRecognition.Embed?
+    /// Id of the embedding model behind `voiceEmbeddings` (samples of different models are never compared).
+    public var voiceModel: String = VoiceProfileStore.builtInModel
+    /// Folder of `voice-profiles.json`; tests point it at a temporary folder.
+    public var voiceProfilesDir: URL = NameGlossary.defaultSupportDir
 
     public init(
         convertToWav: @escaping (URL, URL) async throws -> Void,
@@ -446,7 +459,9 @@ public enum Pipeline {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcriberTerms + transcribeConfig.vocabulary)
         }
         let fuzzyTerms = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + ownerTerms)
-        var summaryGlossary = fuzzyTerms   // what the summary prompt's spelling aid lists
+        // what the summary prompt's spelling aid lists; with name_check also the canonical names of names.txt
+        var summaryGlossary = config.summarise.nameCheck
+            ? Vocabulary.normalisedTerms(fuzzyTerms + NameGlossary.load(supportDir: NameGlossary.defaultSupportDir).terms) : fuzzyTerms
         if !roleTerms.isEmpty {
             transcribeConfig.vocabulary = Vocabulary.normalisedTerms(transcribeConfig.vocabulary + roleTerms)
             summaryGlossary = Vocabulary.normalisedTerms(summaryGlossary + roleTerms)
@@ -546,6 +561,26 @@ public enum Pipeline {
                     channelLabelled = true
                 }
             }
+            // Voice profiles (#2944): a speaker whose voice the owner chose to remember carries that person's name
+            // from here on, so the transcript, the timed transcript and the summary prompt all say who spoke
+            // (the model is not left to guess a name for the label). Nothing stored = nothing computed.
+            var voiceNames: [String: String] = [:]   // diariser label -> name
+            var voicesByTeam: [String] = []           // of those, the ones VoiceTeams settled
+            if config.transcribe.voiceProfiles, let embed = deps.voiceEmbeddings {
+                let named = await VoiceRecognition.relabel(
+                    result: result, audio: wavPath, supportDir: deps.voiceProfilesDir, model: deps.voiceModel,
+                    team: VoiceTeams.load(workDir: workDir, excluding: base), embed: embed)
+                result = named.result
+                voiceNames = named.names.mapValues(\.name)
+                voicesByTeam = named.names.values.filter(\.byTeam).map(\.name)
+                lap("voices")
+            }
+            // The owner's label after that: their own remembered voice wins over the configured label.
+            // A speaker recognised as the note owner is the owner, whatever label the diariser gave them; only
+            // without one does the name on the configured owner label stand.
+            // Nobody else's name ever becomes the owner: if the configured owner label was recognised as another
+            // person, the owner is simply not identified in this recording.
+            let ownerByVoice = voiceNames.values.first { VoiceRecognition.isOwner($0, noteOwner: config.noteOwner) }
             // #3950: the vocabulary cannot reach an engine without a prompt (Parakeet): snap near-miss spellings in
             // the finished text instead. The rules ride the ordinary replacement map, after the user's own.
             if transcribeConfig.fuzzyVocabulary, !fuzzyTerms.isEmpty {
@@ -565,6 +600,10 @@ public enum Pipeline {
             let guarded = OffensiveWordGuard.apply(cleanedOnce)
             let clean = guarded.text
             GuardReport.store(guarded.flagged, workDir: workDir, base: base)
+            // D082: what the top-of-note warnings block can say (used only with `notes.warnings_on_top`).
+            let noteWarnings = NoteWarnings.Signals(wordsRemoved: guarded.flagged,
+                                                    unsureLanguage: NoteWarnings.unsureLanguage(transcribeResult: result,
+                                                                                                spokenLanguages: transcribeConfig.spokenLanguages))
             if clean.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 LongRecording.removeCaches(workDir: workDir, base: base)   // nothing in them worth resuming
                 state.markFailed(base, "empty transcript")
@@ -578,8 +617,17 @@ public enum Pipeline {
             let transcriptPath = workDir.appendingPathComponent("\(base).transcript.clean.txt")
             try? (clean + "\n").write(to: transcriptPath, atomically: true, encoding: .utf8)
             // For "Regenerate Note…" (#2947): keep the detected language beside it.
-            TranscriptMeta.store(dominant: dominantCode, ownerSpeaker: channelLabelled ? "SPEAKER_00" : nil,
+            TranscriptMeta.store(dominant: dominantCode, ownerSpeaker: ownerByVoice ?? (channelLabelled ? "SPEAKER_00" : nil),
                                  workDir: workDir, base: base)
+            // The names given by voice are a rename mapping (Rename Speakers can change or reset them), marked
+            // `byVoice`: recognised, not confirmed by the owner. A reprocess starts from fresh labels, so with
+            // voices switched on a mapping left from an earlier run goes when nobody was recognised this time.
+            if !voiceNames.isEmpty {
+                try? SpeakerNames(names: voiceNames, byVoice: voiceNames.values.sorted()).encoded()
+                    .write(to: SpeakerNames.url(workDir: workDir, base: base), options: .atomic)
+            } else if config.transcribe.voiceProfiles, deps.voiceEmbeddings != nil {
+                try? FileManager.default.removeItem(at: SpeakerNames.url(workDir: workDir, base: base))
+            }
             // Timed twin of the clean transcript for exports/viewer (#2943).
             // Best-effort: a failure to write it must never fail the recording.
             var timedForNote: TranscriptSegments?   // tracked terms / duration (#2954)
@@ -629,8 +677,12 @@ public enum Pipeline {
                 noteOwner: config.noteOwner,
                 // Channel labels put the owner (left, microphone) on SPEAKER_00 whatever label the owner typed
                 // for the diariser's numbering.
-                userSpeaker: channelLabelled ? "SPEAKER_00" : OwnerSpeakerLabel.effective(configured: config.userSpeaker, transcript: clean),   // #3857
-                participants: participants, meetingDate: noteDate,
+                userSpeaker: ownerByVoice ?? (channelLabelled ? "SPEAKER_00" : OwnerSpeakerLabel.effective(configured: config.userSpeaker, transcript: clean)),   // #3857
+                // Known people (opt-in): what the owner wrote on the pages of the people in this meeting.
+                participants: config.summarise.knownPeople
+                    ? PeoplePages.participants(participants, alsoPresent: Array(voiceNames.values), notesDir: notesDir)
+                    : participants,
+                meetingDate: noteDate,
                 promptStyle: config.summarise.promptStyle, noteLanguage: noteLanguage,
                 // Title/tags request (#2954); nil unless auto_title/auto_tags is on.
                 customInstruction: OwnerIdentity.merged(nil, noteOwner: config.noteOwner, notes: config.notes),   // #6772 owner rule + #2954
@@ -638,10 +690,16 @@ public enum Pipeline {
                 // Summary template (#2940): recording sidecar > recordings subfolder > Settings.
                 // Action items (#2941) rewrite its sections when switched on.
                 template: ActionItemsPrompt.effectiveTemplate(resolvedTemplate.template,
-                    style: config.summarise.promptStyle, enabled: config.summarise.actionItems),
+                    style: config.summarise.promptStyle, enabled: config.summarise.actionItems,
+                    namedOwnersOnly: config.summarise.nameCheck),
                 scratchpad: ScratchpadNotes.load(workDir: workDir, base: sourceBase),   // #2949
                 calendarAttendees: calendarAttendees)   // #2946
             if let note = resolvedTemplate.note { context.summaryNotes.append(note) }   // #3582
+            if let note = VoiceRecognition.footerNote(names: Array(voiceNames.values), byTeam: voicesByTeam) { context.summaryNotes.append(note) }   // #2944
+            if let note = SummaryTemplateCatalog.playbackNote(for: resolvedTemplate.template) { context.summaryNotes.append(note) }
+            context.pinOwnerName = config.summarise.nameCheck
+            // D059: only the Ollama prompt asks for the quotes, so only its notes are checked.
+            if case .ollama = target { context.verifySteps = config.summarise.verifySteps }
             // #6759: "transcribed in N parts" and any part that is missing, whatever engine ran.
             context.summaryNotes += (result[LongRecording.notesKey] as? [String]) ?? []
             // Key moments (#2950) are the owner's own live markers: they belong in every note, also the
@@ -657,7 +715,12 @@ public enum Pipeline {
                 case .soloMemo:
                     context.template = ActionItemsPrompt.effectiveTemplate(
                         MeetingShapeGate.memoTemplate, style: config.summarise.promptStyle,
-                        enabled: config.summarise.actionItems)
+                        enabled: config.summarise.actionItems, namedOwnersOnly: config.summarise.nameCheck)
+                case .playback(let reason):
+                    context.template = ActionItemsPrompt.effectiveTemplate(
+                        MeetingShapeGate.playbackTemplate, style: config.summarise.promptStyle,
+                        enabled: config.summarise.actionItems, namedOwnersOnly: config.summarise.nameCheck)
+                    context.summaryNotes.append("Looks like a played-back course or video (" + reason + "), so no follow-up was written")
                 case .notAMeeting(let reason):
                     let note = composeNote(
                         body: Self.keepingLiveCapture(
@@ -666,7 +729,8 @@ public enum Pipeline {
                         footer: "", meta: nil,
                         config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
                         cleanTranscript: clean, dominantCode: dominantCode,
-                        existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                        existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch,
+                        warnings: noteWarnings)
                     try note.write(to: notePath, atomically: true, encoding: .utf8)
                     state.markDone(base)
                     return withTimings(ProcessResult(status: .done, base: base,
@@ -708,8 +772,14 @@ public enum Pipeline {
                 if let pad = context.scratchpad { cleaned = pad.ensureHighlights(in: cleaned) }
                 // Post-summary checks shared with regenerate (1.19): may rewrite the text and add footer notes.
                 var checked = SummaryChecks.apply(summary: cleaned, transcript: clean, context: context,
-                                                applyCorrections: config.summarise.applyCorrections)
+                                                applyCorrections: config.summarise.applyCorrections,
+                                                nameCheck: config.summarise.nameCheck,
+                                                nameGlossary: config.summarise.nameCheck ? NameGlossary.load(supportDir: NameGlossary.defaultSupportDir) : NameGlossary())
                 cleaned = checked.text
+                // Drive 2026-11-23 passes (relative dates, ...), each behind its own key; shared with regenerate.
+                let refined = NoteRefinements.apply(summary: cleaned, transcript: clean, context: context, config: config)
+                cleaned = refined.text
+                checked.notes.append(contentsOf: refined.notes)
                 // A retry that still came back in the wrong language says so in the footer (#3585).
                 if languageRetried, let requested = context.noteLanguage,
                    let note = NoteLanguageCheck.footerNote(requested: requested, text: cleaned) {
@@ -793,7 +863,8 @@ public enum Pipeline {
                     footer: "", meta: nil,
                     config: config, context: context, sourceName: path.lastPathComponent, timed: timedForNote,
                     cleanTranscript: clean, dominantCode: dominantCode,
-                    existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                    existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch,
+                    warnings: noteWarnings)
                 try fallback.write(to: notePath, atomically: true, encoding: .utf8)
                 state.markDone(base)
                 return withTimings(ProcessResult(status: .done, base: base,
@@ -841,11 +912,15 @@ public enum Pipeline {
                 body: noteBody, footer: noteFooter, meta: noteMeta, config: config, context: context,
                 sourceName: path.lastPathComponent, timed: timedForNote, cleanTranscript: clean,
                 dominantCode: dominantCode,
-                existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch)
+                existingNote: try? String(contentsOf: notePath, encoding: .utf8), calendar: calendarMatch,
+                warnings: noteWarnings)
             try noteText.write(to: notePath, atomically: true, encoding: .utf8)
             rememberTitle(noteMeta, config: config, workDir: workDir, base: base, calendar: calendarMatch)   // #2954, #2946
             state.markDone(base)
             var message = "note written"
+            if !voiceNames.isEmpty {
+                message += "; voices recognised: " + voiceNames.values.sorted().joined(separator: ", ")
+            }
             // Compaction makes the take mono; with channel speakers on, a reprocess needs the stereo original.
             if config.compactRecordingsAfterNote, variant == nil, !stereoNeeded,
                let compacted = compactRecording(source: path, compactWav: wavPath) {

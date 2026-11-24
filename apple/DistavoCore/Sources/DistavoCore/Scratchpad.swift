@@ -43,11 +43,59 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
 
     public var version: Int
     public var lines: [Line]
+    /// Who is in the meeting, typed in the panel while recording ("Anna (Acme) - buyer, Pere"). It only
+    /// pre-fills the "Other participants" answer when the recording stops (or becomes it when the question is
+    /// not asked); it is never put in the prompt from here. Absent = nothing typed; old sidecars decode to nil.
+    public var people: String?
 
-    public init(lines: [Line] = []) {
+    public init(lines: [Line] = [], people: String? = nil) {
         self.version = 1
         self.lines = lines
+        self.people = people
     }
+
+    /// Longest people line kept, in characters.
+    public static let maxPeopleChars = 300
+    /// An objective typed in the panel is an ordinary must-include line with this prefix, so it comes back
+    /// under Highlights with what the meeting said about it; no separate prompt text.
+    public static let objectivePrefix = "Objective: "
+
+    /// The line for an objective typed at `offsetSeconds`; nil when nothing was typed.
+    public static func objective(_ raw: String, offsetSeconds: Int) -> Line? {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : Line(offsetSeconds: offsetSeconds, text: objectivePrefix + text, flagged: true)
+    }
+
+    /// `people` as it may be used: one line, brace-free, capped; nil when empty.
+    public var cleanPeople: String? {
+        guard let people else { return nil }
+        let flat = Self.printable(people).components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: ", ")
+            .replacingOccurrences(of: "{", with: "(").replacingOccurrences(of: "}", with: ")")
+            .split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        let cut = String(flat.prefix(Self.maxPeopleChars)).trimmingCharacters(in: .whitespaces)
+        return cut.isEmpty ? nil : cut
+    }
+
+    /// `s` without pasted control characters (bell, escape, NUL): they have no place in a prompt, a note or a
+    /// file name. Every kind of line break and the tab stay, for the callers to turn into a space (a vertical
+    /// tab is what Word puts on the clipboard for Shift+Enter).
+    static func printable(_ s: String) -> String {
+        String(String.UnicodeScalarView(s.unicodeScalars.filter {
+            // Invisible marks that change how a name looks or sorts but not what it reads: zero-width space, the
+            // direction marks and overrides, the word joiner, a byte-order mark, the soft hyphen. The joiners
+            // Persian and emoji need (U+200C, U+200D) stay.
+            if invisible.contains($0.value) { return false }
+            return $0.properties.generalCategory != .control || CharacterSet.newlines.contains($0) || $0 == "\t" }))
+    }
+    private static let invisible: Set<UInt32> = {
+        var set: Set<UInt32> = [0x200B, 0x200E, 0x200F, 0x2060, 0xFEFF, 0x00AD]
+        set.formUnion(0x202A...0x202E); set.formUnion(0x2066...0x2069)
+        return set
+    }()
+
+    /// True when there is anything worth a sidecar (typed lines or people).
+    public var hasContent: Bool { !sanitised().isEmpty || cleanPeople != nil }
 
     // MARK: Caps (documented: they bound the prompt, see `EmbeddedSummaryBudget`)
 
@@ -65,9 +113,11 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
     /// unflagged ones, so "must include" items are never the ones lost.
     public func sanitised() -> ScratchpadNotes {
         func clean(_ s: String) -> String {
-            let flat = s.components(separatedBy: .newlines).joined(separator: " ")
+            let flat = Self.printable(s).components(separatedBy: .newlines).joined(separator: " ")
                 .replacingOccurrences(of: "{", with: "(").replacingOccurrences(of: "}", with: ")")
-                .replacingOccurrences(of: "<<<", with: "<").replacingOccurrences(of: ">>>", with: ">")
+                // Any run of three or more: "<<<<<" must not come out as a fresh "<<<".
+                .replacingOccurrences(of: "<{3,}", with: "<", options: .regularExpression)
+                .replacingOccurrences(of: ">{3,}", with: ">", options: .regularExpression)
             let collapsed = flat.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
             return String(collapsed.prefix(Self.maxLineChars)).trimmingCharacters(in: .whitespaces)
         }
@@ -83,7 +133,7 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
             kept.append(item)
             total += item.1.text.count
         }
-        var out = ScratchpadNotes(lines: kept.sorted { $0.0 < $1.0 }.map(\.1))
+        var out = ScratchpadNotes(lines: kept.sorted { $0.0 < $1.0 }.map(\.1), people: cleanPeople)
         out.version = version
         return out
     }
@@ -104,7 +154,7 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
             return nil
         }
         let clean = decoded.sanitised()
-        return clean.isEmpty ? nil : clean
+        return clean.isEmpty && clean.people == nil ? nil : clean
     }
 
     /// Atomic write. Called after every committed edit while recording, so a
@@ -159,8 +209,12 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
     static func hasHighlights(_ note: String) -> Bool {
         note.components(separatedBy: "\n").contains { line in
             let t = line.trimmingCharacters(in: .whitespaces)
-            guard t.hasPrefix("## ") || t.hasPrefix("**") else { return false }
-            return t.lowercased().contains("highlight")
+            // A heading line, or a line that is bold from end to end ("**Highlights**", "**Key highlights:**").
+            guard t.hasPrefix("## ") || (t.hasPrefix("**") && (t.hasSuffix("**") || t.hasSuffix("**:")) && t.count > 4) else { return false }
+            // Its title is short and has the word itself: "## Risks highlighted by Anna" and
+            // "**Highlight of the quarter: revenue**" are not the Highlights section.
+            let words = t.lowercased().components(separatedBy: CharacterSet.letters.inverted).filter { !$0.isEmpty }
+            return words.count <= 3 && words.contains { $0 == "highlight" || $0 == "highlights" }
         }
     }
 
@@ -171,8 +225,11 @@ public struct ScratchpadNotes: Codable, Equatable, Sendable {
         let lines = note.components(separatedBy: "\n")
         guard let start = lines.firstIndex(where: { $0.hasPrefix("## ") }) else { return false }
         let end = lines[(start + 1)...].firstIndex { $0.hasPrefix("#") } ?? lines.count
-        let body = lines[start..<end].joined(separator: "\n").lowercased()
-        return sanitised().lines.allSatisfy { body.contains($0.text.lowercased()) }
+        // Listed = on a list line of its own. "price" inside the prose of "## Summary" is not a highlight.
+        let listed = lines[start..<end].map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { $0.hasPrefix("- ") || $0.hasPrefix("* ") || $0.hasPrefix("• ") || $0.range(of: #"^\d+[.)] "#, options: .regularExpression) != nil }
+        let typed = sanitised().lines
+        return !typed.isEmpty && typed.allSatisfy { t in listed.contains { $0.contains(t.text.lowercased()) } }
     }
 
     /// The fallback section listing the typed lines verbatim with timestamps.

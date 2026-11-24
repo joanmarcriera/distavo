@@ -106,6 +106,13 @@ struct StatusMenu: View {
         Button("Open last note") { controller.openLastNote() }
             .disabled(!controller.hasLastNote)
         Button("Open Action Items…") { controller.showActionItems() }
+        Button("Write Today's Day Log") { controller.writeDayLog() }   // D102
+        Button("Update People Pages") { controller.updatePeoplePages() }
+        Button("Meeting Brief…") { controller.showMeetingBrief() }
+        Button("Merge People…") { controller.showMergePeople() }
+        #if !EDITION_APPSTORE
+        Button("Name Voices…") { controller.showNameVoices() }   // #2944
+        #endif
 
         Divider()
 

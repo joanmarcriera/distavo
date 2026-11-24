@@ -211,6 +211,21 @@ They cannot press a global hotkey, record a real call or listen to a clip. Do th
    2, 5 and 6 work; the export folder panel grants write access; the hotkey registers with no new
    entitlement (none was added).
 
+## Forgotten recordings: repeated silence notice (D027, drive 2026-11-23) - UNVERIFIED until run on a signed build
+
+Logic is unit-tested (`SilenceRepeatTests`, `SilenceNoticeActionTests`); what needs Marc at the Mac:
+
+1. Settings > Recording: "Suggest stopping after silence" on, 2 minutes. In the config file set
+   `"recording": { "stop_after_unanswered_notices": 3 }` (fresh installs get 3; older configs 0 = off).
+2. Start a recording, say a few words (the stop needs one loud second first), then stay silent.
+3. Expect a notice at about 2, 4 and 6 minutes. Each says how many minutes are left before Distavo stops and keeps
+   the take. At about 8 minutes the recording stops by itself, the file is kept and processed, and the log
+   (~/Library/Logs/Distavo/distavo.log) says "Recording stopped after 3 unanswered silence notices (kept)".
+4. The notice has three buttons: "Stop and keep", "Keep recording", "Stop and discard...". "Keep recording"
+   keeps quiet until the next sound. "Stop and discard..." first shows the "Delete this recording?" confirmation
+   (Keep is the default button); only "Delete" removes the take.
+5. A plain click on the banner does nothing (no stop, no delete).
+
 ## Known caveats (documented, not bugs)
 
 - Loudspeakers (no headphones): the mic also hears the remote participants, so

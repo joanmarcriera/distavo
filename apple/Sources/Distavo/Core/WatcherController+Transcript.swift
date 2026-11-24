@@ -34,7 +34,8 @@ extension WatcherController {
                         result.status == .done ? "Note rewritten from the edited transcript. \(result.message)" : "Note not changed: \(result.message)")
             },
             knownRules: { [weak self] in self?.config.transcribe.replacements ?? [] },
-            learn: { [weak self] rules in self?.learnCorrections(rules) })
+            learn: { [weak self] rules in self?.learnCorrections(rules) },
+            noteIsBeingRewritten: { [weak self] base in self?.queueModel.pendingRegenerate(base) == .running })
         TranscriptWindowController.shared.show(model: model)
     }
 

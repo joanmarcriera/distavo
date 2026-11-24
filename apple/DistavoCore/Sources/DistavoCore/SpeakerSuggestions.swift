@@ -29,7 +29,7 @@ public struct SpeakerSuggestions: Equatable, Sendable {
         guard let text = participants, let r = text.range(of: "(me): ") ?? text.range(of: "(me):") else { return nil }
         var rest = String(text[r.upperBound...])
         for stop in [". In-person meeting", ". Other participants:", "Other participants:"] {
-            if let s = rest.range(of: stop) { rest = String(rest[..<s.lowerBound]) }
+            if let s = rest.range(of: stop, options: .caseInsensitive) { rest = String(rest[..<s.lowerBound]) }
         }
         let role = rest.trimmingCharacters(in: CharacterSet(charactersIn: ". \n"))
         return role.isEmpty ? nil : role

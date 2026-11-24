@@ -4,7 +4,12 @@ import Foundation
 public struct LanguageDetection: Equatable, Sendable {
     public let code: String
     public let probability: Float
-    public init(code: String, probability: Float) { self.code = code; self.probability = probability }
+    /// Probability per language for this window, in [0, 1], when the detector provides them (empty
+    /// otherwise). Used only by "Languages I speak" to pick the best allowed language.
+    public let scores: [String: Float]
+    public init(code: String, probability: Float, scores: [String: Float] = [:]) {
+        self.code = code; self.probability = probability; self.scores = scores
+    }
 }
 
 /// Where the language hint came from (Vikunja #2667).
@@ -27,13 +32,23 @@ public struct RoutingDecision: Equatable, Sendable {
     public let confidence: Float?
     /// A user-facing suggestion, set only for a pinned model (see `EngineRouter.recommendation`).
     public let recommendation: String?
+    /// One activity-log line when "Languages I speak" dropped a detection, e.g.
+    /// "detected nn 43%, not in your languages, using en"; nil otherwise.
+    public let restrictionNote: String?
 
     public init(model: EmbeddedModel, languageHint: String?, note: String?,
                 pinned: Bool = false, languageSource: LanguageSource = .modelDetects,
-                confidence: Float? = nil, recommendation: String? = nil) {
+                confidence: Float? = nil, recommendation: String? = nil, restrictionNote: String? = nil) {
         self.model = model; self.languageHint = languageHint; self.note = note
         self.pinned = pinned; self.languageSource = languageSource
         self.confidence = confidence; self.recommendation = recommendation
+        self.restrictionNote = restrictionNote
+    }
+
+    func with(restrictionNote: String?) -> RoutingDecision {
+        RoutingDecision(model: model, languageHint: languageHint, note: note, pinned: pinned,
+                        languageSource: languageSource, confidence: confidence,
+                        recommendation: recommendation, restrictionNote: restrictionNote)
     }
 
     /// One activity-log line. Keeps the "Using " prefix — WatcherController's
@@ -125,12 +140,60 @@ public enum EngineRouter {
             + "engine=\(decision.model.engine)\(whisper)"
     }
 
+    /// Lowercased, trimmed, de-duplicated "Languages I speak" codes, in the user's order.
+    public static func normalisedSpokenLanguages(_ codes: [String]) -> [String] {
+        var seen = Set<String>()
+        return codes.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty && seen.insert($0).inserted }
+    }
+
+    /// "Languages I speak" (D085): keep the windows whose code is in `spoken`. When none is left, one
+    /// window stands in for them: the allowed language with the highest raw score in any window, else
+    /// the first listed language (probability 0). Returns the kept windows and the dropped ones.
+    static func restrict(_ detections: [LanguageDetection], to spoken: [String])
+        -> (kept: [LanguageDetection], dropped: [LanguageDetection]) {
+        let allowed = Set(spoken)
+        let kept = detections.filter { allowed.contains($0.code) }
+        let dropped = detections.filter { !allowed.contains($0.code) }
+        guard kept.isEmpty, let first = spoken.first else { return (kept, dropped) }
+        var best: (code: String, p: Float)?
+        for d in detections {
+            for code in spoken {
+                if let p = d.scores[code], p > (best?.p ?? 0) { best = (code, p) }
+            }
+        }
+        let stand = best.map { LanguageDetection(code: $0.code, probability: $0.p) }
+            ?? LanguageDetection(code: first, probability: 0)
+        return ([stand], dropped)
+    }
+
     public static func choose(detections: [LanguageDetection], config: TranscribeConfig,
                               memoryBytes: UInt64) -> RoutingDecision {
         let fixedLanguage = EmbeddedModelCatalog.isAutomatic(config.language) ? nil
             : (config.language.isEmpty ? nil : config.language)
+        let spoken = normalisedSpokenLanguages(config.spokenLanguages)
+        // "Languages I speak": a fixed language still wins, and with no detections (detector outage)
+        // the model still detects for itself, exactly as before.
+        guard fixedLanguage == nil, !spoken.isEmpty, !detections.isEmpty else {
+            return route(detections: detections, fixedLanguage: fixedLanguage, userListed: false,
+                         config: config, memoryBytes: memoryBytes)
+        }
+        let (kept, dropped) = restrict(detections, to: spoken)
+        let decision = route(detections: kept, fixedLanguage: nil, userListed: true,
+                             config: config, memoryBytes: memoryBytes)
+        guard !dropped.isEmpty else { return decision }
+        let list = dropped.map { "\($0.code) \(Int(($0.probability * 100).rounded()))%" }.joined(separator: ", ")
+        return decision.with(restrictionNote:
+            "detected \(list), not in your languages, using \(decision.languageHint ?? "the model's own detection")")
+    }
+
+    /// `userListed`: the windows were already narrowed to the user's languages, so when none of them
+    /// reaches `confidenceFloor` the strongest one still decides (the list does the floor's job).
+    private static func route(detections: [LanguageDetection], fixedLanguage: String?, userListed: Bool,
+                              config: TranscribeConfig, memoryBytes: UInt64) -> RoutingDecision {
+        let floorPassing = detections.filter { $0.probability >= confidenceFloor }.map(\.code)
         let confident = fixedLanguage.map { [$0] }
-            ?? detections.filter { $0.probability >= confidenceFloor }.map(\.code)
+            ?? ((userListed && floorPassing.isEmpty) ? dominantCode(detections).map { [$0] } ?? [] : floorPassing)
         let set = Set(confident)
         let dominant = fixedLanguage ?? dominantCode(detections)
         let pinned = !EmbeddedModelCatalog.isAutomatic(config.embeddedModel)
@@ -176,7 +239,7 @@ public enum EngineRouter {
         let source: LanguageSource = fixedLanguage != nil ? .fixed
             : (hint == nil ? .modelDetects : .detected)
         let confidence: Float? = source == .detected
-            ? detections.filter { $0.code == hint }.map(\.probability).max() : nil
+            ? detections.filter { $0.code == hint }.map(\.probability).max().flatMap { $0 > 0 ? $0 : nil } : nil
 
         // Rule 1: an explicit model is always honoured (no memory gate), but
         // it now gets the detected hint plus a recommendation when another

@@ -76,9 +76,21 @@ extension WatcherController {
                        body: "Switch on Settings > Transcription > “Recognise remembered voices” first.")
             return
         }
+        // Every voice of every recording is reviewed in the Voices window; this small one is the question
+        // right after a meeting.
+        #if !EDITION_APPSTORE
+        guard let onlyBase else { showVoices(tab: .unnamed); return }
+        #else
+        guard let onlyBase else { return }
+        #endif
+        NameVoicesWindowController.shared.show(activate: false, model: self.nameVoicesModel(onlyBase: onlyBase))
+    }
+
+    /// The model of the "not yet named" list: all recordings, or the one just processed.
+    func nameVoicesModel(onlyBase: String?) -> NameVoicesModel {
         let notes = Config.resolvePath(config.notesDir), rec = Config.resolvePath(config.recordingsDir)
         let cancel = VoiceScanCancel()
-        NameVoicesWindowController.shared.show(activate: onlyBase == nil, model: NameVoicesModel(
+        return NameVoicesModel(
             heading: onlyBase == nil ? "Name the voices in your recordings" : "Who spoke most in the meeting you just recorded?",
             people: PeoplePages.suggestions(notesDir: notes, limit: 40).map(\.name),
             cancelled: cancel,
@@ -88,7 +100,7 @@ extension WatcherController {
             apply: { [weak self] voice, name, remember, progress in
                 await self?.nameVoice(voice, name: name, remember: remember, progress: progress) ?? "Distavo is closing."
             },
-            audio: { base in Self.recordingURL(forBase: LanguageOverride.sourceBase(from: base), in: rec) }))
+            audio: { base in Self.recordingURL(forBase: LanguageOverride.sourceBase(from: base), in: rec) })
     }
 
     /// One voice sample per unnamed speaker of every note whose recording is still there, grouped into voices.

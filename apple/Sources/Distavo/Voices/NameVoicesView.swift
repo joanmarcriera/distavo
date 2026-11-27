@@ -33,6 +33,8 @@ final class NameVoicesModel: ObservableObject {
     @Published var working: Set<Int> = []
     let people: [String]
     let heading: String
+    /// False inside the Voices window: listening starts when the owner asks, not when the window opens.
+    var autoStart = true
     private let scan: (@escaping (String) -> Void, Bool) async -> ([VoiceReview.Voice], Int, Int)
     /// Recordings listened to, and how many have an unnamed voice and could be.
     @Published var listened = 0
@@ -157,7 +159,7 @@ struct NameVoicesView: View {
         }
         .padding(16)
         .frame(minWidth: 640, minHeight: 460)
-        .onAppear { model.start() }
+        .onAppear { if model.autoStart { model.start() } }
         .onDisappear { model.stop(); model.cancelled.on = true }
     }
 

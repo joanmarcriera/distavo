@@ -224,4 +224,82 @@ final class CopyDataLiveTests: XCTestCase {
         XCTAssertFalse(PeoplePages.known(notesDir: f.notes).contains { $0.name.contains("Brief") })
         XCTAssertEqual(ActionItems.scan(notesDir: f.notes).filter { $0.items.contains { $0.notePath.contains("/people/") } }.count, 0, "people files hold no action items")
     }
+
+    /// Review Voices (`VoiceCatalog`): every remembered voice is listed, and a rename, a "not this person" and
+    /// a merge each come apart again to the same bytes (voice file, note, timed and clean transcript).
+    func test10ReviewVoicesListsEveryVoiceAndEveryChangeIsUndoneToTheSameBytes() throws {
+        let f = try folders()
+        let support = NameGlossary.defaultSupportDir, model = VoiceProfileStore.builtInModel
+        guard support.path.hasPrefix(Config.homeDir.path) else { throw XCTSkip("outside the test home") }
+        let store = VoiceProfileStore.load(supportDir: support, model: model)
+        guard !store.profiles.isEmpty else { throw XCTSkip("no remembered voice in the copy") }
+        let meetings = NotesLibrary.scan(notesDir: f.notes, workDir: f.work, timeZone: zone).filter { !$0.isVariant }
+            .map { VoiceCatalog.Meeting(base: $0.base, title: $0.title, date: $0.date) }
+        let people = VoiceCatalog.people(store: store, meetings: meetings, workDir: f.work, clipLimit: 40)
+        let unnamed = VoiceCatalog.unnamed(meetings: meetings, workDir: f.work)
+        XCTAssertEqual(people.count, store.profiles.count)
+        for c in people.flatMap(\.clips) + unnamed {
+            XCTAssertTrue(c.end > c.start && c.end - c.start <= VoiceReview.sampleSeconds + 1e-6, "a clip of \(tag(c.id)) has a bad length")
+        }
+        XCTAssertTrue(unnamed.allSatisfy { $0.talkSeconds >= VoiceCatalog.longTalkSeconds })
+        print("COPY voices: \(people.count) remembered, \(people.filter { !$0.clips.isEmpty }.count) with a clip, \(people.map(\.bases.count).reduce(0, +)) named meetings, \(people.map(\.guessed).reduce(0, +)) unconfirmed guesses, \(unnamed.count) long unnamed speakers in \(Set(unnamed.map(\.base)).count) meetings")
+
+        let c = VoiceCatalog.Context(notesDir: f.notes, workDir: f.work, supportDir: support, model: model)
+        let storeFile = VoiceProfileStore.url(supportDir: support)
+        let storeBefore = try Data(contentsOf: storeFile)
+        func files(_ base: String) -> [Data?] {
+            [f.notes.appendingPathComponent("\(base).md"), TranscriptSegments.url(workDir: f.work, base: base),
+             Pipeline.cachedTranscriptURL(workDir: f.work, base: base)].map { try? Data(contentsOf: $0) }
+        }
+        func names(_ base: String) -> [String] {
+            let n = SpeakerNames.load(workDir: f.work, base: base)
+            return (n?.names.map { "\($0.key)=\($0.value)" }.sorted() ?? []) + ["|"] + (n?.byVoice ?? []).sorted()
+        }
+        func speakers(_ base: String) -> Set<String> {
+            Set(TranscriptSegments.load(workDir: f.work, base: base)?.segments.compactMap(\.speaker) ?? [])
+        }
+        var renamed = 0, separated = 0, merged = 0, refused = 0, off = 0
+        func check(_ i: Int, _ what: String, _ bases: [String], _ before: [[Data?]], _ namesBefore: [[String]]) {
+            if (try? Data(contentsOf: storeFile)) != storeBefore { off += 1; XCTFail("voice \(i): the voice file differs after \(what) + undo") }
+            for (j, base) in bases.enumerated() {
+                if files(base) != before[j] { off += 1; XCTFail("voice \(i), meeting \(j): files differ after \(what) + undo") }
+                if names(base) != namesBefore[j] { off += 1; XCTFail("voice \(i), meeting \(j): names or guesses differ after \(what) + undo") }
+            }
+            XCTAssertNil(VoiceCatalog.pendingUndo(supportDir: support))
+        }
+        for (i, p) in people.enumerated() where !p.bases.isEmpty {
+            let before = p.bases.map(files), namesBefore = p.bases.map(names)
+            do {
+                let out = try VoiceCatalog.merge(name: p.name, into: "Zq Tester \(i)", renameNotes: true, meetings: p.bases, context: c)
+                XCTAssertFalse(out.merged)
+                XCTAssertEqual(out.renamed.count + out.skipped.count, p.bases.count)
+                for base in out.renamed { XCTAssertTrue(speakers(base).contains("Zq Tester \(i)"), "voice \(i): a meeting does not carry the new name") }
+                XCTAssertNotNil(VoiceCatalog.pendingUndo(supportDir: support))
+                let back = try VoiceCatalog.undo(context: c)
+                XCTAssertEqual(back.renamed.count, out.renamed.count)
+                renamed += 1
+            } catch { refused += 1; print("COPY voices: rename of voice \(i) refused (\(type(of: error)))") }
+            check(i, "rename", p.bases, before, namesBefore)
+            do {
+                let out = try VoiceCatalog.separate(name: p.name, meetings: [p.bases[0]], embeddings: [:], to: nil, remember: false,
+                                                    renameNotes: true, context: c)
+                XCTAssertEqual(out.renamed, [p.bases[0]])
+                XCTAssertFalse(speakers(p.bases[0]).contains { VoiceCatalog.same($0, p.name) }, "voice \(i): still named after not-this-person")
+                _ = try VoiceCatalog.undo(context: c)
+                separated += 1
+            } catch { refused += 1; print("COPY voices: not-this-person of voice \(i) refused (\(type(of: error)))") }
+            check(i, "not-this-person", p.bases, before, namesBefore)
+        }
+        if people.count >= 2 {
+            let a = people[0], b = people[1]
+            let before = a.bases.map(files), namesBefore = a.bases.map(names)
+            let out = try VoiceCatalog.merge(name: a.name, into: b.name, renameNotes: true, meetings: a.bases, context: c)
+            XCTAssertTrue(out.merged)
+            XCTAssertEqual(VoiceProfileStore.load(supportDir: support, model: model).profiles.count, store.profiles.count - 1)
+            _ = try VoiceCatalog.undo(context: c)
+            merged += 1
+            check(0, "merge", a.bases, before, namesBefore)
+        }
+        print("COPY voices: \(renamed) renamed and undone, \(separated) not-this-person and undone, \(merged) merged and undone, \(refused) refused, \(off) not restored")
+    }
 }

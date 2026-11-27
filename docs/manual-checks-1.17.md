@@ -451,3 +451,16 @@ Settings > Recording > "Ask whether a long recording was two meetings".
 6. Not asked: a recording of over an hour with no pause; a 40-minute recording with a two-minute pause; a recording
    stopped by the silence auto-stop or the length limit (nobody is there to answer).
 7. With the option off: nothing is asked for the recording of step 1.
+
+## Review Voices (2026-11-27, Direct and Setapp only)
+
+On a COPY of the data (`DISTAVO_TEST_HOME`, see CLAUDE.md "Testing on a copy of the data"), with "Recognise remembered voices" on and saved.
+
+1. **Open.** Settings > Transcription > "Review Voices…" opens the Voices window on "Remembered"; the menu's "Name Voices…" opens the same window on "Not yet named". The App Store build has neither.
+2. **Listen.** Each remembered voice shows up to 5 meetings, newest first; Play starts at that person's longest turn and stops by itself after about 12 s. A meeting whose recording was deleted says "no recording" instead of Play. "Show N more meetings" lists the rest.
+3. **Confirm.** A clip badged "named by voice": "That's them" removes the badge, and that person's people page lists the meeting as confirmed.
+4. **Not this person.** Tick one clip, leave the name empty, Apply: the meeting's speaker is `SPEAKER_nn` again in the note's Speakers section and in the transcript window, a `.prev-` backup exists, the status line says how many samples left the voice. Undo: the name is back, still badged if it was.
+5. **Separate.** Tick two clips, type a new name, tick "Recognise them automatically next time", Apply: both meetings carry the new name, the new voice is listed under Remembered, and Undo removes it again.
+6. **Merge.** "Same person as" > another voice, with and without "Also rename the speaker in the N meetings": one voice left; with the box the meetings are renamed, without it the notes are unchanged. A meeting where both names speak is reported as left alone. Undo restores both voices.
+7. **Undo goes stale.** After a merge, delete a voice in Settings: the Undo button is gone when the window is reopened, and `voice-review-undo.json` is no longer in the support folder.
+8. **Not yet named.** The list appears at once (no "Listening…"); "Listen and Group the Voices" then shows the grouped rows; naming one there adds it to "Remembered" after switching tabs. Switching tabs during the scan does not stop it; closing the window does.

@@ -93,12 +93,23 @@ public struct VoiceProfileStore: Codable, Equatable, Sendable {
             if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
             return
         }
-        try fm.createDirectory(at: supportDir, withIntermediateDirectories: true)
+        try Self.writePrivate(try fileData(), to: target)
+    }
+
+    /// The bytes `save` writes (stable: sorted keys), so a caller can tell whether the file changed since.
+    public func fileData() throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(self)
-        let temp = supportDir.appendingPathComponent(".\(Self.fileName).\(UUID().uuidString).tmp")
+        return try encoder.encode(self)
+    }
+
+    /// Writes `data` atomically as a file that is 0600 from its first byte.
+    static func writePrivate(_ data: Data, to target: URL) throws {
+        let fm = FileManager.default
+        let dir = target.deletingLastPathComponent()
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        let temp = dir.appendingPathComponent(".\(target.lastPathComponent).\(UUID().uuidString).tmp")
         guard fm.createFile(atPath: temp.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown)
         }

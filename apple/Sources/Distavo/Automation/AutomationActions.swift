@@ -201,6 +201,19 @@ final class AutomationAppDelegate: NSObject, NSApplicationDelegate {
         NSApp.servicesProvider = self
         NSUpdateDynamicServices()
         Task { @MainActor in AutomationHub.shared.controller?.removeStaleAutomationTemps() }
+        #if !EDITION_APPSTORE
+        // Testing on a copy of the data: `DISTAVO_TEST_OPEN=voices` opens the Voices window at launch, so a
+        // check of that window never goes through the menu-bar icon (the installed Distavo has one too).
+        // Only when the data is a test home, which only a DEBUG build of DistavoCore honours (`Config.homeDir`;
+        // the app target has no DEBUG condition of its own): a Release build never takes this branch.
+        if Config.homeDir.standardizedFileURL.path != FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.path,
+           ProcessInfo.processInfo.environment["DISTAVO_TEST_OPEN"] == "voices" {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                AutomationHub.shared.controller?.showVoices()
+            }
+        }
+        #endif
     }
 
     /// Unsaved transcript edits (Vikunja #2951): ask Save / Discard / Cancel; no

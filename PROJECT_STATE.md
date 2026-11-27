@@ -7,7 +7,7 @@
   CPU, hole recovery stops after two failed decodes in a row, a stitched long recording no longer reads "English 219%".
   1.22.0 is still `WAITING_FOR_REVIEW` on the App Store, so 1.22.1 can only be submitted once it clears.
   Not done: English heard as Nynorsk on quiet audio (spoken languages are not set in the owner's config).
-- **Next action:** submit 1.22.1 (build 26) for review when 1.22.0 leaves review (`ops/submit-when-review-clears.sh 1.22.0 1.22.1 26`), or replace the pending submission if Marc says so.
+- **Next action:** Marc merges PR 26 (tests + fixes for Review Voices and the watch switch); 1.22.1 (build 26) is submitted by `ops/submit-when-review-clears.sh` when 1.22.0 leaves review (Marc approves the `app-store-submission` environment); 1.23.0 is cut only after Apple approves 1.22.1 (What's New on main stays 1.22.1's until that submit ran).
 
 ## Earlier (2026-11-24 17:30, superseded)
 

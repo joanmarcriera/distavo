@@ -19,6 +19,11 @@ struct VoiceProfilesSection: View {
         if model.draft.transcribe.voiceProfiles || !names.isEmpty {
             if names.isEmpty {
                 SettingCaption("No voice remembered yet. Rename a speaker in the Notes window and tick “Recognise them automatically next time”.")
+                HStack {
+                    Button("Review Voices…") { model.controller.showVoices(tab: .unnamed) }
+                        .help("Listen to the voices not named yet and name them. Uses the saved setting: press Save first if you just switched this on.")
+                    Spacer()
+                }
             } else {
                 ForEach(names, id: \.self) { name in
                     HStack {
@@ -30,6 +35,8 @@ struct VoiceProfilesSection: View {
                     }
                 }
                 HStack {
+                    Button("Review Voices…") { model.controller.showVoices() }
+                        .help("Listen to a stretch of each remembered voice from recent meetings, correct a meeting that is someone else, merge two voices that are one person, and name the voices not named yet. Uses the saved setting: press Save first if you just switched this on.")
                     Spacer()
                     Button("Delete All Voices…") { confirmDeleteAll = true }
                 }
@@ -74,6 +81,8 @@ struct VoiceProfilesSection: View {
         // Nothing found = nothing to save (never write over a voice file this build cannot read).
         guard s.delete(name: name) else { return }
         try? s.save(supportDir: NameGlossary.defaultSupportDir)
+        // The undo record of the Voices window holds the voice file as it was: it must not keep a deleted voice.
+        VoiceCatalog.discardUndo(supportDir: NameGlossary.defaultSupportDir)
         reload()
     }
 
@@ -82,6 +91,7 @@ struct VoiceProfilesSection: View {
         var s = store()
         s.deleteAll()
         try? s.save(supportDir: NameGlossary.defaultSupportDir)
+        VoiceCatalog.discardUndo(supportDir: NameGlossary.defaultSupportDir)
         reload()
     }
 }

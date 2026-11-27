@@ -89,3 +89,50 @@ func testVoiceProfilesOffByDefaultAndForOldConfigs() throws {
 * Provide or record a consenting two-speaker pair (different rooms or mics if possible) for the 90% check.
 * Approve the privacy-answer wording before the App Store build ships the feature.
 * Decide SpeakerKit patch versus FluidAudio once the measurement exists.
+
+## Review Voices (2026-11-27)
+
+Asked for by Marc: check the remembered voices, listen to them, merge or separate them, and reach the voices
+not named yet from the same place. Decisions he took (four yes/no questions, 2026-11-27):
+
+1. **Clips are cut on demand, nothing new is stored.** A clip is a stretch of the recording found through
+   `.segments.json` and played from the file. A meeting whose recording was deleted shows what was said, with
+   no Play button. No audio clip and no extra voiceprint is written.
+2. **"Not this person" fixes the meeting and cleans the profile; no negative voiceprint.** The speaker of the
+   ticked meetings goes back to its `SPEAKER_nn` label or gets the name typed; every sample of the profile that
+   was learnt from one of those voices (cosine >= 0.85 to that meeting's speaker) leaves the profile; the other
+   person is remembered only when named and ticked. A voice the owner cannot name is not stored, so it can be
+   confused again: the window says so.
+3. **Whether the past notes follow a merge, a rename or a correction is the owner's choice each time**, shown
+   with the number of meetings. Meetings are rewritten only by `SpeakerRename.apply` (`.prev-` backup). One
+   level of Undo restores the voice file and those renames.
+4. **One Voices window**, opened by "Review Voices…" in Settings > Transcription and by the menu's
+   "Name Voices…": "Remembered" and "Not yet named". The small Name Voices window stays only as the question
+   right after a meeting.
+
+Logic: `DistavoCore/VoiceCatalog.swift` (the header is the spec). App: `Voices/VoicesWindow.swift`,
+`Core/WatcherController+VoiceCatalog.swift`. Not in the App Store edition.
+
+"A voice that has spoken long enough always has a sample": every unnamed speaker with a minute or more of talk
+in a meeting is listed at once, without loading the voice model; grouping the same voice across meetings and
+naming is the "Listen and Group the Voices" step (the existing scan, 20 newest recordings first).
+
+Undo record: `voice-review-undo.json` beside `voice-profiles.json`, 0600. It holds the voice file as it was
+before the last operation, so it is biometric data too: it is written before anything changes, removed by
+Undo, removed as soon as it can no longer be used (the voice file changed since), and removed when a voice is
+deleted in Settings.
+
+Verified 2026-11-27: 15 unit tests on synthetic vectors (`VoiceCatalogTests`, including a rename or a save
+failing half-way); on a copy of the owner's data (`CopyDataLiveTests.test10`, counts only): 10 remembered
+voices, 52 named meetings, 22 unconfirmed voice guesses, 195 long unnamed speakers in 81 meetings; each voice
+renamed with its meetings and undone, each newest meeting marked "not this person" and undone, two voices
+merged and undone, every file byte-identical afterwards. With the real engine (`VoiceCatalogLiveTests`, same
+copy, numbers only, 24 s): the speaker of each voice's three newest meetings scores 0.63 to 1.00 against that
+voice's stored samples (the meetings Distavo named by voice itself: 0.63 to 0.94; a meeting a sample was
+learnt from: 0.99 to 1.00); "not this person" on the newest meeting of each of the 10 voices took a sample out
+for 3 of them (the meeting scored 0.85 or more against a sample) and left the other 7 profiles as they were;
+all 10 undone to the same voice file. What that means for the owner: marking a meeting the profile was learnt
+from removes that sample (a voice with one sample is then forgotten, the window says so and Undo brings it
+back); marking a meeting that merely matched at 0.6 to 0.8 corrects the meeting but cannot stop the same
+mix-up unless the other person is named and remembered. Not verified by a test: the window itself
+(`docs/manual-checks-1.17.md`, "Review Voices").

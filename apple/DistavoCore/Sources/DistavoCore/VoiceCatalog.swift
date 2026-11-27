@@ -194,7 +194,7 @@ public enum VoiceCatalog {
     public typealias RenameSeam = (_ mapping: [String: String], _ base: String) throws -> Void
     public typealias SaveSeam = (_ store: VoiceProfileStore) throws -> Void
 
-    public struct Context {
+    public struct Context: @unchecked Sendable {
         public var notesDir: URL
         public var workDir: URL
         public var supportDir: URL

@@ -143,11 +143,15 @@ public enum LongRecording {
                 }
                 segments.append(seg)
             }
-            for d in (result["detections"] as? [[String: Any]]) ?? [] {
+            // A part brings one reading per detector window (up to three): its speech is shared between them,
+            // so the stitched figure stays a mean (it read "English 219%" when each window took it whole).
+            let partDetections = (result["detections"] as? [[String: Any]]) ?? []
+            for d in partDetections {
                 guard let code = d["code"] as? String else { continue }
                 weighted[code, default: 0] += ((d["probability"] as? Double) ?? 0) * max(speech, 1)
+                    / Double(partDetections.count)
             }
-            if (result["detections"] as? [[String: Any]])?.isEmpty == false { speechTotal += max(speech, 1) }
+            if !partDetections.isEmpty { speechTotal += max(speech, 1) }
             if let e = result["engine"] as? String, !engines.contains(e) { engines.append(e) }
             if let l = result["language_used"] as? String, !languagesUsed.contains(l) { languagesUsed.append(l) }
             for n in (result["footer_notes"] as? [String]) ?? [] where !notes.contains(n) { notes.append(n) }

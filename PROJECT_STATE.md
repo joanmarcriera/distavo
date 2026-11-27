@@ -1,12 +1,20 @@
 # Project State
 
-## Resume here (2026-11-24 17:30)
+## Resume here (2026-11-27 10:30)
+
+- Branch `fix/log-errors-2026-11-27` (from `origin/main` 8fd47d6, local only): the crash of 2026-11-26 18:12 is the GPU text
+  decoder leaking `MPSNDArray`/`IOSurface` objects per decode (measured with `heap`); the decoder now runs on the CPU, hole
+  recovery stops after two failed decodes in a row, and a stitched long recording no longer reads "English 219%".
+  Not done: the English halves heard as Nynorsk on quiet audio (spoken languages are not set in the owner's config).
+- **Next action:** Marc: press "Process now" for `Meeting 2026-11-26 15.06.35` (set aside by the crash), then say whether this goes out as 1.22.1.
+
+## Earlier (2026-11-24 17:30, superseded)
 
 - **1.22.0 (build 25)** is cut from `release/1.22` (PR https://github.com/joanmarcriera/distavo/pull/21), a squash of
   `feat/people-pages` plus "Was this two meetings?" (`recording.ask_two_meetings`, off by default, lossless cut after review).
   `ops/pre-tag-check.sh --full v1.22.0` all PASS (DistavoCore 2200+ / 0 failures, DistavoEmbedded 95 / 0, three editions, gates).
   `feat/people-pages` keeps the granular history (private remote only); new work branches from `main`.
-- **Next action:** Marc: approve the `app-store-submission` environment for the v1.22.0 run, then do the two-meetings manual check in `docs/manual-checks-1.17.md`.
+- Open from that day: Marc approves the `app-store-submission` environment for the v1.22.0 run; the two-meetings manual check in `docs/manual-checks-1.17.md`.
 
 ## Earlier (2026-11-23 12:30, superseded)
 
@@ -21,7 +29,7 @@
   `distavo-ideas/BUILD-NOW.md` (spoken languages, relative dates, warnings on top, repeated silence notice, plan-step
   quotes, split recording, day log; memory fix landed but does NOT bound the growth). DistavoCore 1928 / 0 failures,
   DistavoEmbedded 93 / 0, Direct Debug build succeeded; two Opus reviews applied. Read `docs/whats-new-2026-11-23.md`.
-- **Next action:** Marc: try the Debug build per `docs/whats-new-2026-11-23.md`, decide the WhisperKit instance reuse (task 4019), then the merge order of the three drive branches.
+- Next action then: Marc: try the Debug build per `docs/whats-new-2026-11-23.md`, decide the WhisperKit instance reuse (task 4019), then the merge order of the three drive branches.
 
 ## Earlier (2026-11-23 00:45, superseded)
 
@@ -35,7 +43,7 @@
 - **v1.21.0 (build 24) released** from `main` @ 756afe3 (PR #19), tag `v1.21.0` on origin.
   Direct: https://github.com/joanmarcriera/distavo/releases/tag/v1.21.0 ; https://distavo.com/appcast.xml serves 1.21.0.
   App Store: build 24 VALID; the submit-for-review job waits for Marc's approval (card https://familia.riera.co.uk/tasks/6858).
-- **Next action:** after Marc approves, confirm 1.21.0 reaches WAITING_FOR_REVIEW
+- Next action then: after Marc approves, confirm 1.21.0 reaches WAITING_FOR_REVIEW
   (`scripts/submit-appstore-review.py --version 1.21.0 --build-number 24 --dry-run --until version`); then the backlog
   left in `docs/drives/2026-11-14-feedback-drive.md` ("What is left").
 - CI: dispatch `ci.yml` on any release branch; it is green again after the macOS 26 runner fix.
@@ -72,7 +80,7 @@
 - Direct DMG: https://github.com/joanmarcriera/distavo/releases/tag/v1.20.0 (`Distavo.dmg`, `appcast.xml`);
   https://distavo.com/appcast.xml serves 1.20.0.
 - App Store: build 23 VALID, version 1.20.0 `WAITING_FOR_REVIEW` (submitted by the gated job, releaseType AFTER_APPROVAL).
-- **Next action:** watch App Review for 1.20.0 (ASC dry run: `scripts/submit-appstore-review.py --version 1.20.0 --build-number 23 --dry-run --until version`);
+- Next action then: watch App Review for 1.20.0 (ASC dry run: `scripts/submit-appstore-review.py --version 1.20.0 --build-number 23 --dry-run --until version`);
   confirm the Forgejo mirror catches up (`git ls-remote --tags forgejo | grep v1.20.0`).
 - Setapp upload remains manual.
 

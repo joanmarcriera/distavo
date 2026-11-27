@@ -1,13 +1,3 @@
-• People pages: one page per person you have met, built only from names you confirmed, with their meetings, role and organisation. Menu, Update People Pages.
-• Meeting Brief: before a meeting, the last meetings and the open tasks for each person in it.
-• Merge People joins two spellings of one person, and can be undone.
-• Two meetings in one recording: split a recording in two from the Notes window, or let Distavo ask when a long recording with a quiet gap stops (Settings, Recording). Each meeting gets its own note and its own speakers.
-• Transcript: Move to Speaker gives a selected part to another or a new speaker.
-• Quick Notes: type the objective of the meeting and who is in it while you record.
-• Day log: one note per day listing that day's meetings.
-• Safer notes: every generated plan step needs a quote from the transcript, relative dates in tasks are resolved against the recording date, and warnings appear at the top of the note.
-• "Languages I speak" limits language detection to your own short list.
-• A names list keeps the spelling of the people and products you mention; tasks are only given to an owner the transcript supports.
-• New templates for sales calls and for played-back courses, and a sales-call export.
-• The silence notice repeats, then stops and keeps the recording; you can also stop and discard from the notice.
-• Fixes: two recordings with the same cleaned-up name no longer collide, and an interrupted recording is never deleted in favour of a shorter copy.
+• Fixes a crash after several hours of transcription: Distavo could run out of graphics memory and quit while identifying speakers. Transcription with the Whisper models is a little slower in exchange.
+• Recovering missed speech now stops cleanly when the speech model cannot run, instead of retrying every stretch.
+• Long recordings: the "Detected language" line no longer shows percentages above 100.

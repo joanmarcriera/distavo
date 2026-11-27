@@ -30,7 +30,7 @@ final class HoleRecoveryLiveTests: XCTestCase {
         let whisper = try await WhisperKit(WhisperKitConfig(
             model: model.whisperKitName, downloadBase: EmbeddedModelStore.modelsDirectory, modelRepo: model.whisperKitRepo,
             modelFolder: EmbeddedModelStore.whisperKitDirectory(repo: model.whisperKitRepo, variant: model.whisperKitName).path,
-            computeOptions: ModelComputeOptions(textDecoderCompute: .cpuAndGPU),
+            computeOptions: ModelComputeOptions(textDecoderCompute: EmbeddedTranscriber.textDecoderCompute),
             verbose: false, load: true, download: false))
         let audio = try AudioProcessor.loadAudioAsFloatArray(fromPath: audioPath)
         let sr = Double(WhisperKit.sampleRate)

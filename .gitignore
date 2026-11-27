@@ -28,3 +28,6 @@ __pycache__/
 
 # local-only deploy key material (never commit)
 .secrets-local/
+
+# archify working files (the published diagram lives in docs/architecture)
+.archify/

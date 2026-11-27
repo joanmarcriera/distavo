@@ -1,4 +1,4 @@
-# Releasing Distavo (next: 1.22.0)
+# Releasing Distavo (next: 1.22.1)
 
 > **Learned on 1.21.0 (2026-11-14):** (1) dispatch `ci.yml` on the release branch and wait for it before tagging:
 > `gh workflow run ci.yml --ref <branch>`. `main` had been red on macos-latest (macOS 26, Xcode 26.4-26.6) since

@@ -1,12 +1,13 @@
 # Project State
 
-## Resume here (2026-11-27 10:30)
+## Resume here (2026-11-27 11:40)
 
-- Branch `fix/log-errors-2026-11-27` (from `origin/main` 8fd47d6, local only): the crash of 2026-11-26 18:12 is the GPU text
-  decoder leaking `MPSNDArray`/`IOSurface` objects per decode (measured with `heap`); the decoder now runs on the CPU, hole
-  recovery stops after two failed decodes in a row, and a stitched long recording no longer reads "English 219%".
-  Not done: the English halves heard as Nynorsk on quiet audio (spoken languages are not set in the owner's config).
-- **Next action:** Marc: press "Process now" for `Meeting 2026-11-26 15.06.35` (set aside by the crash), then say whether this goes out as 1.22.1.
+- **1.22.1 (build 26)** tagged on `main` b277f46 (PR https://github.com/joanmarcriera/distavo/pull/22): the crash of
+  2026-11-26 was the GPU text decoder leaking `MPSNDArray`/`IOSurface` objects per decode (#4019); the decoder runs on the
+  CPU, hole recovery stops after two failed decodes in a row, a stitched long recording no longer reads "English 219%".
+  1.22.0 is still `WAITING_FOR_REVIEW` on the App Store, so 1.22.1 can only be submitted once it clears.
+  Not done: English heard as Nynorsk on quiet audio (spoken languages are not set in the owner's config).
+- **Next action:** submit 1.22.1 (build 26) for review when 1.22.0 leaves review (`ops/submit-when-review-clears.sh 1.22.0 1.22.1 26`), or replace the pending submission if Marc says so.
 
 ## Earlier (2026-11-24 17:30, superseded)
 

@@ -83,6 +83,26 @@ final class LongRecordingTests: XCTestCase {
         XCTAssertTrue(own[0].contains("1 silent, skipped"), own[0])
     }
 
+    /// Log of 2026-11-26: "Detected language: 3 samples: English 219%". The detector gives three windows per
+    /// part, and each was weighted by the part's whole speech while the total counted that speech once.
+    func testStitchedDetectionsNeverExceedOneWithSeveralWindowsPerPart() {
+        func part(_ i: Int, _ dets: [(String, Double)], speech: Double) -> LongRecording.PartOutcome {
+            .init(part: .init(index: i, start: Double(i) * 1800, end: Double(i + 1) * 1800, isSilent: false),
+                  result: ["segments": [["text": "x", "start": 0.0, "end": speech]],
+                           "detections": dets.map { ["code": $0.0, "probability": $0.1] as [String: Any] }])
+        }
+        let out = LongRecording.stitch([
+            part(0, [("hu", 0.25), ("en", 0.34), ("en", 0.31)], speech: 100),
+            part(1, [("en", 0.34), ("en", 0.92), ("en", 0.78)], speech: 300),
+            part(2, [("en", 0.84), ("en", 0.85), ("en", 0.90)], speech: 300),
+            part(3, [("nn", 0.40), ("nn", 0.76), ("nn", 0.74)], speech: 100)])
+        let det = (out["detections"] as! [[String: Any]]).map { ($0["code"] as! String, $0["probability"] as! Double) }
+        XCTAssertEqual(det.first?.0, "en")
+        XCTAssertLessThanOrEqual(det.map(\.1).reduce(0, +), 1.0001, "\(det)")
+        // en: (100 * 0.65/3 + 300 * 2.04/3 + 300 * 2.59/3) / 800
+        XCTAssertEqual(det.first?.1 ?? 0, (100 * 0.65 / 3 + 300 * 2.04 / 3 + 300 * 2.59 / 3) / 800, accuracy: 0.0001)
+    }
+
     func testStitchNamesAMissingPart() {
         let p0 = LongRecording.Part(index: 0, start: 0, end: 1800, isSilent: false)
         let p1 = LongRecording.Part(index: 1, start: 1800, end: 3600, isSilent: false)

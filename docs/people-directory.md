@@ -126,3 +126,6 @@ Rules added by the real-data rounds (2026-11-24, checked on a copy of the owner'
 - Brief: a task under the transcript's spelling of a name ("owner: Oscar Lind" for Oskar Lind, one letter off per word of four letters or more) is theirs, unless someone confirmed is called exactly that.
 - Transcript save: a save that changes no turn keeps the cached text; files with the same speakers in the same order are taken turn for turn, and only where one speaker goes on in the next turn must both sides of that cut agree.
 
+## A page made by a change that was undone (2026-11-27)
+
+A page is never removed by "Update People Pages": when its person is in no meeting any more it stays, as history. One exception, in Review Voices only: renaming or correcting a voice writes the page of the new name, and Undo right after takes that page back (`PeoplePages.removeUnusedNewPages`) when all three hold: Distavo made it during that change, the name is in no meeting now, and nobody wrote in it (no line of text, no role, organisation, alias or LinkedIn address). The list of pages a change made is kept in memory only, so an undo after a relaunch leaves the page; delete it by hand.

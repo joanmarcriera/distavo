@@ -500,6 +500,45 @@ public enum PeoplePages {
         return out + meetingsBlock(p, linkedin: "", organisation: p.organisation, timeZone: timeZone)
     }
 
+    /// Takes back pages an operation made and then undid (Review Voices: a voice renamed, the page of the new
+    /// name written, the rename undone). Of `names`, removes the page that Distavo made, that nobody wrote in
+    /// (`isUntouched`) and whose name is in no meeting now; returns the names removed. Every other page stays:
+    /// a page is history and the owner's (see `update`), so this is only ever called with the names an
+    /// operation itself created moments before. Run `update` afterwards so the lists follow.
+    @discardableResult
+    public static func removeUnusedNewPages(_ names: [String], notesDir: URL, workDir: URL, ownerName: String = "",
+                                            glossary: NameGlossary = NameGlossary(), timeZone: TimeZone = .current) -> [String] {
+        guard !names.isEmpty else { return [] }
+        let seen = collect(notesDir: notesDir, workDir: workDir, ownerName: ownerName, glossary: glossary, timeZone: timeZone)
+        // Nobody found at all: the work folder may be out of reach, so nothing is judged unused.
+        guard !seen.isEmpty else { return [] }
+        let inUse = Set(seen.flatMap { [$0.name] + $0.aliases }.map { $0.lowercased() })
+        var removed: [String] = []
+        for name in names where !inUse.contains(name.lowercased()) {
+            let file = folder(notesDir: notesDir).appendingPathComponent(fileName(for: name))
+            guard let text = try? String(contentsOf: file, encoding: .utf8), frontmatter(of: text)["type"] == "person",
+                  (frontmatter(of: text)["name"] ?? "").lowercased() == name.lowercased(),
+                  isUntouched(page: text, name: name, timeZone: timeZone),
+                  (try? FileManager.default.removeItem(at: file)) != nil else { continue }
+            removed.append(name)
+        }
+        return removed
+    }
+
+    /// Whether `page` holds nothing but what Distavo wrote for `name`: the header of a new page with every
+    /// field empty, and one complete meetings block (which is Distavo's own). One character typed anywhere
+    /// else, a role, an organisation, an alias or a LinkedIn address makes it the owner's.
+    static func isUntouched(page: String, name: String, timeZone: TimeZone) -> Bool {
+        func outsideBlock(_ text: String) -> [String]? {
+            let lines = text.components(separatedBy: "\n")
+            guard let s = lines.firstIndex(where: { $0.hasPrefix("<!-- distavo:meetings:start") }),
+                  let e = lines[s...].firstIndex(of: blockEnd) else { return nil }
+            return Array(lines[..<s]) + Array(lines[(e + 1)...])
+        }
+        guard let mine = outsideBlock(page), let fresh = outsideBlock(newPage(Person(name: name), timeZone: timeZone)) else { return false }
+        return mine == fresh
+    }
+
     /// An existing page with only Distavo's parts refreshed: the meetings block, and `role:` / `organisation:`
     /// when the owner left them empty. Every other byte stays.
     public static func refreshed(page: String, with p: Person, timeZone: TimeZone) -> String {

@@ -89,6 +89,8 @@ public struct VoiceProfileStore: Codable, Equatable, Sendable {
     public func save(supportDir: URL) throws {
         let fm = FileManager.default
         let target = Self.url(supportDir: supportDir)
+        // An undo record of Review Voices that this save makes unusable holds samples: it goes now.
+        defer { VoiceCatalog.dropUndoIfStale(supportDir: supportDir) }
         guard !profiles.isEmpty else {
             if fm.fileExists(atPath: target.path) { try fm.removeItem(at: target) }
             return

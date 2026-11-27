@@ -128,7 +128,8 @@ final class VoicesModel: ObservableObject {
         field.stringValue = preset ?? person.name
         field.isEnabled = preset == nil
         let n = person.bases.count
-        let box = NSButton(checkboxWithTitle: "Also rename the speaker in the \(n) meeting\(n == 1 ? "" : "s") named \(person.name)", target: nil, action: nil)
+        // Short: an alert's accessory view does not wrap, and a longer title was cut off after "meetings name…".
+        let box = NSButton(checkboxWithTitle: "Also rename the speaker in \(n == 1 ? "their meeting" : "their \(n) meetings")", target: nil, action: nil)
         box.frame = NSRect(x: 0, y: 0, width: 340, height: 20)
         box.state = .on
         box.isHidden = n == 0
@@ -209,6 +210,7 @@ struct VoicesView: View {
                         ForEach(model.snapshot.people) { person in personRow(person) }
                     }
                     .padding(.vertical, 4)
+                    .padding(.trailing, 14)   // room for the scroll bar, which covered the end of "Not this person"
                 }
             }
         }

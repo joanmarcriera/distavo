@@ -129,8 +129,15 @@ jobs:
         run: |
           cd apple
           NOTARY_AUTH=(--key "$RUNNER_TEMP/notary.p8" --key-id "$ASC_API_KEY_ID" --issuer "$ASC_API_ISSUER_ID")
-          hdiutil create -volname "Distavo" -srcfolder build/export/Distavo.app \
-            -ov -format UDZO build/Distavo.dmg
+          # hdiutil sizes the image from -srcfolder and now and then gets it too small
+          # ("No space left on device", v1.22.1 on 2026-11-27): try up to three times.
+          for attempt in 1 2 3; do
+            if hdiutil create -volname "Distavo" -srcfolder build/export/Distavo.app \
+                 -ov -format UDZO build/Distavo.dmg; then break; fi
+            if [ "$attempt" = 3 ]; then echo "::error::hdiutil create failed three times"; exit 1; fi
+            echo "::warning::hdiutil create failed (attempt $attempt), retrying"
+            sleep 10
+          done
           xcrun notarytool submit build/Distavo.dmg \
             "${NOTARY_AUTH[@]}" --wait
           xcrun stapler staple build/Distavo.dmg

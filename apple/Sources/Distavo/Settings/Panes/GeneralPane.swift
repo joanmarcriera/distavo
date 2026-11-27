@@ -18,11 +18,14 @@ struct GeneralPane: View {
         }
 
         Section("Folders and schedule") {
+            Toggle("Watch the folder for new recordings", isOn: $model.draft.watchEnabled)
+                .withHelp("On: Distavo checks the watch folder on its own and turns each new recording into a note. Off: nothing is processed until you choose Process now, Retry, or a shortcut - the same as Pause watching in the menu, and it stays off after a restart.")
             Picker("Watch interval", selection: $model.draft.watchIntervalSeconds) {
                 ForEach(WatcherController.intervalChoices, id: \.self) { secs in
                     Text(WatcherController.intervalLabel(secs)).tag(secs)
                 }
             }
+            .disabled(!model.draft.watchEnabled)
             TextField("Watch folder", text: $model.draft.recordingsDir)
                 .withHelp("Distavo watches this folder and turns each new recording into a note. Drop files here, or point it at an iCloud Drive / Google Drive folder so recordings sync in automatically.")
             TextField("Notes folder", text: $model.draft.notesDir)

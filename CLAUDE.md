@@ -241,6 +241,8 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   Key moments and tracked terms are deterministic (no model); the validator runs on the summary before assembly.
 - **"Pause watching" holds only automatic work** (`PausePolicy`, `ScanTrigger`): the timer is blocked, explicit user actions
   (Process now, Retry, URL/Shortcuts, Finder Service) run; a pause switched on mid-pass still stops the next file.
+  The pause is the config key `watch_enabled` (on for fresh installs and for configs predating it): the menu item and
+  Settings > General "Watch the folder for new recordings" write the same flag, so it survives a relaunch.
 - **Ask is local-only by construction.** `AskEndpointGuard.resolve` parses once, resolves once, requires EVERY address to be
   loopback/RFC1918/link-local/ULA, then pins the validated IP (Host header = original); no redirects, no system proxy, no cookies;
   anything unverifiable fails closed. `NetworkScope` now parses hosts strictly (numeric forms via `getaddrinfo`, zone ids, userinfo

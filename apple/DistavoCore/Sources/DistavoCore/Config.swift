@@ -390,6 +390,10 @@ private enum LegacyWhenDoneKey: String, CodingKey {
 
 public struct Config: Codable, Equatable {
     public var watchIntervalSeconds: Int
+    /// Whether the timer scans the recordings folder on its own. Off = the menu's "Pause watching", kept
+    /// across launches: nothing is processed until the owner asks (Process now, Retry, a shortcut).
+    /// On for fresh installs and for any config predating the key.
+    public var watchEnabled: Bool
     public var recordingsDir: String
     public var notesDir: String
     public var workDir: String
@@ -453,6 +457,7 @@ public struct Config: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case watchIntervalSeconds = "watch_interval_seconds"
+        case watchEnabled = "watch_enabled"
         case recordingsDir = "recordings_dir", notesDir = "notes_dir", workDir = "work_dir"
         case transcribe, summarise
         case noteOwner = "note_owner", userSpeaker = "user_speaker"
@@ -475,6 +480,7 @@ public struct Config: Codable, Equatable {
     }
 
     public init(watchIntervalSeconds: Int = 20,
+                watchEnabled: Bool = true,
                 recordingsDir: String = "~/Documents/Distavo/recordings",
                 notesDir: String = "~/Documents/Distavo/notes",
                 workDir: String = "~/Library/Application Support/Distavo/work",
@@ -499,6 +505,7 @@ public struct Config: Codable, Equatable {
                 notes: NotesConfig = .init(),
                 salesExport: SalesExportConfig = .init()) {
         self.watchIntervalSeconds = watchIntervalSeconds
+        self.watchEnabled = watchEnabled
         self.recordingsDir = recordingsDir; self.notesDir = notesDir; self.workDir = workDir
         self.transcribe = transcribe; self.summarise = summarise
         self.noteOwner = noteOwner; self.userSpeaker = userSpeaker
@@ -524,6 +531,7 @@ public struct Config: Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         let d = Config()
         watchIntervalSeconds = try c.decodeIfPresent(Int.self, forKey: .watchIntervalSeconds) ?? d.watchIntervalSeconds
+        watchEnabled = try c.decodeIfPresent(Bool.self, forKey: .watchEnabled) ?? true
         recordingsDir = try c.decodeIfPresent(String.self, forKey: .recordingsDir) ?? d.recordingsDir
         notesDir = try c.decodeIfPresent(String.self, forKey: .notesDir) ?? d.notesDir
         workDir = try c.decodeIfPresent(String.self, forKey: .workDir) ?? d.workDir

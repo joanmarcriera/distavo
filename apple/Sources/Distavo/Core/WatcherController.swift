@@ -122,6 +122,8 @@ final class WatcherController: ObservableObject {
         cfg.applyEnvOverrides()
         self.config = cfg
         self.watchIntervalSeconds = cfg.watchIntervalSeconds
+        self.isPaused = !cfg.watchEnabled   // the pause is a setting: it survives a relaunch
+        if !cfg.watchEnabled { self.status = "Paused" }
         self.allowLocalOllama = cfg.summarise.allowLocalFallback
         // #6759: a `.processing` marker that survived to launch means Distavo died on that recording (a normal
         // quit clears them, `clearMarkersOnQuit`). Set it aside instead of retrying it into another crash.
@@ -1039,9 +1041,12 @@ final class WatcherController: ObservableObject {
         NSWorkspace.shared.open(url)
     }
 
+    /// The menu's "Pause watching" and the Settings switch are one flag, `watch_enabled`, so it is saved.
     func togglePause() {
         isPaused.toggle()
+        config.watchEnabled = !isPaused
         status = isPaused ? "Paused" : "Idle"
+        persist()
     }
 
     func setInterval(_ seconds: Int) {
@@ -1086,6 +1091,10 @@ final class WatcherController: ObservableObject {
         let wasAllowed = config.summarise.allowLocalFallback
         config = newConfig
         watchIntervalSeconds = newConfig.watchIntervalSeconds
+        if isPaused == newConfig.watchEnabled {   // the Settings switch changed it
+            isPaused = !newConfig.watchEnabled
+            if !isScanning { status = isPaused ? "Paused" : "Idle" }
+        }
         allowLocalOllama = newConfig.summarise.allowLocalFallback
         meetingDetection.configure()
         capture.applyKeyMomentHotkeyConfig()   // #2950: live hotkey changes

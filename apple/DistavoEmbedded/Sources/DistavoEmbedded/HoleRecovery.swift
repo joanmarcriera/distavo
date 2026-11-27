@@ -32,6 +32,8 @@ enum HoleRecovery {
     /// First-pass segments with at most this many words, lying mostly inside a
     /// recovered hole, are replaced by the recovery.
     static let replaceableWordCount = 2
+    /// Decodes that throw in a row before the remaining windows are left alone.
+    static let failuresBeforeStopping = 2
 
     struct Outcome {
         var results: [TranscriptionResult]
@@ -42,6 +44,8 @@ enum HoleRecovery {
         var holeCount = 0
         /// Seconds whose re-decode only repeated text the first pass already had (timestamps squeezed, not dropped).
         var duplicateSeconds = 0.0
+        /// The error type that ended the recovery before its last window; nil when it ran to the end.
+        var stoppedOn: String?
 
         /// Sentences for the note's provenance line (`footer_notes`); empty when there were no holes.
         var footerNotes: [String] {
@@ -199,6 +203,25 @@ enum HoleRecovery {
         whisper: WhisperKit, audio: [Float], results: [TranscriptionResult],
         options: DecodingOptions, report: @Sendable (String) -> Void
     ) async -> Outcome {
+        var decodeOptions = options
+        decodeOptions.promptTokens = nil
+        decodeOptions.chunkingStrategy = nil
+        let plain = decodeOptions
+        return await recover(audio: audio, results: results, report: report) { samples in
+            try await whisper.transcribe(audioArray: samples, decodeOptions: plain).flatMap { $0.segments }
+        }
+    }
+
+    /// The same with the decoder passed in, so the loop is tested without a model.
+    ///
+    /// A decode that throws `failuresBeforeStopping` times in a row ends the recovery: the model can no
+    /// longer run (crash of 2026-11-26: 64 `MLMultiArrayCreationError` in one second for the 32 windows
+    /// left, then CoreML aborted the app in the next model). What was recovered until then is kept, the
+    /// windows not reached count as not transcribed, and `stoppedOn` tells the caller.
+    static func recover(
+        audio: [Float], results: [TranscriptionResult], report: @Sendable (String) -> Void,
+        decode: ([Float]) async throws -> [TranscriptionSegment]
+    ) async -> Outcome {
         var outcome = Outcome(results: results)
         let rate = Double(WhisperKit.sampleRate)
         let duration = Double(audio.count) / rate
@@ -217,12 +240,9 @@ enum HoleRecovery {
         let total = recoveryWindows.reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
         report("Recovering \(Int(total.rounded())) s of speech the first pass dropped…")
 
-        var decodeOptions = options
-        decodeOptions.promptTokens = nil
-        decodeOptions.chunkingStrategy = nil
-
         var recovered: [(window: ClosedRange<Double>, segments: [TranscriptionSegment])] = []
-        for window in recoveryWindows {
+        var failuresInARow = 0
+        windows: for (index, window) in recoveryWindows.enumerated() {
             let lo = max(0, Int(window.lowerBound * rate))
             let hi = min(audio.count, Int(window.upperBound * rate))
             guard hi > lo else { continue }
@@ -230,14 +250,24 @@ enum HoleRecovery {
             var candidates: [(segments: [TranscriptionSegment], stats: (words: Int, compressionRatio: Double, avgLogProb: Double))] = []
             for samples in [slice, gainNormalised(slice)] {
                 do {
-                    let decoded: [TranscriptionResult] = try await whisper.transcribe(audioArray: samples, decodeOptions: decodeOptions)
-                    let segs: [TranscriptionSegment] = decoded.flatMap { $0.segments }
+                    let segs: [TranscriptionSegment] = try await decode(samples)
+                    failuresInARow = 0
                     let words = segs.reduce(0) { $0 + wordCount($1.text) }
                     let ratio = segs.map { Double($0.compressionRatio) }.max() ?? 0
                     let logProb = segs.isEmpty ? 0 : segs.reduce(0.0) { $0 + Double($1.avgLogprob) } / Double(segs.count)
                     candidates.append((segs, (words, ratio, logProb)))
                 } catch {
-                    report("Recovery of a dropped stretch failed (\(type(of: error))) — keeping the first pass.")
+                    failuresInARow += 1
+                    if failuresInARow < failuresBeforeStopping {
+                        report("Recovery of a dropped stretch failed (\(type(of: error))) — keeping the first pass.")
+                        continue
+                    }
+                    let left = recoveryWindows[index...].reduce(0) { $0 + ($1.upperBound - $1.lowerBound) }
+                    outcome.emptySeconds += left
+                    outcome.stoppedOn = "\(type(of: error))"
+                    report("Recovery stopped: the speech model could not run (\(type(of: error))) — "
+                        + "keeping the first pass for the last \(Int(left.rounded())) s.")
+                    break windows
                 }
             }
             if let best = SpeechCoverage.pickBest(candidates: candidates.map(\.stats)) {

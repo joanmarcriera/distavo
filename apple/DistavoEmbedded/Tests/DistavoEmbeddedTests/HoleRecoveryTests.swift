@@ -129,4 +129,69 @@ final class HoleRecoveryTests: XCTestCase {
                        ["13 s of audible audio could not be transcribed."])
         XCTAssertEqual(HoleRecovery.footerNotes(recoveredSeconds: 20, emptySeconds: 10).count, 2)
     }
+
+    // MARK: Recovery loop (crash of 2026-11-26)
+
+    /// 20 s of silence (the noise floor), then 60 s of a loud tone the first pass returned nothing for:
+    /// one hole, three windows.
+    private var loudAudio: [Float] {
+        [Float](repeating: 0, count: 20 * WhisperKit.sampleRate)
+            + (0..<(60 * WhisperKit.sampleRate)).map { 0.3 * sin(Float($0) * 0.05) }
+    }
+
+    private final class Lines: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [String] = []
+        func add(_ line: String) { lock.lock(); stored.append(line); lock.unlock() }
+        var all: [String] { lock.lock(); defer { lock.unlock() }; return stored }
+    }
+
+    private struct Exhausted: Error {}
+
+    func testRecoveryStopsAfterTwoFailedDecodesInARow() {
+        let done = expectation(description: "recovered")
+        let audio = loudAudio
+        let lines = Lines()
+        Task {
+            var calls = 0
+            let out = await HoleRecovery.recover(audio: audio, results: [], report: { lines.add($0) }) { _ in
+                calls += 1
+                throw Exhausted()
+            }
+            XCTAssertEqual(calls, HoleRecovery.failuresBeforeStopping, "the windows left are not tried")
+            XCTAssertEqual(out.stoppedOn, "Exhausted")
+            XCTAssertEqual(out.recoveredSeconds, 0)
+            XCTAssertGreaterThan(out.emptySeconds, 55, "what was not reached counts as not transcribed")
+            XCTAssertEqual(lines.all.filter { $0.contains("failed") }.count, 1, "\(lines.all)")
+            XCTAssertEqual(lines.all.filter { $0.contains("Recovery stopped") }.count, 1, "\(lines.all)")
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 30)
+    }
+
+    func testOneFailedDecodeDoesNotStopTheRecovery() {
+        let done = expectation(description: "recovered")
+        let audio = loudAudio
+        Task {
+            var calls = 0
+            let out = await HoleRecovery.recover(audio: audio, results: [], report: { _ in }) { samples in
+                calls += 1
+                if calls == 1 { throw Exhausted() }
+                let seconds = Float(samples.count) / Float(WhisperKit.sampleRate)
+                return [TranscriptionSegment(start: 0, end: seconds, text: " we agreed to move the cluster in March")]
+            }
+            XCTAssertNil(out.stoppedOn)
+            XCTAssertGreaterThan(calls, 2)
+            XCTAssertGreaterThan(out.recoveredSeconds, 55)
+            XCTAssertFalse(out.results.flatMap(\.segments).isEmpty)
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 30)
+    }
+
+    func testTextDecoderIsNotOnTheGPU() {
+        // The GPU decoder leaks MPSNDArray/IOSurface objects per decode until CoreML aborts the app.
+        XCTAssertNotEqual(EmbeddedTranscriber.textDecoderCompute, .cpuAndGPU)
+        XCTAssertNotEqual(EmbeddedTranscriber.textDecoderCompute, .all)
+    }
 }

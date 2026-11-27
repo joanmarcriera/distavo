@@ -1,4 +1,5 @@
 import Foundation
+import CoreML
 import WhisperKit
 import SpeakerKit
 // Both SpeakerKit and FluidAudio declare a `DiarizationResult` type; this
@@ -167,6 +168,22 @@ public actor EmbeddedTranscriber {
 
     public init() {}
 
+    /// Where Whisper's text decoder runs: the CPU.
+    ///
+    /// Not the GPU (crash of 2026-11-26, measured 2026-11-27 on macOS 27.2.1 with tiny and large-v3
+    /// turbo): with `.cpuAndGPU` every decode of a 16 s clip leaves about 3 800 `MPSNDArray` and 70
+    /// `IOSurface` objects that are never freed, not by `unloadModels()` either. A menu-bar app that
+    /// stays open runs out after some hours of audio: WhisperKit then throws
+    /// `MLMultiArrayCreationError` and the next CoreML model aborts the process. CPU and Neural Engine
+    /// leave nothing behind.
+    ///
+    /// Not the Neural Engine (Vikunja #2158): on the 2026-07-23 Catalan bake-off excerpt the ANE
+    /// decoder truncated a 24 s segment to 7-10 words in two runs out of two.
+    ///
+    /// Cost: the turbo decoder takes 2.3 s instead of 1.2 s for that 16 s clip (same 56 words). The
+    /// encoder stays on the Neural Engine.
+    static let textDecoderCompute: MLComputeUnits = .cpuOnly
+
     /// Status line sink (menu-bar status + activity log in the app).
     public func setProgressHandler(_ handler: (@Sendable (String) -> Void)?) {
         progressHandler = handler
@@ -201,18 +218,11 @@ public actor EmbeddedTranscriber {
                 await self.report("Loading \(model.displayName)…")
             }
 
-            // Text decoder on the GPU, not the Neural Engine (Vikunja #2158):
-            // on the 2026-07-23 Catalan bake-off excerpt the default ANE decoder
-            // truncated a 24 s segment to 7–10 words in two out of two runs
-            // (accepted at a low fallback temperature after ANE contention),
-            // while cpuAndGPU decoded all 62–68 words every time — and ran the
-            // autoregressive decode 2–3x faster. The encoder stays on the ANE
-            // (no speed benefit measured from moving it).
             let whisperConfig = WhisperKitConfig(
                 model: model.whisperKitName,
                 downloadBase: EmbeddedModelStore.modelsDirectory,
                 modelRepo: model.whisperKitRepo,
-                computeOptions: ModelComputeOptions(textDecoderCompute: .cpuAndGPU),
+                computeOptions: ModelComputeOptions(textDecoderCompute: Self.textDecoderCompute),
                 verbose: false,
                 load: true,
                 download: true)

@@ -191,6 +191,11 @@ All live in `workDir` beside the `.state` markers, keyed `<base>.*`, so the (pos
   partitions input; the reduce step reuses `Prompt.build`, so an on-device note has the same shape as Ollama.
   The feature is a kill switch: with `summarise.embedded_enabled` false, `backend == "embedded"` falls back
   to Ollama (does not fail), and Settings does not offer it.
+- **Whisper's text decoder runs on the CPU, never the GPU** (`EmbeddedTranscriber.textDecoderCompute`, crash of 2026-11-26):
+  with `.cpuAndGPU` every decode leaves `MPSNDArray`/`IOSurface` objects that nothing frees (about 3 800 and 70 per 16 s
+  clip on macOS 27.2.1, also after `unloadModels()`), until WhisperKit throws `MLMultiArrayCreationError` and the next CoreML
+  model aborts the app. Not the Neural Engine either (#2158, truncated Catalan). `HoleRecovery.recover` stops after two
+  failed decodes in a row (`stoppedOn`) instead of trying every window left. Re-measure with `heap <pid>` before moving it back.
 - **Stale markers at startup never crash-loop (#6759):** a normal quit clears this process's `.processing`
   markers (`applicationWillTerminate` -> `clearProcessingMarkers`, markers carry the pid), so one left at launch
   means Distavo died on that file: `setAsideInterrupted` marks it `.failed` with `interruptedReason` and the app

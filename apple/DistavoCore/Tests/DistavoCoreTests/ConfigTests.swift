@@ -159,6 +159,21 @@ final class ConfigTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
     }
 
+    /// `watch_enabled`: on by default and for a config that predates it; off is kept across a save and load.
+    func testWatchEnabledIsOnUnlessSwitchedOff() throws {
+        XCTAssertTrue(Config().watchEnabled)
+        XCTAssertTrue(Config.recommendedForThisMac().watchEnabled)
+        let old = try JSONDecoder().decode(Config.self, from: Data(#"{"watch_interval_seconds": 60}"#.utf8))
+        XCTAssertTrue(old.watchEnabled)
+
+        let url = tempFile()
+        var off = Config()
+        off.watchEnabled = false
+        try Config.save(off, to: url)
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).contains("\"watch_enabled\" : false"))
+        XCTAssertFalse(try Config.load(from: url).watchEnabled)
+    }
+
     func testLoadMergesPartialOntoDefaults() throws {
         let url = tempFile()
         try FileManager.default.createDirectory(

@@ -464,3 +464,27 @@ On a COPY of the data (`DISTAVO_TEST_HOME`, see CLAUDE.md "Testing on a copy of 
 6. **Merge.** "Same person as" > another voice, with and without "Also rename the speaker in the N meetings": one voice left; with the box the meetings are renamed, without it the notes are unchanged. A meeting where both names speak is reported as left alone. Undo restores both voices.
 7. **Undo goes stale.** After a merge, delete a voice in Settings: the Undo button is gone when the window is reopened, and `voice-review-undo.json` is no longer in the support folder.
 8. **Not yet named.** The list appears at once (no "Listening…"); "Listen and Group the Voices" then shows the grouped rows; naming one there adds it to "Remembered" after switching tabs. Switching tabs during the scan does not stop it; closing the window does.
+
+9. **A leftover page.** Rename a voice to a new name (a person page of that name appears in `notes/people/`), then Undo: that page is gone again and `_People.md` no longer lists it. A page you typed something into stays.
+
+Checked in a running Debug build on a copy of the data on 2026-11-27 (computer-use, steps 2, 3, 4, 6 as a rename, 8 without the scan, 9): after Apply + Undo and after Rename + Undo every note, transcript and the voice file were byte-identical to before (`shasum` of the folders), the names sidecar differing only by its `last_note_sha256` bookkeeping. Not checked by hand: step 5 with "remember", step 7 through Settings, the scan of step 8.
+
+How to click through it without touching the installed app: the installed Distavo and a Debug build share one bundle id, and a click tool that finds apps by bundle id attaches to the installed one. Copy the Debug app, give the copy its own id, sign it ad hoc and launch that:
+
+```sh
+cp -Rc apple/build/Build/Products/Debug/Distavo.app "$T/app/DistavoTest.app"
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier uk.co.riera.distavo.testcopy" "$T/app/DistavoTest.app/Contents/Info.plist"
+codesign -s - --force --deep "$T/app/DistavoTest.app"
+open -n --env DISTAVO_TEST_HOME="$T" --env DISTAVO_TEST_OPEN=voices,settings,queue "$T/app/DistavoTest.app"
+```
+
+## Watch the folder: one switch in three places (2026-11-27)
+
+On a copy of the data, launched with `DISTAVO_TEST_OPEN=settings,queue`.
+
+1. **Same switch.** Queue window "Pause": Settings > General "Watch the folder for new recordings" turns off at once, with nothing to save; "Resume" turns it on. `watch_enabled` in the config file follows each time.
+2. **Closing Settings changes nothing.** Open Settings, pause from the menu or the Queue window, close Settings: still paused (before 1.23 the close put the old value back).
+3. **It survives a restart.** Quit while paused, launch: the Queue window says "Paused" and offers "Resume".
+4. **Off means off.** Switch it off in Settings and Save while a recording is waiting: nothing is processed until "Process now".
+
+Steps 1 to 3 were checked on 2026-11-27 in a running Debug build; step 4 only with nothing waiting (the rule itself is `PausePolicy.rescansAfterSettingsSaved`, unit-tested).

@@ -49,16 +49,31 @@ final class SettingsModel: ObservableObject {
     let embeddedSupported = HardwareProbe.supportsEmbeddedTranscription
 
     private var forwarding: AnyCancellable?
+    /// The live config as the draft last saw it (see `followLiveConfig`).
+    private var seen: Config
 
     init(controller: WatcherController) {
         self.controller = controller
         draft = controller.config
+        seen = controller.config
         openAtLogin = controller.openAtLogin
         // Panes read live controller state (last detected language, benchmark
         // results); re-render them when it changes, as the old view's body did.
         forwarding = controller.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
+            // After the change has landed: the menu may have changed a setting this window holds a copy of.
+            DispatchQueue.main.async { self?.followLiveConfig() }
         }
+    }
+
+    /// A setting changed outside this window (the menu's "Pause watching", interval, "Use local Ollama")
+    /// takes its new value in the draft too; without this the next Save or close put the old value back
+    /// and a pause chosen in the menu was silently undone. What the owner typed here stays (`SettingsDraft`).
+    private func followLiveConfig() {
+        let live = controller.config
+        guard live != seen else { return }
+        draft = SettingsDraft.following(draft: draft, was: seen, now: live)
+        seen = live
     }
 
     // MARK: Edition / backend facts
@@ -305,8 +320,10 @@ final class SettingsModel: ObservableObject {
 
     func save() {
         // Blank / duplicate glossary lines are dropped on save (#3950); they stay while typing.
+        followLiveConfig()
         draft.transcribe.vocabulary = Vocabulary.normalisedTerms(draft.transcribe.vocabulary)
         controller.applyConfig(draft)
+        seen = controller.config
         saved = true
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -316,21 +333,25 @@ final class SettingsModel: ObservableObject {
 
     func revert() {
         draft = controller.config
+        seen = controller.config
         openAtLogin = controller.openAtLogin
     }
 
     /// Window closing (titlebar close, Cmd-W, quit) must not lose edits the user
     /// forgot to Save — persist them and note it in the activity log.
     func saveIfNeededOnClose() {
+        followLiveConfig()
         draft.transcribe.vocabulary = Vocabulary.normalisedTerms(draft.transcribe.vocabulary)
         if draft != controller.config {
             controller.applyConfigOnClose(draft)
         }
+        seen = controller.config
     }
 
     /// A reused window (SettingsWindowController keeps one instance alive across
     /// opens) must never show a confirmation left over from the previous visit.
     func windowAppeared() {
+        followLiveConfig()
         saved = false
         #if EDITION_DIRECT
         autoUpdates = controller.updater?.automaticallyChecksForUpdates ?? true

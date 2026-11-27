@@ -83,7 +83,7 @@ struct QueueView: View {
             Button(controller.isPaused ? "Resume" : "Pause") { controller.toggleQueuePause() }
                 .help(controller.isPaused
                       ? "Resume processing."
-                      : "Finish the file in progress, then hold. Same switch as “Pause watching”; it resets when Distavo restarts.")
+                      : "Finish the file in progress, then hold. Same switch as “Pause watching” and Settings > General; it stays paused after a restart.")
             Button("Process now") { controller.processNow() }
                 .help("Scan the folder now and retry every failed recording. Works while paused.")
             Button("Clear finished") { controller.clearFinishedQueueItems() }
@@ -121,7 +121,7 @@ struct QueueView: View {
                 Text(notice).font(.caption).foregroundStyle(.orange)
             }
             if controller.isPaused {
-                Text("Paused — automatic processing is on hold. Process now still runs once. Resets when Distavo restarts.")
+                Text("Paused — automatic processing is on hold. Process now still runs once. It stays paused after a restart, until you resume.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Drop files or use the context menu on a row. “Skip” only affects this session: the file stays in the folder and is offered again next launch. A file that is already being processed cannot be stopped.")

@@ -31,6 +31,13 @@ public enum PausePolicy {
     }
 }
 
+extension PausePolicy {
+    /// Saving Settings re-scans the folder and retries failed recordings, because new settings may fix what
+    /// failed. That is automatic work: with watching off (`watch_enabled` false, the menu's "Pause watching")
+    /// it does not start, and the owner uses "Process now" when they want it.
+    public static func rescansAfterSettingsSaved(paused: Bool) -> Bool { !paused }
+}
+
 /// Owns the retry queue and the never-twice bookkeeping for one app session.
 @MainActor
 public final class QueueCoordinator {

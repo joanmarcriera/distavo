@@ -79,6 +79,79 @@ final class PeoplePagesTests: XCTestCase {
         }
     }
 
+    func testAPageMadeByAnUndoneRenameIsTakenBack() throws {
+        let (notes, work) = try fixture()
+        let first = "Meeting_2026-11-18_09.00.00"
+        func update() throws -> PeoplePages.Summary {
+            try PeoplePages.update(notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)
+        }
+        func unused(_ names: [String]) -> [String] {
+            PeoplePages.removeUnusedNewPages(names, notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)
+        }
+        _ = try update()
+        let before = try [PeoplePages.indexName, "Oskar Lind.md"].map { try page(notes, $0) }
+        // A voice is renamed in Review Voices: the page of the new name is written...
+        try SpeakerNames(names: ["SPEAKER_00": "Dana Owner", "SPEAKER_01": "Oskar Lindt"]).encoded()
+            .write(to: SpeakerNames.url(workDir: work, base: first))
+        let made = try update().created
+        XCTAssertEqual(made, ["Oskar Lindt"])
+        XCTAssertEqual(unused(made), [], "while the name is in a meeting its page is in use")
+        // ...and the rename is undone.
+        try SpeakerNames(names: ["SPEAKER_00": "Dana Owner", "SPEAKER_01": "Oskar Lind"]).encoded()
+            .write(to: SpeakerNames.url(workDir: work, base: first))
+        _ = try update()
+        XCTAssertEqual(unused(made), ["Oskar Lindt"])
+        _ = try update()
+        let folder = PeoplePages.folder(notesDir: notes)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("Oskar Lindt.md").path))
+        XCTAssertEqual(try [PeoplePages.indexName, "Oskar Lind.md"].map { try page(notes, $0) }, before, "the people folder is as before the rename")
+    }
+
+    func testOnlyAnUntouchedUnusedPageOfThatNameIsEverTakenBack() throws {
+        let (notes, work) = try fixture()
+        let third = "Meeting_2026-11-20_10.00.00"
+        func update() throws { try PeoplePages.update(notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone) }
+        func unused(_ names: [String], work w: URL? = nil) -> [String] {
+            PeoplePages.removeUnusedNewPages(names, notesDir: notes, workDir: w ?? work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)
+        }
+        try SpeakerNames(names: ["SPEAKER_00": "Zoe Ward"]).encoded().write(to: SpeakerNames.url(workDir: work, base: third))
+        try update()
+        let folder = PeoplePages.folder(notesDir: notes)
+        let zoe = folder.appendingPathComponent("Zoe Ward.md")
+        let untouched = try String(contentsOf: zoe, encoding: .utf8)
+        // Zoe is in no meeting any more; the others still are.
+        try FileManager.default.removeItem(at: SpeakerNames.url(workDir: work, base: third))
+        try update()
+        XCTAssertEqual(try String(contentsOf: zoe, encoding: .utf8), untouched, "an update keeps her page as history")
+
+        XCTAssertEqual(unused([]), [])
+        XCTAssertEqual(unused(["Nobody Such"]), [], "no page of that name")
+        XCTAssertEqual(unused(["Oskar Lind", "Petra Novak"]), [], "people who are in a meeting")
+        XCTAssertEqual(unused(["Zoe Ward"], work: work.appendingPathComponent("unreachable")), [], "nobody found at all: nothing is judged unused")
+        // One line of the owner's, or one fact about her, makes the page theirs.
+        for edit in [("# Zoe Ward\n", "# Zoe Ward\n\nLikes roses.\n"), ("role: \n", "role: gardener\n"), ("aliases: []", "aliases: [Zoë]"),
+                     ("linkedin: \n", "linkedin: https://example.com/in/zoe\n")] {
+            XCTAssertTrue(untouched.contains(edit.0), edit.0)
+            try untouched.replacingOccurrences(of: edit.0, with: edit.1).write(to: zoe, atomically: true, encoding: .utf8)
+            XCTAssertEqual(unused(["Zoe Ward"]), [], edit.1)
+        }
+        try untouched.write(to: zoe, atomically: true, encoding: .utf8)
+        XCTAssertEqual(unused(["Zoe Ward"]), ["Zoe Ward"], "made by Distavo, never written in, in no meeting")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: zoe.path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { !$0.hasPrefix("_") }.sorted(),
+                       ["Oskar Lind.md", "Petra Novak.md"], "nobody else's page is touched")
+    }
+
+    func testAnUpdateAloneNeverRemovesAPage() throws {
+        // A page is history: when its person is in no meeting any more it stays, untouched or not.
+        let (notes, work) = try fixture()
+        try PeoplePages.update(notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)
+        try FileManager.default.removeItem(at: SpeakerNames.url(workDir: work, base: "Meeting_2026-11-18_09.00.00"))
+        try FileManager.default.removeItem(at: SpeakerNames.url(workDir: work, base: "Meeting_2026-11-19_14.30.00"))
+        try PeoplePages.update(notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: PeoplePages.folder(notesDir: notes).appendingPathComponent("Oskar Lind.md").path))
+    }
+
     func testSecondRunChangesNothing() throws {
         let (notes, work) = try fixture()
         try PeoplePages.update(notesDir: notes, workDir: work, ownerName: "Dana Owner", glossary: glossary, timeZone: zone)

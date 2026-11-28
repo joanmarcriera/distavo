@@ -80,15 +80,25 @@ extension WatcherController {
         return changed
     }
 
-    /// The notes of the meetings an operation renamed follow everywhere they are copied to.
-    private func afterVoiceRenames(_ bases: [String], context c: VoiceCatalog.Context) async {
+    /// The person pages the last merge, rename or correction made. An undo takes back the ones nobody wrote
+    /// in (`PeoplePages.removeUnusedNewPages`); kept in memory only, so an undo after a relaunch leaves them.
+    private static var pagesMadeByLastVoiceChange: [String] = []
+
+    /// The notes of the meetings an operation renamed follow everywhere they are copied to. Returns the
+    /// person pages this made; `takingBack` (an undo) removes the pages the undone operation had made.
+    @discardableResult
+    private func afterVoiceRenames(_ bases: [String], context c: VoiceCatalog.Context, takingBack made: [String] = []) async -> [String] {
         for base in bases {
             indexForSearch(base: base, note: c.notesDir.appendingPathComponent("\(base).md"))
             exportToVault(base: base, note: c.notesDir.appendingPathComponent("\(base).md"))
         }
         let owner = config.noteOwner
-        await Task.detached(priority: .userInitiated) {
-            _ = Self.updatePeoplePagesInTurn(notes: c.notesDir, work: c.workDir, owner: owner)
+        return await Task.detached(priority: .userInitiated) {
+            let created = (try? Self.updatePeoplePagesInTurn(notes: c.notesDir, work: c.workDir, owner: owner).get())?.created ?? []
+            let removed = PeoplePages.removeUnusedNewPages(made, notesDir: c.notesDir, workDir: c.workDir, ownerName: owner,
+                                                           glossary: NameGlossary.load(supportDir: NameGlossary.defaultSupportDir))
+            if !removed.isEmpty { _ = Self.updatePeoplePagesInTurn(notes: c.notesDir, work: c.workDir, owner: owner) }
+            return created
         }.value
     }
 
@@ -110,7 +120,7 @@ extension WatcherController {
             }.value
             switch result {
             case .success(let out):
-                await self.afterVoiceRenames(out.renamed, context: c)
+                Self.pagesMadeByLastVoiceChange = await self.afterVoiceRenames(out.renamed, context: c)
                 self.log("Voices: not-this-person on \(bases.count) meetings: \(out.renamed.count) renamed, \(out.skipped.count) left alone, \(out.samplesRemoved) samples removed")
                 var parts = [renameNotes ? "Corrected \(out.renamed.count) meeting\(out.renamed.count == 1 ? "" : "s")" : "Meetings left as they are"]
                 if !out.skipped.isEmpty { parts.append("\(out.skipped.count) left alone (\(Set(out.skipped.values).sorted().joined(separator: "; ")))") }
@@ -136,7 +146,7 @@ extension WatcherController {
             }.value
             switch result {
             case .success(let out):
-                await self.afterVoiceRenames(out.renamed, context: c)
+                Self.pagesMadeByLastVoiceChange = await self.afterVoiceRenames(out.renamed, context: c)
                 self.log("Voices: \(out.merged ? "merge" : "rename"): \(out.renamed.count) meetings renamed, \(out.skipped.count) left alone")
                 var parts = [out.merged ? "\(name) and \(into) are now one voice" : "The voice is now called \(into)"]
                 if renameNotes { parts.append("renamed in \(out.renamed.count) meeting\(out.renamed.count == 1 ? "" : "s")") }
@@ -157,7 +167,8 @@ extension WatcherController {
             let result = await Task.detached(priority: .userInitiated) { Result { try VoiceCatalog.undo(context: c) } }.value
             switch result {
             case .success(let out):
-                await self.afterVoiceRenames(out.renamed, context: c)
+                await self.afterVoiceRenames(out.renamed, context: c, takingBack: Self.pagesMadeByLastVoiceChange)
+                Self.pagesMadeByLastVoiceChange = []
                 self.log("Voices: undo: \(out.renamed.count) meetings put back, \(out.skipped.count) left alone")
                 line = "Undone: the remembered voices are as before"
                     + (out.renamed.isEmpty ? "" : ", \(out.renamed.count) meeting\(out.renamed.count == 1 ? "" : "s") put back")

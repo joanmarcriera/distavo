@@ -252,9 +252,11 @@ final class VoiceCatalogTests: XCTestCase {
     func testUndoIsRefusedOnceTheVoicesChangedAndTheRecordDoesNotOutliveItsUse() throws {
         let f = try fixture()
         _ = try VoiceCatalog.merge(name: "Ines Prat", into: "Petra Novak", renameNotes: false, meetings: [], context: f.context(now: t0))
+        // The voice file changed behind Distavo's back (another edition running on the same folder, a restored
+        // backup): no save of this process removed the record, so the undo itself must notice.
         var store = f.store()
         store.enrol(name: "Someone New", sample: v(4), now: t0)
-        try store.save(supportDir: f.support)
+        try store.fileData().write(to: VoiceProfileStore.url(supportDir: f.support))
         let changed = f.storeBytes
         XCTAssertThrowsError(try VoiceCatalog.undo(context: f.context(now: t0))) { XCTAssertEqual($0 as? VoiceCatalog.Failure, .changedSince) }
         XCTAssertEqual(f.storeBytes, changed)

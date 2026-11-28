@@ -21,7 +21,11 @@
 //   - "Undo" (`undo`): one level. The record (`voice-review-undo.json`, support folder, 0600) holds the voice
 //     file as it was and the renames done. It is written BEFORE anything changes; an operation that fails
 //     half-way puts the meetings, the voice file and the previous undo record back. Undo is refused, and
-//     changes nothing, when the voice file changed since. Deleting a voice in Settings discards the record.
+//     changes nothing, when the voice file changed since. Deleting a voice in Settings discards the record,
+//     and so does every other save of the voice file that makes it unusable (`dropUndoIfStale`, called by
+//     `VoiceProfileStore.save`): the record holds samples and must not wait for the window to be opened.
+//   - A name given to a voice must be one a transcript can carry (`isVoiceName`), whether or not a meeting
+//     follows now. A rename that is put back, by Undo or after a failure, keeps a voice guess a guess.
 //
 // Pure apart from the file reads and writes named above. Names only in logs: the app logs counts.
 
@@ -217,13 +221,20 @@ public enum VoiceCatalog {
         (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).precomposedStringWithCanonicalMapping
     }
 
+    /// A name a remembered voice may have: one a speaker may have in a transcript (`SpeakerRename.normalised`:
+    /// one line, no square brackets, not too long) that is not a diariser label. Recognition writes the
+    /// remembered name into the next transcript as `[name]`, so the rule holds even when no meeting follows now.
+    static func isVoiceName(_ name: String) -> Bool {
+        !name.isEmpty && !VoiceRecognition.isLabel(name) && (try? SpeakerRename.normalised(["SPEAKER_00": name])) != nil
+    }
+
     /// "Not this person": in `bases` the speaker called `name` is somebody else. See the header.
     /// `embeddings`: the voice sample of that speaker per meeting (from the engine; a meeting without one only
     /// has its name corrected). `to` empty = nobody the owner can name: back to a `SPEAKER_nn` label.
     public static func separate(name: String, meetings bases: [String], embeddings: [String: [Float]],
                                 to rawNew: String?, remember: Bool, renameNotes: Bool, context c: Context) throws -> Outcome {
         let new = cleanName(rawNew)
-        guard new.isEmpty || !VoiceRecognition.isLabel(new) else { throw Failure.invalidName }
+        guard new.isEmpty || isVoiceName(new) else { throw Failure.invalidName }
         guard new.isEmpty || !same(new, name) else { throw Failure.sameName }
         guard !VoiceProfileStore.hasIncompatibleFile(supportDir: c.supportDir, model: c.model) else { throw Failure.incompatibleFile }
         return try VoiceProfileStore.fileLock.withLock {
@@ -279,7 +290,7 @@ public enum VoiceCatalog {
     public static func merge(name: String, into rawNew: String, renameNotes: Bool, meetings bases: [String],
                              context c: Context) throws -> Outcome {
         let new = cleanName(rawNew)
-        guard !new.isEmpty, !VoiceRecognition.isLabel(new) else { throw Failure.invalidName }
+        guard isVoiceName(new) else { throw Failure.invalidName }
         guard !VoiceProfileStore.hasIncompatibleFile(supportDir: c.supportDir, model: c.model) else { throw Failure.incompatibleFile }
         return try VoiceProfileStore.fileLock.withLock {
             let before = VoiceProfileStore.load(supportDir: c.supportDir, model: c.model)
@@ -328,16 +339,20 @@ public enum VoiceCatalog {
     /// since) is removed here: it holds voice samples and must not outlive its use.
     public static func pendingUndo(supportDir: URL) -> (summary: String, date: Date)? {
         VoiceProfileStore.fileLock.withLock {
-            guard let r = loadUndo(supportDir: supportDir) else {
-                try? FileManager.default.removeItem(at: undoURL(supportDir: supportDir))
-                return nil
-            }
-            guard r.storeAfterSHA256 == sha256(ofFile: VoiceProfileStore.url(supportDir: supportDir)) else {
-                try? FileManager.default.removeItem(at: undoURL(supportDir: supportDir))
-                return nil
-            }
-            return (r.summary, r.date)
+            dropUndoIfStale(supportDir: supportDir)
+            return loadUndo(supportDir: supportDir).map { ($0.summary, $0.date) }
         }
+    }
+
+    /// Removes an undo record that no longer matches the voice file (or cannot be read). Called by every
+    /// save of the voice file, so the samples in a record never stay on disk after another feature changed
+    /// the voices. Takes no lock: the caller holds `VoiceProfileStore.fileLock` or is the only writer.
+    static func dropUndoIfStale(supportDir: URL) {
+        let file = undoURL(supportDir: supportDir)
+        guard FileManager.default.fileExists(atPath: file.path) else { return }
+        if let r = loadUndo(supportDir: supportDir),
+           r.storeAfterSHA256 == sha256(ofFile: VoiceProfileStore.url(supportDir: supportDir)) { return }
+        try? FileManager.default.removeItem(at: file)
     }
 
     /// Removes the undo record (a voice was deleted in Settings: its samples must not stay in the record).
@@ -365,12 +380,7 @@ public enum VoiceCatalog {
                 revert(back, context: c)
                 throw error
             }
-            // A name that was a voice guess before is a guess again, not an owner-confirmed name.
-            for r in record.renames where r.wasGuess && back.contains(where: { $0.base == r.base }) {
-                guard var names = SpeakerNames.load(workDir: c.workDir, base: r.base), names.names.values.contains(r.from) else { continue }
-                names.byVoice = Array(Set((names.byVoice ?? []) + [r.from])).sorted()
-                try? names.encoded().write(to: SpeakerNames.url(workDir: c.workDir, base: r.base), options: .atomic)
-            }
+            guessAgain(record.renames.filter { r in back.contains { $0.base == r.base } }, context: c)
             discardUndo(supportDir: c.supportDir)
             out.renamed = back.map(\.base)
             return out
@@ -392,6 +402,18 @@ public enum VoiceCatalog {
 
     private static func revert(_ done: [Rename], context c: Context) {
         for r in done.reversed() { try? c.rename([r.to: r.from], r.base) }
+        guessAgain(done, context: c)
+    }
+
+    /// A name that was a voice guess before a rename is a guess again once the rename is put back, not an
+    /// owner-confirmed name (a rename always makes the names it touches the owner's).
+    private static func guessAgain(_ renames: [Rename], context c: Context) {
+        for r in renames where r.wasGuess {
+            guard var names = SpeakerNames.load(workDir: c.workDir, base: r.base), names.names.values.contains(r.from),
+                  !(names.byVoice ?? []).contains(r.from) else { continue }
+            names.byVoice = ((names.byVoice ?? []) + [r.from]).sorted()
+            try? names.encoded().write(to: SpeakerNames.url(workDir: c.workDir, base: r.base), options: .atomic)
+        }
     }
 
     /// Undo record first, then the meetings, then the voice file. Any failure leaves all three as they were.

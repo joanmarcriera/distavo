@@ -1104,7 +1104,9 @@ final class WatcherController: ObservableObject {
         lastError = nil
         seedLastNoteFromDisk()   // the notes folder may have just been re-pointed
         maybeWarnLocalNetwork()
-        processNow()
+        // With watching switched off nothing starts on its own, a Settings save included (it used to
+        // process everything pending the moment the switch was turned off and saved).
+        if PausePolicy.rescansAfterSettingsSaved(paused: isPaused) { processNow() }
     }
 
     func testConnections(_ cfg: Config) async -> (whisperx: Bool, ollamaServer: Bool, ollamaLocal: Bool) {

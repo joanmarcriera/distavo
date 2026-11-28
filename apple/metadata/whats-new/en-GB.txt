@@ -1,3 +1,3 @@
-• Fixes a crash after several hours of transcription: Distavo could run out of graphics memory and quit while identifying speakers. Transcription with the Whisper models is a little slower in exchange.
-• Recovering missed speech now stops cleanly when the speech model cannot run, instead of retrying every stretch.
-• Long recordings: the "Detected language" line no longer shows percentages above 100.
+• Watching the folder is now a saved setting: Settings, General, "Watch the folder for new recordings". "Pause watching" in the menu is the same switch, so a pause stays in place after a restart. Process now, Retry and Shortcuts still work while it is off.
+• A pause chosen in the menu is no longer undone when the Settings window is saved or closed, and saving Settings while paused no longer starts processing.
+• Where remembered voices are available: a Voices window (Settings, Transcription, Review Voices) lists every remembered voice with a clip from each recent meeting. Confirm a guess, say "Not this person", rename a voice or join two into one, with one step of undo. Voices not yet named are listed too. No audio is stored; clips are played from your own recordings.
